@@ -1,0 +1,68 @@
+[tool.poetry]
+name = "scrumdev-ai"
+version = "0.1.0"
+description = "ScrumDev AI - Plataforma multiagente para desarrollo agil de software"
+authors = ["ScrumDev AI Team"]
+readme = "../README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.32.0"}
+pydantic = "^2.9.0"
+pydantic-settings = "^2.6.0"
+sqlalchemy = "^2.0.36"
+asyncpg = "^0.30.0"
+alembic = "^1.13.3"
+redis = "^5.2.0"
+httpx = "^0.27.2"
+python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+structlog = "^24.4.0"
+python-dotenv = "^1.0.1"
+claude-agent-sdk = "^0.1.0"
+python-multipart = "^0.0.12"
+email-validator = ">=2.2"
+aio-pika = ">=9.5"
+temporalio = ">=1.8"
+prometheus-client = ">=0.21"
+websockets = ">=13.1"
+opentelemetry-api = ">=1.27"
+opentelemetry-sdk = ">=1.27"
+opentelemetry-instrumentation-fastapi = ">=0.48b0"
+pgvector = ">=0.3"
+pyyaml = ">=6.0"
+# ML stack: embeddings + clasificacion local (sin API). Versiones laxas para Python 3.13.
+sentence-transformers = ">=3.3"
+scikit-learn = ">=1.5"
+numpy = ">=2.0"
+
+# Si quieres usar CrewAI + OpenAI/Anthropic API en lugar de Claude Code,
+# instala manualmente (requiere Python <=3.13.x):
+#   poetry run pip install "crewai>=0.86" "anthropic>=0.39" "litellm>=1.52"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
+pytest-asyncio = "^0.24.0"
+ruff = "^0.7.0"
+black = "^24.10.0"
+mypy = "^1.13.0"
+httpx = "^0.27.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]

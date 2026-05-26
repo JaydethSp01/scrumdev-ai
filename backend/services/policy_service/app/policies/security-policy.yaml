@@ -1,0 +1,27 @@
+policy: security-policy
+version: 1
+authentication:
+  required: true
+  mfa_recommended_for_admin: true
+  jwt_expiration_max_hours: 24
+
+authorization:
+  rbac_required: true
+  principle: least_privilege
+
+secrets:
+  hardcoded_secrets_forbidden: true
+  rotation_max_days: 90
+  encryption_at_rest_required: true
+
+owasp_top_10:
+  injection: must_validate_input
+  broken_auth: must_use_strong_session_management
+  sensitive_data: must_encrypt_at_rest_and_transit
+  xxe: disable_xml_external_entities
+  broken_access_control: enforce_authorization_per_endpoint
+  security_misconfiguration: disable_debug_in_prod
+  xss: escape_user_input
+  insecure_deserialization: avoid_pickle_with_untrusted_input
+  vulnerable_components: keep_deps_updated_scan_with_sca
+  insufficient_logging: log_security_events

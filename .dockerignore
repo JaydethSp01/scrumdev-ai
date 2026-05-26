@@ -1,0 +1,62 @@
+# =============================================================================
+# .dockerignore raíz - aplica al build context cuando se invoca desde la raíz
+# del repo (docker compose lo hace por defecto con context: .).
+# Mantiene el contexto pequeño -> builds más rápidos y caché más estable.
+# =============================================================================
+
+# Python
+.venv/
+venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Node / Next
+**/node_modules/
+**/.next/
+**/out/
+**/.turbo/
+
+# Git / VCS
+.git/
+.gitignore
+.gitattributes
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs / pids
+logs/
+**/*.log
+.pids/
+
+# Env (NO se copia al contexto; cada deploy monta su .env)
+.env
+.env.*
+!.env.example
+!.env.prod.example
+
+# Docs / CI (no necesarios dentro de la imagen)
+docs/
+.github/
+
+# Local data stores
+scrumdev_data/
+chroma_data/
+
+# Docker en sí
+**/Dockerfile
+!backend/Dockerfile
+!frontend/Dockerfile
+infra/docker-compose*.yml

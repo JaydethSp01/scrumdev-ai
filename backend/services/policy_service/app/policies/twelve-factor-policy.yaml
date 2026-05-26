@@ -1,0 +1,32 @@
+policy: twelve-factor-policy
+version: 1
+twelve_factor:
+  codebase:
+    one_codebase_per_app: true
+  dependencies:
+    explicit_manifest_required: true
+    isolation_required: true
+  config:
+    env_variables_required: true
+    hardcoded_secrets_forbidden: true
+  backing_services:
+    treat_as_attached_resources: true
+  build_release_run:
+    separated: true
+  processes:
+    stateless_required: true
+    share_nothing: true
+  port_binding:
+    self_contained_service: true
+  concurrency:
+    horizontal_scale_required: true
+  disposability:
+    fast_startup_required: true
+    graceful_shutdown_required: true
+  dev_prod_parity:
+    minimize_gap: true
+  logs:
+    stdout_required: true
+    no_log_files_required: true
+  admin_processes:
+    one_off_admin_tasks_separated: true

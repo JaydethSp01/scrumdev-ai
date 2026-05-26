@@ -1,0 +1,637 @@
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from shared.clients.http import get_json, post_json
+from shared.config.settings import settings
+from shared.observability import configure_logging, get_logger
+
+configure_logging("api-gateway", debug=settings.app_debug)
+logger = get_logger(__name__)
+
+app = FastAPI(title=f"{settings.app_name} - API Gateway", version="0.2.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class ChatRequest(BaseModel):
+    user_id: str
+    project_key: str
+    issue_key: str | None = None
+    content: str
+
+
+class WorkflowRequest(BaseModel):
+    user_id: str
+    project_key: str
+    issue_key: str | None = None
+    message: str
+    crew_name: str = "refinement"
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    name: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class ProjectCreate(BaseModel):
+    key: str
+    name: str
+    description: str | None = None
+    owner_id: str | None = None
+
+
+class TextIn(BaseModel):
+    text: str
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok", "service": "api-gateway"}
+
+
+@app.get("/services/status")
+async def services_status() -> dict[str, dict]:
+    targets = {
+        "conversation": f"{settings.conversation_service_url}/health",
+        "orchestrator": f"{settings.orchestrator_service_url}/health",
+        "agent_runtime": f"{settings.agent_runtime_service_url}/health",
+        "policy": f"{settings.policy_service_url}/health",
+        "memory": f"{settings.memory_service_url}/health",
+        "audit": f"{settings.audit_service_url}/health",
+        "notification": f"{settings.notification_service_url}/health",
+        "auth": f"{settings.auth_service_url}/health",
+        "user": f"{settings.user_service_url}/health",
+        "ml": f"{settings.ml_service_url}/health",
+        "jira": f"{settings.jira_connector_service_url}/health",
+        "git": f"{settings.git_connector_service_url}/health",
+        "deploy": f"{settings.deploy_connector_service_url}/health",
+    }
+    # F6 quick win: paralelizado con asyncio.gather (antes era secuencial,
+    # ~39s en peor caso con 13 servicios x 3s timeout).
+    import asyncio as _asyncio
+
+    async def _one(name: str, url: str) -> tuple[str, dict]:
+        try:
+            return name, await get_json(url, timeout=3.0)
+        except Exception as exc:
+            return name, {"status": "unreachable", "error": str(exc)}
+
+    results = await _asyncio.gather(*[_one(n, u) for n, u in targets.items()])
+    return {name: status for name, status in results}
+
+
+async def _proxy_post(url: str, payload: dict, timeout: float = 60.0) -> dict:
+    import httpx
+
+    try:
+        return await post_json(url, payload, timeout=timeout)
+    except httpx.HTTPStatusError as exc:
+        # Preserva el status code original (404, 409, 400, etc) en lugar de envolver en 502.
+        try:
+            detail = exc.response.json().get("detail", exc.response.text)
+        except Exception:
+            detail = exc.response.text
+        raise HTTPException(status_code=exc.response.status_code, detail=detail)
+    except Exception as exc:
+        logger.error("proxy_post_failed", url=url, error=str(exc))
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+async def _proxy_get(url: str, timeout: float = 10.0) -> dict:
+    import httpx
+
+    try:
+        return await get_json(url, timeout=timeout)
+    except httpx.HTTPStatusError as exc:
+        try:
+            detail = exc.response.json().get("detail", exc.response.text)
+        except Exception:
+            detail = exc.response.text
+        raise HTTPException(status_code=exc.response.status_code, detail=detail)
+    except Exception as exc:
+        logger.error("proxy_get_failed", url=url, error=str(exc))
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/chat")
+async def chat(request: ChatRequest) -> dict:
+    return await _proxy_post(
+        f"{settings.conversation_service_url}/messages", request.model_dump(), timeout=300.0
+    )
+
+
+@app.post("/workflows/start")
+async def start_workflow(request: WorkflowRequest) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/workflows/start",
+        request.model_dump(),
+        timeout=300.0,
+    )
+
+
+@app.get("/workflows/{workflow_id}")
+async def get_workflow(workflow_id: str) -> dict:
+    return await _proxy_get(f"{settings.orchestrator_service_url}/workflows/{workflow_id}")
+
+
+@app.post("/auth/register")
+async def auth_register(req: RegisterRequest) -> dict:
+    return await _proxy_post(f"{settings.auth_service_url}/auth/register", req.model_dump())
+
+
+@app.post("/auth/login")
+async def auth_login(req: LoginRequest) -> dict:
+    return await _proxy_post(f"{settings.auth_service_url}/auth/login", req.model_dump())
+
+
+@app.get("/users/{user_id}")
+async def get_user(user_id: str) -> dict:
+    return await _proxy_get(f"{settings.user_service_url}/users/{user_id}")
+
+
+@app.get("/projects")
+async def list_projects(owner_id: str | None = None) -> dict:
+    suffix = f"?owner_id={owner_id}" if owner_id else ""
+    return await _proxy_get(f"{settings.user_service_url}/projects{suffix}")
+
+
+@app.post("/projects")
+async def create_project(req: ProjectCreate) -> dict:
+    return await _proxy_post(f"{settings.user_service_url}/projects", req.model_dump())
+
+
+@app.get("/projects/{key}")
+async def get_project(key: str) -> dict:
+    return await _proxy_get(f"{settings.user_service_url}/projects/{key}")
+
+
+@app.get("/agents")
+async def list_agents() -> dict:
+    return await _proxy_get(f"{settings.agent_runtime_service_url}/agents")
+
+
+@app.get("/crews")
+async def list_crews() -> dict:
+    return await _proxy_get(f"{settings.agent_runtime_service_url}/crews")
+
+
+@app.get("/audit/events")
+async def audit_events(limit: int = 50) -> dict:
+    return await _proxy_get(f"{settings.audit_service_url}/events?limit={limit}")
+
+
+@app.get("/events")
+async def events_alias(limit: int = 50) -> dict:
+    """Alias para que el frontend use /events directo."""
+    return await _proxy_get(f"{settings.audit_service_url}/events?limit={limit}")
+
+
+@app.get("/notifications/{user_id}")
+async def notifications(user_id: str, limit: int = 50) -> dict:
+    return await _proxy_get(
+        f"{settings.notification_service_url}/notifications/{user_id}?limit={limit}"
+    )
+
+
+@app.post("/ml/analyze")
+async def ml_analyze(req: TextIn) -> dict:
+    return await _proxy_post(
+        f"{settings.ml_service_url}/ml/analyze", req.model_dump(), timeout=120.0
+    )
+
+
+@app.post("/ml/classify-story")
+async def ml_classify(req: TextIn) -> dict:
+    return await _proxy_post(
+        f"{settings.ml_service_url}/ml/classify-story", req.model_dump(), timeout=60.0
+    )
+
+
+@app.post("/ml/estimate-effort")
+async def ml_effort(req: TextIn) -> dict:
+    return await _proxy_post(
+        f"{settings.ml_service_url}/ml/estimate-effort", req.model_dump(), timeout=60.0
+    )
+
+
+@app.post("/ml/extract-risks")
+async def ml_risks(req: TextIn) -> dict:
+    return await _proxy_post(
+        f"{settings.ml_service_url}/ml/extract-risks", req.model_dump(), timeout=30.0
+    )
+
+
+@app.get("/policies")
+async def policies() -> dict:
+    return await _proxy_get(f"{settings.policy_service_url}/policies")
+
+
+@app.post("/memory/save")
+async def memory_save(req: dict[str, Any]) -> dict:
+    return await _proxy_post(f"{settings.memory_service_url}/memory/save", req)
+
+
+@app.post("/memory/search")
+async def memory_search(req: dict[str, Any]) -> dict:
+    return await _proxy_post(f"{settings.memory_service_url}/memory/search", req)
+
+
+class NFRRequest(BaseModel):
+    user_id: str
+    project_key: str
+    issue_key: str | None = None
+    nfr_data: dict[str, Any]
+
+
+class AdvanceWorkflowRequest(BaseModel):
+    user_id: str
+    project_key: str
+    issue_key: str | None = None
+    correlation_id: str | None = None
+    target_state: str | None = None
+    context: dict[str, Any] = {}
+
+
+class DecisionRequest(BaseModel):
+    decided_by: str
+    decision_reason: str | None = None
+
+
+@app.post("/nfr")
+async def submit_nfr(req: NFRRequest) -> dict:
+    return await _proxy_post(f"{settings.orchestrator_service_url}/nfr", req.model_dump())
+
+
+@app.get("/nfr")
+async def list_nfr(project_key: str | None = None) -> dict:
+    suffix = f"?project_key={project_key}" if project_key else ""
+    return await _proxy_get(f"{settings.orchestrator_service_url}/nfr{suffix}")
+
+
+@app.post("/workflows/advance")
+async def advance_workflow(req: AdvanceWorkflowRequest) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/workflows/advance",
+        req.model_dump(),
+        timeout=300.0,
+    )
+
+
+@app.get("/workflows")
+async def list_workflows(project_key: str | None = None, limit: int = 50) -> dict:
+    if project_key:
+        return await _proxy_get(
+            f"{settings.orchestrator_service_url}/workflows?project_key={project_key}&limit={limit}"
+        )
+    return await _proxy_get(f"{settings.orchestrator_service_url}/workflows?limit={limit}")
+
+
+@app.get("/decisions/pending")
+async def list_pending_decisions(project_key: str | None = None) -> dict:
+    suffix = f"?project_key={project_key}" if project_key else ""
+    return await _proxy_get(f"{settings.orchestrator_service_url}/decisions/pending{suffix}")
+
+
+@app.post("/decisions/{decision_id}/approve")
+async def approve_decision(decision_id: str, req: DecisionRequest) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/decisions/{decision_id}/approve",
+        req.model_dump(),
+    )
+
+
+@app.post("/decisions/{decision_id}/reject")
+async def reject_decision(decision_id: str, req: DecisionRequest) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/decisions/{decision_id}/reject",
+        req.model_dump(),
+    )
+
+
+@app.post("/adr/generate")
+async def adr_generate(req: dict[str, Any]) -> dict:
+    return await _proxy_post(
+        f"{settings.agent_runtime_service_url}/adr/generate", req, timeout=180.0
+    )
+
+
+@app.post("/policy/evaluate")
+async def policy_evaluate(req: dict[str, Any]) -> dict:
+    return await _proxy_post(f"{settings.policy_service_url}/policy/evaluate", req)
+
+
+@app.get("/policies/{name}")
+async def get_policy(name: str) -> dict:
+    return await _proxy_get(f"{settings.policy_service_url}/policies/{name}")
+
+
+class VisionPayload(BaseModel):
+    project_key: str
+    vision: str
+    target_users: str | None = None
+    stack_preference: str | None = None
+
+
+class BuildPayload(BaseModel):
+    project_key: str
+    triggered_by: str
+    stack: str | None = None
+    max_stories_to_code: int = 5
+
+
+@app.post("/projects/{project_key}/vision")
+async def set_vision(project_key: str, req: VisionPayload) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/vision",
+        req.model_dump(),
+    )
+
+
+@app.get("/projects/{project_key}/vision")
+async def get_vision(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/vision"
+    )
+
+
+@app.get("/projects/{project_key}/backlog")
+async def get_backlog(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/backlog"
+    )
+
+
+@app.get("/projects/{project_key}/code")
+async def get_code(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/code"
+    )
+
+
+@app.post("/projects/{project_key}/build")
+async def trigger_build(project_key: str, req: BuildPayload) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/build",
+        req.model_dump(),
+        timeout=900.0,
+    )
+
+
+@app.get("/projects/{project_key}/builds")
+async def list_builds(project_key: str, limit: int = 10) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/builds?limit={limit}"
+    )
+
+
+class AssistantPayload(BaseModel):
+    user_id: str
+    message: str
+    image_paths: list[str] = []
+    image_urls: list[str] = []
+
+
+@app.post("/projects/{project_key}/assistant")
+async def project_assistant(project_key: str, req: AssistantPayload) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/assistant",
+        req.model_dump(),
+        timeout=240.0,
+    )
+
+
+@app.get("/projects/{project_key}/chat")
+async def project_chat_history(project_key: str, user_id: str, limit: int = 200) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/chat?user_id={user_id}&limit={limit}"
+    )
+
+
+@app.delete("/projects/{project_key}/chat")
+async def project_chat_clear(project_key: str, user_id: str) -> dict:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.delete(
+            f"{settings.orchestrator_service_url}/projects/{project_key}/chat",
+            params={"user_id": user_id},
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return r.json()
+
+
+@app.post("/webhooks/jira")
+async def webhook_jira(request: Request) -> dict:
+    body = await request.body()
+    headers = {
+        k: v
+        for k, v in request.headers.items()
+        if k.lower() in ("content-type", "x-atlassian-webhook-secret", "x-atlassian-webhook-identifier")
+    }
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.post(
+            f"{settings.jira_connector_service_url}/webhooks/jira",
+            content=body,
+            headers=headers,
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return r.json()
+
+
+@app.post("/webhooks/github")
+async def webhook_github(request: Request) -> dict:
+    body = await request.body()
+    headers = {
+        k: v
+        for k, v in request.headers.items()
+        if k.lower() in ("content-type", "x-github-event", "x-hub-signature-256", "x-github-delivery")
+    }
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.post(
+            f"{settings.git_connector_service_url}/webhooks/github",
+            content=body,
+            headers=headers,
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return r.json()
+
+
+@app.post("/projects/{project_key}/chat/upload-image")
+async def project_chat_upload_image(project_key: str, request: Request) -> dict:
+    """Proxy multipart al user_service para que el frontend pueda subir imagenes
+    de chat via gateway (mismo origen, sin CORS extra)."""
+    body = await request.body()
+    content_type = request.headers.get("content-type", "")
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.post(
+            f"{settings.user_service_url}/projects/{project_key}/chat/upload-image",
+            content=body,
+            headers={"content-type": content_type},
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return r.json()
+
+
+class DeployPayload(BaseModel):
+    triggered_by: str
+    create_vercel_project: bool = True
+    framework: str = "nextjs"
+
+
+@app.post("/projects/{project_key}/deploy")
+async def project_deploy(project_key: str, req: DeployPayload) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/deploy",
+        req.model_dump(),
+        timeout=300.0,
+    )
+
+
+@app.get("/deploy/status")
+async def deploy_status() -> dict:
+    git = await _proxy_get(f"{settings.git_connector_service_url}/health")
+    try:
+        vercel = await _proxy_get(f"{settings.deploy_connector_service_url}/vercel/status")
+    except Exception:
+        vercel = {"configured": False}
+    return {
+        "github": {"configured": bool(git.get("configured")), "repo": git.get("repo")},
+        "vercel": vercel,
+    }
+
+
+@app.get("/projects/{project_key}/deploy/preview")
+async def project_deploy_preview(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/deploy/preview"
+    )
+
+
+class PostgresConfigurePayload(BaseModel):
+    database_url: str | None = None
+    auto_provision: bool = True
+
+
+@app.post("/projects/{project_key}/postgres/configure")
+async def project_postgres_configure(project_key: str, req: PostgresConfigurePayload) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/postgres/configure",
+        req.model_dump(),
+        timeout=90.0,
+    )
+
+
+@app.get("/projects/{project_key}/state")
+async def project_state(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/state"
+    )
+
+
+class SmartBuildPayload(BaseModel):
+    triggered_by: str
+    force_regenerate: bool = False
+
+
+@app.post("/projects/{project_key}/smart-build")
+async def smart_build(project_key: str, req: SmartBuildPayload) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/smart-build",
+        req.model_dump(),
+        timeout=30.0,
+    )
+
+
+class GenerateAppPayload(BaseModel):
+    triggered_by: str
+    replace_existing: bool = True
+
+
+@app.post("/projects/{project_key}/generate-app")
+async def generate_app(project_key: str, req: GenerateAppPayload) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/generate-app",
+        req.model_dump(),
+        timeout=30.0,
+    )
+
+
+# ===== Brand kit + assets (proxy a user_service) =====
+
+
+@app.get("/projects/{project_key}/brand-kit")
+async def get_brand_kit(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.user_service_url}/projects/{project_key}/brand-kit"
+    )
+
+
+@app.put("/projects/{project_key}/brand-kit")
+async def upsert_brand_kit(project_key: str, body: dict[str, Any]) -> dict:
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.put(
+            f"{settings.user_service_url}/projects/{project_key}/brand-kit", json=body
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return r.json()
+
+
+@app.get("/projects/{project_key}/assets")
+async def list_assets(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.user_service_url}/projects/{project_key}/assets"
+    )
+
+
+@app.delete("/projects/{project_key}/assets/{asset_id}")
+async def delete_asset(project_key: str, asset_id: str) -> dict:
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.delete(
+            f"{settings.user_service_url}/projects/{project_key}/assets/{asset_id}"
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return r.json()
+
+
+@app.post("/projects/{project_key}/assets")
+async def upload_asset_proxy(project_key: str, request: Request) -> dict:
+    """Streaming proxy multipart al user_service."""
+    import httpx
+
+    body = await request.body()
+    ct = request.headers.get("content-type", "")
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.post(
+            f"{settings.user_service_url}/projects/{project_key}/assets",
+            content=body,
+            headers={"content-type": ct} if ct else {},
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return r.json()

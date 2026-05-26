@@ -1,0 +1,44 @@
+# =============================================================================
+# ScrumDev AI - docker-compose STAGING
+# -----------------------------------------------------------------------------
+# Uso:
+#   docker compose \
+#     -f infra/docker-compose.prod.yml \
+#     -f infra/docker-compose.staging.yml \
+#     up -d
+#
+# Override del prod más ligero:
+#   - Sin temporal (servicio "removido" reasignando imagen a nada útil + scale 0)
+#   - Sin rabbitmq
+#   - Frontend/backend con menor logging
+#   - IMAGE_TAG por defecto = staging
+#   - Puerto público = 8088 para no chocar con prod en el mismo host
+# =============================================================================
+
+services:
+  # Truco de override: Docker Compose no soporta "remove service" directamente.
+  # Lo que hacemos es marcar profiles: ["disabled"] para que no se levanten
+  # salvo que se pase --profile disabled explícitamente.
+  temporal:
+    profiles: ["disabled"]
+
+  rabbitmq:
+    profiles: ["disabled"]
+
+  # El resto de servicios hereda del prod. Sólo ajustamos puerto y tag default.
+  nginx:
+    ports:
+      - "${HTTP_PORT:-8088}:80"
+
+  api_gateway:
+    environment:
+      SERVICE_MODULE: services.api_gateway.app.main:app
+      SERVICE_PORT: "8080"
+      APP_ENV: staging
+      APP_DEBUG: "false"
+      UVICORN_LOG_LEVEL: info
+
+  frontend:
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_GATEWAY_URL: ${NEXT_PUBLIC_API_GATEWAY_URL:-/api}

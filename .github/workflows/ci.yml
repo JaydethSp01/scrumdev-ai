@@ -1,0 +1,160 @@
+# =============================================================================
+# CI - Lint + Test + Docker build validation
+# Trigger: push a cualquier rama y PRs hacia main/develop.
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, develop]
+
+# Cancelar runs viejos del mismo ref para ahorrar minutos
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+  POETRY_VERSION: "1.8.4"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Backend: lint + tests con Postgres y Redis como service containers
+  # ---------------------------------------------------------------------------
+  backend:
+    name: Backend (lint + pytest)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: scrumdev
+          POSTGRES_PASSWORD: scrumdev
+          POSTGRES_DB: scrumdev_ai_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U scrumdev -d scrumdev_ai_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=3s
+          --health-retries=5
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://scrumdev:scrumdev@localhost:5432/scrumdev_ai_test
+      REDIS_URL: redis://localhost:6379/0
+      APP_ENV: ci
+      SCRUMDEV_AI_PROVIDER: claude_code
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip + poetry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('backend/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      - name: Install Poetry
+        run: pip install "poetry==${{ env.POETRY_VERSION }}"
+
+      - name: Install dependencies (with dev)
+        run: poetry install --no-interaction --no-root
+
+      - name: Ruff lint
+        run: poetry run ruff check .
+
+      - name: Pytest
+        # Si todavía no hay tests, el step se considera success (-q + --ignore vacío)
+        run: poetry run pytest -q || [ $? -eq 5 ]  # exit code 5 = no tests collected
+
+  # ---------------------------------------------------------------------------
+  # Frontend: lint + build
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: Frontend (lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Next lint
+        # `next lint` puede no estar configurado al 100% todavía; lo dejamos non-blocking.
+        run: npm run lint --if-present || true
+
+      - name: Next build
+        env:
+          NEXT_PUBLIC_API_GATEWAY_URL: /api
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # Docker build validation (NO push)
+  # ---------------------------------------------------------------------------
+  docker-build:
+    name: Docker build (validation)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: false
+          tags: scrumdev-backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to:   type=gha,scope=backend,mode=max
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: false
+          tags: scrumdev-frontend:ci
+          cache-from: type=gha,scope=frontend
+          cache-to:   type=gha,scope=frontend,mode=max

@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: scrumdev-postgres
+    environment:
+      POSTGRES_USER: scrumdev
+      POSTGRES_PASSWORD: scrumdev
+      POSTGRES_DB: scrumdev_ai
+    ports:
+      - "5434:5432"
+    volumes:
+      - scrumdev_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scrumdev -d scrumdev_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: scrumdev-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  scrumdev_postgres_data:

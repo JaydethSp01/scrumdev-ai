@@ -1,0 +1,2 @@
+# Placeholder para que el directorio exista; aquí puedes meter overrides
+# (TLS, basic auth, server blocks adicionales) sin tocar nginx.conf principal.

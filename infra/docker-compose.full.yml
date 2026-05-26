@@ -1,0 +1,43 @@
+# Compose extendido con RabbitMQ y Temporal (fase 2). Uso opcional.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: scrumdev-postgres
+    environment:
+      POSTGRES_USER: scrumdev
+      POSTGRES_PASSWORD: scrumdev
+      POSTGRES_DB: scrumdev_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - scrumdev_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: scrumdev-redis
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: scrumdev-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    container_name: scrumdev-temporal
+    ports:
+      - "7233:7233"
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=scrumdev
+      - POSTGRES_PWD=scrumdev
+      - POSTGRES_SEEDS=postgres
+    depends_on:
+      - postgres
+
+volumes:
+  scrumdev_postgres_data:

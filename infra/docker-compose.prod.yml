@@ -1,0 +1,291 @@
+# =============================================================================
+# ScrumDev AI - docker-compose PROD
+# -----------------------------------------------------------------------------
+# Stack completo: postgres + redis + rabbitmq + temporal + 10 microservicios
+# backend + frontend + nginx reverse proxy.
+#
+# Convenciones:
+#   - Una sola imagen backend (${BACKEND_IMAGE}) reutilizada por los 10 servicios
+#     vía SERVICE_MODULE / SERVICE_PORT.
+#   - Tag controlado por IMAGE_TAG (default: latest).
+#   - Sólo nginx expone puertos al host (80/443). El resto vive en la red interna.
+#   - Healthchecks reales con curl al /health expuesto por FastAPI.
+#   - depends_on con condition: service_healthy donde aplica (postgres/redis).
+# =============================================================================
+
+x-backend-base: &backend-base
+  image: ${BACKEND_IMAGE:-ghcr.io/scrumdev/scrumdev-backend}:${IMAGE_TAG:-latest}
+  restart: unless-stopped
+  env_file:
+    - ../.env
+  environment:
+    # PYTHONPATH ya está en la imagen, pero lo repetimos por claridad
+    PYTHONPATH: /app
+    # Reescribimos las URLs internas para usar DNS de docker (nombres de servicio)
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-scrumdev}:${POSTGRES_PASSWORD:-scrumdev}@postgres:5432/${POSTGRES_DB:-scrumdev_ai}
+    REDIS_URL: redis://redis:6379/0
+    RABBITMQ_URL: amqp://${RABBITMQ_USER:-scrumdev}:${RABBITMQ_PASSWORD:-scrumdev}@rabbitmq:5672/
+    TEMPORAL_HOST: temporal:7233
+    CONVERSATION_SERVICE_URL: http://conversation_service:8001
+    ORCHESTRATOR_SERVICE_URL: http://orchestrator_service:8002
+    AGENT_RUNTIME_SERVICE_URL: http://agent_runtime_service:8003
+    JIRA_CONNECTOR_SERVICE_URL: http://jira_connector_service:8004
+    GIT_CONNECTOR_SERVICE_URL: http://git_connector_service:8005
+    DEPLOY_CONNECTOR_SERVICE_URL: http://deploy_connector_service:8006
+    POLICY_SERVICE_URL: http://policy_service:8007
+    MEMORY_SERVICE_URL: http://memory_service:8008
+    AUDIT_SERVICE_URL: http://audit_service:8009
+    NOTIFICATION_SERVICE_URL: http://notification_service:8010
+    AUTH_SERVICE_URL: http://auth_service:8011
+    USER_SERVICE_URL: http://user_service:8012
+    ML_SERVICE_URL: http://ml_service:8013
+  networks:
+    - scrumdev_net
+
+x-backend-depends: &backend-depends
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  # ===========================================================================
+  # Infraestructura
+  # ===========================================================================
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: scrumdev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-scrumdev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scrumdev}
+      POSTGRES_DB: ${POSTGRES_DB:-scrumdev_ai}
+    volumes:
+      - scrumdev_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-scrumdev} -d ${POSTGRES_DB:-scrumdev_ai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - scrumdev_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: scrumdev-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - scrumdev_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - scrumdev_net
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: scrumdev-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-scrumdev}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-scrumdev}
+    volumes:
+      - scrumdev_rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - scrumdev_net
+
+  temporal:
+    image: temporalio/auto-setup:1.25
+    container_name: scrumdev-temporal
+    restart: unless-stopped
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-scrumdev}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-scrumdev}
+      POSTGRES_SEEDS: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # tctl no incluido en auto-setup minimal; usamos check de puerto via bash builtin
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/7233' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      - scrumdev_net
+
+  # ===========================================================================
+  # Microservicios backend (10) - misma imagen, distinta SERVICE_MODULE/PORT
+  # ===========================================================================
+  api_gateway:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-api-gateway
+    environment:
+      SERVICE_MODULE: services.api_gateway.app.main:app
+      SERVICE_PORT: "8080"
+
+  conversation_service:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-conversation
+    environment:
+      SERVICE_MODULE: services.conversation_service.app.main:app
+      SERVICE_PORT: "8001"
+
+  orchestrator_service:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-orchestrator
+    environment:
+      SERVICE_MODULE: services.orchestrator_service.app.main:app
+      SERVICE_PORT: "8002"
+
+  agent_runtime_service:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-agent-runtime
+    environment:
+      SERVICE_MODULE: services.agent_runtime_service.app.main:app
+      SERVICE_PORT: "8003"
+
+  jira_connector_service:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-jira-connector
+    environment:
+      SERVICE_MODULE: services.jira_connector_service.app.main:app
+      SERVICE_PORT: "8004"
+
+  git_connector_service:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-git-connector
+    environment:
+      SERVICE_MODULE: services.git_connector_service.app.main:app
+      SERVICE_PORT: "8005"
+
+  deploy_connector_service:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-deploy-connector
+    environment:
+      SERVICE_MODULE: services.deploy_connector_service.app.main:app
+      SERVICE_PORT: "8006"
+
+  policy_service:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-policy
+    environment:
+      SERVICE_MODULE: services.policy_service.app.main:app
+      SERVICE_PORT: "8007"
+
+  memory_service:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-memory
+    environment:
+      SERVICE_MODULE: services.memory_service.app.main:app
+      SERVICE_PORT: "8008"
+
+  audit_service:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-audit
+    environment:
+      SERVICE_MODULE: services.audit_service.app.main:app
+      SERVICE_PORT: "8009"
+
+  notification_service:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-notification
+    environment:
+      SERVICE_MODULE: services.notification_service.app.main:app
+      SERVICE_PORT: "8010"
+
+  auth_service:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-auth
+    environment:
+      SERVICE_MODULE: services.auth_service.app.main:app
+      SERVICE_PORT: "8011"
+
+  user_service:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-user
+    environment:
+      SERVICE_MODULE: services.user_service.app.main:app
+      SERVICE_PORT: "8012"
+
+  ml_service:
+    <<: [*backend-base, *backend-depends]
+    container_name: scrumdev-ml
+    environment:
+      SERVICE_MODULE: services.ml_service.app.main:app
+      SERVICE_PORT: "8013"
+      ML_CACHE_DIR: /ml_cache
+    volumes:
+      - scrumdev_ml_cache:/ml_cache
+
+  # ===========================================================================
+  # Frontend
+  # ===========================================================================
+  frontend:
+    image: ${FRONTEND_IMAGE:-ghcr.io/scrumdev/scrumdev-frontend}:${IMAGE_TAG:-latest}
+    container_name: scrumdev-frontend
+    restart: unless-stopped
+    environment:
+      # En prod el front habla con el gateway vía /api (proxy de nginx)
+      NEXT_PUBLIC_API_GATEWAY_URL: ${NEXT_PUBLIC_API_GATEWAY_URL:-/api}
+    networks:
+      - scrumdev_net
+    depends_on:
+      api_gateway:
+        condition: service_healthy
+
+  # ===========================================================================
+  # Reverse proxy / edge
+  # ===========================================================================
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: scrumdev-nginx
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      # 443 reservado para futuro TLS (usar certbot/traefik fuera de scope)
+      # - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      api_gateway:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - scrumdev_net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+networks:
+  scrumdev_net:
+    driver: bridge
+    name: scrumdev_net
+
+volumes:
+  scrumdev_postgres_data:
+    name: scrumdev_postgres_data
+  scrumdev_redis_data:
+    name: scrumdev_redis_data
+  scrumdev_rabbitmq_data:
+    name: scrumdev_rabbitmq_data
+  scrumdev_ml_cache:
+    name: scrumdev_ml_cache
