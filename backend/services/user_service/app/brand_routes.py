@@ -24,8 +24,29 @@ UPLOADS_ROOT.mkdir(exist_ok=True)
 
 PUBLIC_BASE = os.environ.get("UPLOADS_PUBLIC_BASE", "http://localhost:8012/uploads")
 MAX_BYTES = 10 * 1024 * 1024  # 10MB
-ALLOWED_MIME = {"image/png", "image/jpeg", "image/webp", "image/svg+xml", "image/gif"}
+# Sprint 3 hardening: SVG removido por riesgo XSS persistente al servirse static.
+ALLOWED_MIME = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 ASSET_TYPES = {"logo", "hero", "feature", "avatar", "gallery", "background", "other"}
+
+# Magic bytes para validar que el archivo ES lo que dice el mime header
+# (header content_type lo manda el cliente, no se puede confiar).
+MAGIC_BYTES = {
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/webp": (b"RIFF",),  # primeros 4 bytes; el siguiente "WEBP" en offset 8
+    "image/gif": (b"GIF87a", b"GIF89a"),
+}
+
+
+def _validate_magic_bytes(data: bytes, mime: str) -> bool:
+    signatures = MAGIC_BYTES.get(mime, ())
+    for sig in signatures:
+        if data.startswith(sig):
+            if mime == "image/webp":
+                # Validar tambien que es WEBP (offset 8)
+                return data[8:12] == b"WEBP"
+            return True
+    return False
 
 
 class BrandKitIn(BaseModel):
@@ -154,9 +175,25 @@ async def upload_asset(
     safe_name = f"{uuid.uuid4().hex[:12]}.{ext}" if ext else f"{uuid.uuid4().hex[:12]}.bin"
     dest = project_dir / safe_name
 
-    contents = await file.read()
-    if len(contents) > MAX_BYTES:
-        raise HTTPException(status_code=413, detail="file too large (max 10MB)")
+    # Sprint 3 hardening: stream con limite estricto antes de leer todo a RAM.
+    chunk_size = 64 * 1024
+    contents = bytearray()
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        contents.extend(chunk)
+        if len(contents) > MAX_BYTES:
+            raise HTTPException(status_code=413, detail="file too large (max 10MB)")
+    contents = bytes(contents)
+
+    # Validar magic bytes - el content_type del cliente no es confiable
+    if not _validate_magic_bytes(contents, file.content_type):
+        raise HTTPException(
+            status_code=400,
+            detail=f"contenido no coincide con mime declarado {file.content_type}",
+        )
+
     dest.write_bytes(contents)
 
     public_url = f"{PUBLIC_BASE}/{_slugify(project_key)}/{safe_name}"

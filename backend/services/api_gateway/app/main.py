@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from services.api_gateway.app.auth_middleware import BearerAuthMiddleware
 from shared.clients.http import get_json, post_json
 from shared.config.settings import settings
 from shared.observability import configure_logging, get_logger
@@ -25,6 +26,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Sprint 3: Bearer auth middleware. En dev pasivo (no bloquea, solo decodifica),
+# en prod (AUTH_ENFORCE=true) rechaza 401 si no hay token valido.
+app.add_middleware(BearerAuthMiddleware, auth_service_url=settings.auth_service_url)
 
 
 class ChatRequest(BaseModel):

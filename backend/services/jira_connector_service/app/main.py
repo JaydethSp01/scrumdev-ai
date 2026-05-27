@@ -243,6 +243,9 @@ async def jira_webhook(request: Request, x_atlassian_webhook_secret: str | None 
     Secret: lo configuras en JIRA_WEBHOOK_SECRET de tu .env.
     """
     expected = getattr(settings, "jira_webhook_secret", None) or ""
+    is_prod = (settings.app_env or "").lower() in ("production", "prod")
+    if is_prod and not expected:
+        raise HTTPException(status_code=503, detail="JIRA_WEBHOOK_SECRET requerido en production")
     if expected and x_atlassian_webhook_secret != expected:
         raise HTTPException(status_code=401, detail="invalid webhook secret")
 

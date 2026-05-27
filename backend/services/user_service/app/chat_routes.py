@@ -18,6 +18,7 @@ from services.user_service.app.brand_routes import (
     PUBLIC_BASE,
     UPLOADS_ROOT,
     _slugify,
+    _validate_magic_bytes,
 )
 
 router = APIRouter()
@@ -30,11 +31,24 @@ async def upload_chat_image(project_key: str, file: UploadFile = File(...)) -> d
             status_code=415,
             detail=f"Tipo no soportado: {file.content_type}. Permitidos: {', '.join(sorted(ALLOWED_MIME))}",
         )
-    data = await file.read()
-    if len(data) > MAX_BYTES:
+    # Sprint 3 hardening: stream con limite + validar magic bytes
+    chunk_size = 64 * 1024
+    buf = bytearray()
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > MAX_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Imagen excede {MAX_BYTES // 1024 // 1024}MB",
+            )
+    data = bytes(buf)
+    if not _validate_magic_bytes(data, file.content_type):
         raise HTTPException(
-            status_code=413,
-            detail=f"Imagen excede {MAX_BYTES // 1024 // 1024}MB",
+            status_code=400,
+            detail="Contenido no coincide con el tipo declarado.",
         )
 
     slug = _slugify(project_key)

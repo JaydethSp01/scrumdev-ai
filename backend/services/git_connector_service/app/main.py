@@ -211,6 +211,9 @@ async def github_webhook(
     """Recibe webhooks de GitHub. Valida HMAC con GITHUB_WEBHOOK_SECRET."""
     raw = await request.body()
     secret = getattr(settings, "github_webhook_secret", None) or ""
+    is_prod = (settings.app_env or "").lower() in ("production", "prod")
+    if is_prod and not secret:
+        raise HTTPException(status_code=503, detail="GITHUB_WEBHOOK_SECRET requerido en production")
     if secret and not _verify_signature(secret, raw, x_hub_signature_256):
         raise HTTPException(status_code=401, detail="invalid HMAC signature")
 
