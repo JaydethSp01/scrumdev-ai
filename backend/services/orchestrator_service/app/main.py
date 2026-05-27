@@ -1230,7 +1230,28 @@ async def deploy_project(project_key: str, req: DeployRequest) -> dict:
 
         vercel_resp: dict | None = None
         vercel_deploy_resp: dict | None = None
+        render_resp: dict | None = None
+        used_fallback: str | None = None
         project_name_vercel = project_key.lower().replace("_", "-")
+
+        def _is_quota_exceeded(resp: dict | None) -> bool:
+            if not resp:
+                return False
+            err = (resp.get("error") or "")
+            if isinstance(err, str):
+                low = err.lower()
+                return any(
+                    sig in low
+                    for sig in (
+                        "payment_required",
+                        "free-per-day",
+                        "resource is limited",
+                        "402",
+                        "quota",
+                    )
+                )
+            return False
+
         if req.create_vercel_project and settings.scrumdev_git_owner:
             try:
                 vercel_resp = await post_json(
@@ -1246,8 +1267,6 @@ async def deploy_project(project_key: str, req: DeployRequest) -> dict:
             except Exception as exc:
                 vercel_resp = {"error": str(exc)}
 
-            # Vercel NO arranca el primer deploy automaticamente al crear via API.
-            # Lo disparamos explicitamente. Si ya existia el project, esto crea otro deploy.
             try:
                 vercel_deploy_resp = await post_json(
                     f"{settings.deploy_connector_service_url}/vercel/deploy",
@@ -1261,6 +1280,32 @@ async def deploy_project(project_key: str, req: DeployRequest) -> dict:
                 )
             except Exception as exc:
                 vercel_deploy_resp = {"error": str(exc)}
+
+            # FALLBACK A RENDER: si Vercel agoto quota (402) o paymet_required,
+            # creamos servicio en Render del mismo repo. El frontend Next se
+            # sirve igual (con mock data si backend API no disponible).
+            if _is_quota_exceeded(vercel_deploy_resp) or _is_quota_exceeded(vercel_resp):
+                logger.warning(
+                    "vercel_quota_exceeded_falling_back_to_render",
+                    project=project_key,
+                )
+                try:
+                    render_resp = await post_json(
+                        f"{settings.deploy_connector_service_url}/render/services",
+                        {
+                            "name": project_name_vercel,
+                            "git_owner": settings.scrumdev_git_owner,
+                            "git_repo": project_name_vercel,
+                            "branch": "main",
+                            "runtime": "node",
+                            "build_command": "npm install && npm run build",
+                            "start_command": "npm start",
+                        },
+                        timeout=60.0,
+                    )
+                    used_fallback = "render"
+                except Exception as exc:
+                    render_resp = {"error": str(exc)}
 
         await event_bus.publish(
             DomainEvent(
@@ -1309,12 +1354,24 @@ async def deploy_project(project_key: str, req: DeployRequest) -> dict:
                     pass
                 await asyncio.sleep(6)
 
+        # Si caimos a Render, extraer URL
+        render_url = None
+        render_state = None
+        if render_resp and not render_resp.get("error"):
+            svc = render_resp.get("service") or render_resp
+            render_url = svc.get("serviceDetails", {}).get("url") or svc.get("dashboardUrl")
+            render_state = "created"
+
         return {
             "git_url": repo_url,
             "vercel_url": vercel_url,
             "vercel_state": vercel_state,
+            "render_url": render_url,
+            "render_state": render_state,
+            "fallback_provider": used_fallback,
             "git": git_resp,
             "vercel": vercel_resp,
+            "render": render_resp,
             "files_count": len(files),
         }
     raise HTTPException(status_code=503, detail="database unavailable")

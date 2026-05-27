@@ -600,6 +600,12 @@ export type ChatImageUpload = {
   uploaded_at: string;
 };
 
+export type DeployFallback = {
+  fallback_provider?: "render" | null;
+  render_url?: string | null;
+  render_state?: string | null;
+};
+
 export async function apiUploadChatImage(
   projectKey: string,
   file: File

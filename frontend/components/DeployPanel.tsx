@@ -22,6 +22,7 @@ import {
   type DeployResponse,
   type DeployStatus,
 } from "@/lib/api";
+import DeployFlowDiagram, { type DeployStage } from "@/components/DeployFlowDiagram";
 import type { AuthUser } from "@/app/auth/_lib";
 import Spinner from "@/components/Spinner";
 import { ToastStack, useToasts } from "@/components/Toast";
@@ -41,6 +42,22 @@ const STEPS: Step[] = [
   { key: "vercel_project", label: "Creando proyecto Vercel" },
   { key: "deploy", label: "Generando primer deploy" },
 ];
+
+function deployStageFromStep(
+  activeStep: number,
+  lastDeploy: DeployResponse | null,
+  preview: DeployPreview | null
+): DeployStage {
+  const state = (preview?.state || lastDeploy?.vercel_state || "").toUpperCase();
+  if (state === "READY") return "ready";
+  if (state === "ERROR" || state === "FAILED") return "error";
+  if (activeStep <= 0) return "generating_code";
+  if (activeStep === 1) return "pushing_git";
+  if (activeStep === 2) return "creating_vercel";
+  if (state === "BUILDING" || state === "QUEUED" || state === "INITIALIZING")
+    return "building_vercel";
+  return "creating_vercel";
+}
 
 function stateTone(state?: string): string {
   const s = (state || "").toUpperCase();
@@ -260,53 +277,19 @@ export function DeployPanel({ projectKey, user }: Props) {
       )}
 
       {deploying && (
-        <div className="rounded-2xl border border-brand/40 bg-white dark:bg-neutral-950 p-6 shadow-sm">
-          <div className="flex items-center gap-2 text-sm font-semibold mb-4">
-            <Loader2 size={16} className="animate-spin text-brand" />
-            Desplegando tu aplicacion...
-          </div>
-          <ol className="space-y-2.5">
-            {STEPS.map((step, i) => {
-              const done = i < activeStep;
-              const active = i === activeStep;
-              return (
-                <li key={step.key} className="flex items-center gap-3 text-sm">
-                  <span
-                    className={`grid place-items-center w-6 h-6 rounded-full shrink-0 ${
-                      done
-                        ? "bg-green-500/15 text-green-600 dark:text-green-300"
-                        : active
-                        ? "bg-brand/15 text-brand"
-                        : "bg-neutral-100 dark:bg-neutral-900 text-neutral-400"
-                    }`}
-                  >
-                    {done ? (
-                      <CheckCircle2 size={14} />
-                    ) : active ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <span className="text-[10px] font-semibold">{i + 1}</span>
-                    )}
-                  </span>
-                  <span
-                    className={
-                      done
-                        ? "text-neutral-700 dark:text-neutral-300 line-through opacity-60"
-                        : active
-                        ? "text-neutral-900 dark:text-neutral-100 font-medium"
-                        : "text-neutral-500"
-                    }
-                  >
-                    {step.label}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-          <p className="text-[11px] text-neutral-500 mt-4">
+        <>
+          <DeployFlowDiagram
+            stage={deployStageFromStep(activeStep, lastDeploy, preview)}
+            vercelState={preview?.state || lastDeploy?.vercel_state || undefined}
+            githubReady={activeStep >= 1}
+            postgresConfigured={false}
+            filesCount={lastDeploy?.files_count}
+            vercelUrl={preview?.vercel_url || lastDeploy?.vercel_url || undefined}
+          />
+          <p className="text-[11px] text-neutral-500 mt-2 text-center">
             Esto puede tardar hasta 60 segundos. No cierres esta pestana.
           </p>
-        </div>
+        </>
       )}
 
       {error && (
@@ -318,6 +301,27 @@ export function DeployPanel({ projectKey, user }: Props) {
 
       {hasDeploy && (
         <div className="space-y-5">
+          <DeployFlowDiagram
+            stage={
+              previewState === "READY"
+                ? "ready"
+                : previewState === "ERROR" || previewState === "FAILED"
+                ? "error"
+                : previewState === "BUILDING" || previewState === "QUEUED" || previewState === "INITIALIZING"
+                ? "building_vercel"
+                : (lastDeploy as { fallback_provider?: string } | null)?.fallback_provider === "render"
+                ? "ready"
+                : "creating_vercel"
+            }
+            vercelState={previewState}
+            githubReady={Boolean(githubUrl)}
+            postgresConfigured={false}
+            filesCount={lastDeploy?.files_count}
+            vercelUrl={vercelUrl || undefined}
+            renderUrl={(lastDeploy as { render_url?: string | null } | null)?.render_url || undefined}
+            fallbackProvider={(lastDeploy as { fallback_provider?: "render" | null } | null)?.fallback_provider || null}
+            errorMessage={error || undefined}
+          />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <DeployCard
               icon={Github}

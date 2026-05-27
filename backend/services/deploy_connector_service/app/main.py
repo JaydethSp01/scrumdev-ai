@@ -19,6 +19,14 @@ from services.deploy_connector_service.app.vercel_client import (
     set_env_var,
     trigger_deploy as vercel_trigger_deploy,
 )
+from services.deploy_connector_service.app.render_client import (
+    create_web_service as render_create_web_service,
+    find_service_by_name as render_find_service,
+    is_configured as render_configured,
+    latest_deploy as render_latest_deploy,
+    set_env_var as render_set_env_var,
+    trigger_deploy as render_trigger_deploy,
+)
 from shared.config.settings import settings
 from shared.observability import configure_logging, get_logger
 
@@ -111,6 +119,78 @@ async def vercel_list_env(project_id_or_name: str) -> dict:
 class VercelPostgresRequest(BaseModel):
     name: str
     region: str = "iad1"
+
+
+# --- Render (fallback) endpoints ---
+
+
+class RenderServiceRequest(BaseModel):
+    name: str
+    git_owner: str
+    git_repo: str
+    branch: str = "main"
+    runtime: str = "node"
+    build_command: str | None = None
+    start_command: str | None = None
+
+
+@app.get("/render/status")
+async def render_status() -> dict:
+    return {"configured": render_configured()}
+
+
+@app.post("/render/services")
+async def render_create(req: RenderServiceRequest) -> dict:
+    if not render_configured():
+        raise HTTPException(status_code=400, detail="Render no configurado")
+    result = await render_create_web_service(
+        req.name,
+        req.git_owner,
+        req.git_repo,
+        branch=req.branch,
+        runtime=req.runtime,
+        build_command=req.build_command,
+        start_command=req.start_command,
+    )
+    if "error" in result:
+        raise HTTPException(status_code=502, detail=result.get("error"))
+    return result
+
+
+class RenderDeployRequest(BaseModel):
+    service_id: str
+    clear_cache: bool = False
+
+
+@app.post("/render/deploy")
+async def render_deploy(req: RenderDeployRequest) -> dict:
+    if not render_configured():
+        raise HTTPException(status_code=400, detail="Render no configurado")
+    return await render_trigger_deploy(req.service_id, req.clear_cache)
+
+
+@app.get("/render/services/{name}")
+async def render_get(name: str) -> dict:
+    if not render_configured():
+        raise HTTPException(status_code=400, detail="Render no configurado")
+    svc = await render_find_service(name)
+    if not svc:
+        raise HTTPException(status_code=404, detail="service not found")
+    latest = await render_latest_deploy(svc.get("id"))
+    return {"service": svc, "latest_deploy": latest}
+
+
+class RenderEnvRequest(BaseModel):
+    service_id: str
+    key: str
+    value: str
+
+
+@app.post("/render/env")
+async def render_set_env(req: RenderEnvRequest) -> dict:
+    if not render_configured():
+        raise HTTPException(status_code=400, detail="Render no configurado")
+    return await render_set_env_var(req.service_id, req.key, req.value)
 
 
 @app.post("/vercel/postgres")

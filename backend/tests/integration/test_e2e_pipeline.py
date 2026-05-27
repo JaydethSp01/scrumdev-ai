@@ -53,62 +53,73 @@ def test_assistant_responds_to_basic_question(project_key: str):
     assert len(data["reply"]) > 0
 
 
-def test_jira_bulk_creation_mock(project_key: str):
-    """Jira sin creds devuelve mocks deterministicos."""
+def test_jira_bulk_creation(project_key: str):
+    """Jira bulk create. Con creds reales usa SCRUMDEV_JIRA_PROJECT_KEY,
+    sin creds devuelve mocks con prefix del project_key del request."""
     r = httpx.post(
         f"http://localhost:8004/issues/bulk",
         json={
             "project_key": project_key,
             "stories": [
-                {"story_key": "S-001", "title": "Auth"},
-                {"story_key": "S-002", "title": "Profile"},
+                {"story_key": "S-001", "title": "Auth (e2e test)"},
+                {"story_key": "S-002", "title": "Profile (e2e test)"},
             ],
         },
-        timeout=15.0,
+        timeout=30.0,
     )
     assert r.status_code == 200
     data = r.json()
     assert data["created"] == 2
-    assert all(r.get("issue_key", "").startswith(project_key) for r in data["results"])
+    # En real (Jira conectado) el issue_key sigue el project key de Jira;
+    # en mock sigue el project_key del request. Ambos son validos.
+    for entry in data["results"]:
+        assert entry.get("issue_key") and "-" in entry["issue_key"]
 
 
 def test_github_webhook_received_and_event_published():
-    """Webhook GitHub sin secret pasa y publica DomainEvent."""
-    r = httpx.post(
-        f"{BASE}/webhooks/github",
-        json={
-            "ref": "refs/heads/main",
-            "repository": {"full_name": "JaydethSp01/barista"},
-            "sender": {"login": "jaysp"},
-        },
-        headers={"X-Github-Event": "push", "Content-Type": "application/json"},
-        timeout=10.0,
-    )
-    assert r.status_code == 200
+    """Webhook GitHub: si hay GITHUB_WEBHOOK_SECRET en env firma con HMAC,
+    si no envia sin firma."""
+    import hashlib
+    import hmac
+    import json as _json
+
+    body_obj = {
+        "ref": "refs/heads/main",
+        "repository": {"full_name": "JaydethSp01/barista"},
+        "sender": {"login": "jaysp"},
+    }
+    body = _json.dumps(body_obj).encode()
+    headers = {"X-Github-Event": "push", "Content-Type": "application/json"}
+    secret = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
+    if secret:
+        sig = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        headers["X-Hub-Signature-256"] = sig
+    r = httpx.post(f"{BASE}/webhooks/github", content=body, headers=headers, timeout=10.0)
+    assert r.status_code == 200, r.text
     data = r.json()
     assert data["received"] is True
     assert data["event"] == "push"
 
 
 def test_jira_webhook_received():
-    """Webhook Jira sin secret pasa."""
-    r = httpx.post(
-        f"{BASE}/webhooks/jira",
-        json={
-            "webhookEvent": "jira:issue_updated",
-            "issue": {
-                "key": "TEST-1",
-                "fields": {
-                    "summary": "Test",
-                    "status": {"name": "In Progress"},
-                    "project": {"key": "TEST"},
-                },
+    """Webhook Jira: si hay JIRA_WEBHOOK_SECRET en env, envia el header."""
+    body = {
+        "webhookEvent": "jira:issue_updated",
+        "issue": {
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test",
+                "status": {"name": "In Progress"},
+                "project": {"key": "TEST"},
             },
         },
-        headers={"Content-Type": "application/json"},
-        timeout=10.0,
-    )
-    assert r.status_code == 200
+    }
+    headers = {"Content-Type": "application/json"}
+    secret = os.environ.get("JIRA_WEBHOOK_SECRET", "")
+    if secret:
+        headers["X-Atlassian-Webhook-Secret"] = secret
+    r = httpx.post(f"{BASE}/webhooks/jira", json=body, headers=headers, timeout=10.0)
+    assert r.status_code == 200, r.text
     assert r.json()["received"] is True
 
 

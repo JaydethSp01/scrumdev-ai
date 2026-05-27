@@ -174,9 +174,27 @@ class JiraBulkRequest(BaseModel):
     stories: list[dict]
 
 
+async def _resolve_jira_project_key(client: httpx.AsyncClient, requested: str) -> str:
+    """Si el project_key del request no existe en Jira, cae al de settings.
+
+    Permite que ScrumDev AI use sus propios keys de proyecto (BARISTA, MU, ...)
+    sin que el usuario tenga que crear esos proyectos en Jira a mano.
+    """
+    r = await client.get(f"{_base()}/rest/api/3/project/{requested}", headers=_auth())
+    if r.status_code == 200:
+        return requested
+    fallback = settings.scrumdev_jira_project_key
+    if fallback:
+        return fallback
+    return requested
+
+
 @app.post("/issues/bulk")
 async def create_issues_bulk(req: JiraBulkRequest) -> dict:
-    """Crea N issues. Si no hay creds, devuelve mocks deterministicos."""
+    """Crea N issues. Si no hay creds, devuelve mocks deterministicos.
+
+    Si el project_key no existe en Jira, usa el SCRUMDEV_JIRA_PROJECT_KEY default.
+    """
     results: list[dict] = []
     if not _ok():
         for i, s in enumerate(req.stories, 1):
@@ -187,10 +205,11 @@ async def create_issues_bulk(req: JiraBulkRequest) -> dict:
             })
         return {"created": len(results), "results": results}
     async with httpx.AsyncClient(timeout=30.0) as client:
+        effective_pk = await _resolve_jira_project_key(client, req.project_key)
         for s in req.stories:
             payload = {
                 "fields": {
-                    "project": {"key": req.project_key},
+                    "project": {"key": effective_pk},
                     "summary": s.get("title", "Untitled"),
                     "description": _adf(s.get("description", "")),
                     "issuetype": {"name": "Story"},
@@ -202,7 +221,7 @@ async def create_issues_bulk(req: JiraBulkRequest) -> dict:
                 results.append({"story_key": s.get("story_key"), "error": r.text})
             else:
                 results.append({"story_key": s.get("story_key"), "issue_key": r.json().get("key")})
-    return {"created": len(results), "results": results}
+    return {"created": len(results), "results": results, "jira_project_used": effective_pk}
 
 
 # --- Webhooks Jira (T1 §78 - columna vertebral event-driven) ---
