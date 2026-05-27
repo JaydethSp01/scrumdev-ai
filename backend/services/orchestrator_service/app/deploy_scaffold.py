@@ -403,10 +403,100 @@ def _copy_frontend_to_root(files: list[dict]) -> list[dict]:
     return copies
 
 
+_LIB_API_PATCH = """
+
+// Auto-patch (scaffold): asegura que `fallbacks` y types esten exportados
+// aunque el LLM olvidara declararlos. Importa solo si los modulos existen.
+import { BARISTAS_MOCK, TURNOS_MOCK, GRANOS_MOCK } from './mock';
+
+export const fallbacks = {
+  baristas: BARISTAS_MOCK,
+  turnos: TURNOS_MOCK,
+  granos: GRANOS_MOCK,
+};
+"""
+
+_LIB_MOCK_PATCH = """
+
+// Auto-patch (scaffold): types derivados para que las pages que los importan
+// no rompan el build.
+export type Turno = (typeof TURNOS_MOCK)[number];
+export type Barista = (typeof BARISTAS_MOCK)[number];
+export type Grano = (typeof GRANOS_MOCK)[number];
+"""
+
+
+_FORCE_DYNAMIC_LINE = "export const dynamic = 'force-dynamic';"
+
+
+def _autofix_force_dynamic(files: list[dict]) -> list[dict]:
+    """Inyecta `export const dynamic = 'force-dynamic'` en TODAS las pages
+    async que usan `await apiGet/apiPost`. Previene "prerender error" de
+    Next cuando el server tira al fetch en build time sin backend disponible.
+    """
+    patched: list[dict] = []
+    for f in files:
+        path = f.get("path") or ""
+        content = f.get("content") or ""
+        if not path.startswith("app/") or not path.endswith("page.tsx"):
+            continue
+        if "await apiGet" not in content and "await apiPost" not in content:
+            continue
+        if "export const dynamic" in content:
+            continue
+        # Insertar tras el ultimo import
+        lines = content.split("\n")
+        last_import_idx = -1
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("import ") or stripped.startswith("import("):
+                last_import_idx = i
+        if last_import_idx < 0:
+            new_lines = [_FORCE_DYNAMIC_LINE, ""] + lines
+        else:
+            new_lines = lines[: last_import_idx + 1] + ["", _FORCE_DYNAMIC_LINE] + lines[last_import_idx + 1 :]
+        patched.append({"path": path, "content": "\n".join(new_lines)})
+    return patched
+
+
+def _autofix_lib_exports(files: list[dict]) -> list[dict]:
+    """Si las pages importan `fallbacks`/`Turno`/`Barista`/`Grano` pero el
+    LLM no los exporto, le agregamos el shim al final de lib/api.ts y lib/mock.ts.
+
+    Esto resuelve el bug recurrente de Next prerender "Cannot read properties
+    of undefined (reading 'turnos')".
+    """
+    patched: list[dict] = []
+    # Detecta uso desde cualquier app/**/*.tsx
+    uses_fallbacks = any(
+        "fallbacks" in (f.get("content") or "")
+        and "lib/api" in (f.get("content") or "")
+        and (f.get("path") or "").startswith("app/")
+        for f in files
+    )
+    uses_type = any(
+        (("Turno" in (f.get("content") or "")) or ("Barista" in (f.get("content") or "")) or ("Grano" in (f.get("content") or "")))
+        and "@/lib/mock" in (f.get("content") or "")
+        for f in files
+    )
+    for f in files:
+        path = f.get("path") or ""
+        content = f.get("content") or ""
+        if path == "lib/api.ts" and uses_fallbacks and "export const fallbacks" not in content:
+            patched.append({"path": "lib/api.ts", "content": content.rstrip() + _LIB_API_PATCH})
+        elif path == "lib/mock.ts" and uses_type and "export type Turno" not in content:
+            patched.append({"path": "lib/mock.ts", "content": content.rstrip() + _LIB_MOCK_PATCH})
+    return patched
+
+
 def build_scaffold(project_name: str, files: list[dict]) -> list[dict]:
     """Devuelve archivos de scaffold faltantes para que el deploy funcione."""
     info = detect_stack(files)
     extra: list[dict] = []
+    # Auto-fix exports faltantes en lib/api.ts y lib/mock.ts
+    extra.extend(_autofix_lib_exports(files))
+    # Auto-fix prerender error: forzar dynamic en pages async
+    extra.extend(_autofix_force_dynamic(files))
 
     # Caso ideal nuevo: el generador ya pone TODO en root (app/, api/, etc).
     # Solo agregamos lo que falte.
@@ -436,8 +526,10 @@ def build_scaffold(project_name: str, files: list[dict]) -> list[dict]:
         if info["has_serverless_api"]:
             if not info["has_root_requirements"]:
                 extra.append({"path": "requirements.txt", "content": _REQUIREMENTS_FALLBACK})
-            if not info["has_root_vercel_json"]:
-                extra.append({"path": "vercel.json", "content": _VERCEL_JSON_FULLSTACK})
+            # FORZAR override del vercel.json del LLM — el LLM tiende a meter
+            # runtime: python3.12 que es invalido y rompe el build con
+            # "Function Runtimes must have a valid version".
+            extra.append({"path": "vercel.json", "content": _VERCEL_JSON_FULLSTACK})
         elif not info["has_root_vercel_json"]:
             extra.append({"path": "vercel.json", "content": _VERCEL_JSON})
         if not _has(combined, "README.md"):
