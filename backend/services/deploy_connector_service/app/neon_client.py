@@ -40,12 +40,24 @@ def is_configured() -> bool:
     return bool(_token())
 
 
+def _org_query() -> str:
+    """Si la key es organizational, Neon API exige `org_id` en cada llamada."""
+    org = getattr(settings, "scrumdev_neon_org_id", None) or os.environ.get("SCRUMDEV_NEON_ORG_ID")
+    return f"&org_id={org}" if org else ""
+
+
+def _org_id() -> str | None:
+    return getattr(settings, "scrumdev_neon_org_id", None) or os.environ.get("SCRUMDEV_NEON_ORG_ID")
+
+
 async def list_projects() -> list[dict]:
-    """Lista todos los proyectos Neon en la cuenta."""
+    """Lista todos los proyectos Neon en la cuenta/org."""
     if not _token():
         return []
     async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.get(f"{API_BASE}/projects?limit=100", headers=_headers())
+        r = await client.get(
+            f"{API_BASE}/projects?limit=100{_org_query()}", headers=_headers()
+        )
         if r.status_code >= 400:
             return []
         return r.json().get("projects", [])
@@ -70,18 +82,19 @@ async def create_project(name: str, region: str = "aws-us-east-2") -> dict[str, 
         return {"ok": False, "error": "neon_api_key_not_configured"}
 
     safe_name = name.lower().replace("_", "-")[:60]
-    body = {
-        "project": {
-            "name": safe_name,
-            "region_id": region,
-            "pg_version": 16,
-            "default_endpoint_settings": {
-                "autoscaling_limit_min_cu": 0.25,
-                "autoscaling_limit_max_cu": 1,
-                "suspend_timeout_seconds": 0,
-            },
-        }
+    project_body: dict = {
+        "name": safe_name,
+        "region_id": region,
+        "pg_version": 16,
+        "default_endpoint_settings": {
+            "autoscaling_limit_min_cu": 0.25,
+            "autoscaling_limit_max_cu": 1,
+            "suspend_timeout_seconds": 0,
+        },
     }
+    if _org_id():
+        project_body["org_id"] = _org_id()
+    body = {"project": project_body}
     async with httpx.AsyncClient(timeout=45.0) as client:
         r = await client.post(f"{API_BASE}/projects", json=body, headers=_headers())
         if r.status_code >= 400:

@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
 
     scrumdev_neon_api_key: str | None = None
+    scrumdev_neon_org_id: str | None = None
 
     # OpenAI - hibrido con Claude Code (no reemplazo)
     openai_api_key: str | None = None
