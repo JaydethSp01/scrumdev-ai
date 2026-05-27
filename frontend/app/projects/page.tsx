@@ -24,6 +24,7 @@ import { apiGetBacklog, apiGetCode, apiListBuilds, type BuildRecord } from "@/li
 import EmptyState from "@/components/EmptyState";
 import Spinner from "@/components/Spinner";
 import ProjectCreateWizard from "@/components/ProjectCreateWizard";
+import OnboardingHero from "@/components/OnboardingHero";
 
 type ProjectMetrics = {
   stories?: number;
@@ -199,24 +200,10 @@ export default function ProjectsPage() {
           <Spinner />
         </div>
       ) : projects.length === 0 ? (
-        <div className="border border-dashed border-neutral-300 dark:border-neutral-800 rounded-3xl p-12 text-center bg-gradient-to-b from-transparent to-brand/5">
-          <div className="grid place-items-center w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-brand to-brand-dark text-white shadow-lg">
-            <Rocket size={28} />
-          </div>
-          <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight mt-6">
-            Crea tu primer proyecto
-          </h2>
-          <p className="text-sm sm:text-base text-neutral-500 mt-2 max-w-md mx-auto">
-            En 3 pasos definimos identidad, vision y stack. Despues los agentes
-            generan tu backlog, arquitectura y codigo.
-          </p>
-          <button
-            onClick={() => setWizardOpen(true)}
-            className="mt-7 inline-flex items-center gap-2 px-5 py-3 bg-brand text-white rounded-lg hover:bg-brand-dark transition font-medium shadow-sm"
-          >
-            <FolderPlus size={16} /> Empezar el wizard
-          </button>
-        </div>
+        <OnboardingHero
+          userName={user.name}
+          onStart={() => setWizardOpen(true)}
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {projects.map((p) => (
