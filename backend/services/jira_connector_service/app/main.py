@@ -14,11 +14,13 @@ from pydantic import BaseModel
 
 from shared.config.settings import settings
 from shared.observability import configure_logging, get_logger
+from shared.observability.metrics import instrument_app
 
 configure_logging("jira-connector-service", debug=settings.app_debug)
 logger = get_logger(__name__)
 
 app = FastAPI(title=f"{settings.app_name} - Jira Connector", version="0.1.0")
+instrument_app(app, "jira-connector-service")
 
 
 class JiraIssueCreate(BaseModel):
@@ -229,6 +231,7 @@ from fastapi import Header, Request  # noqa: E402
 
 from shared.events.domain_events import DomainEvent  # noqa: E402
 from shared.events.event_bus import event_bus  # noqa: E402
+from shared.observability.metrics import instrument_app
 
 
 @app.post("/webhooks/jira")

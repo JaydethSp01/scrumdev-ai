@@ -75,6 +75,35 @@ async def generate_adr(
     )
     fs_path.write_text(markdown.rstrip() + footer, encoding="utf-8")
 
+    # Auto-commit ADR al repo del proyecto generado via git_connector_service
+    # (cierra T5 gap: ADRs versionados en el repo del cliente, no solo local).
+    git_commit_result: dict | None = None
+    try:
+        import httpx
+        from shared.config.settings import settings as _settings
+
+        slug = project_key.lower().replace("_", "-")
+        async with httpx.AsyncClient(timeout=20.0) as _client:
+            r = await _client.post(
+                f"{_settings.git_connector_service_url}/push",
+                json={
+                    "repo": slug,
+                    "branch": "main",
+                    "files": [
+                        {
+                            "path": f"docs/adr/{fname}",
+                            "content": markdown.rstrip() + footer,
+                        }
+                    ],
+                    "message": f"docs(adr): {fname} - {topic[:60]}",
+                },
+            )
+            if r.status_code < 400:
+                git_commit_result = r.json()
+    except Exception:
+        # Best-effort: si git_connector no responde, el ADR queda en local
+        git_commit_result = None
+
     return {
         "adr_number": adr_number,
         "title": f"ADR-{adr_number:03d}: {topic}",
@@ -85,4 +114,5 @@ async def generate_adr(
         "markdown": markdown,
         "fs_path": str(fs_path),
         "file_name": fname,
+        "git_commit": git_commit_result,
     }

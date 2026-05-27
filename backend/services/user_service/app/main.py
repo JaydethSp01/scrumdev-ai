@@ -15,11 +15,13 @@ from shared.db import init_db
 from shared.db.models import Project, User
 from shared.db.session import get_session
 from shared.observability import configure_logging, get_logger
+from shared.observability.metrics import instrument_app
 
 configure_logging("user-service", debug=settings.app_debug)
 logger = get_logger(__name__)
 
 app = FastAPI(title=f"{settings.app_name} - User Service", version="0.2.0")
+instrument_app(app, "user-service")
 
 app.add_middleware(
     CORSMiddleware,

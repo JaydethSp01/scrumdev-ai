@@ -34,11 +34,13 @@ from services.deploy_connector_service.app.neon_client import (
 )
 from shared.config.settings import settings
 from shared.observability import configure_logging, get_logger
+from shared.observability.metrics import instrument_app
 
 configure_logging("deploy-connector-service", debug=settings.app_debug)
 logger = get_logger(__name__)
 
 app = FastAPI(title=f"{settings.app_name} - Deploy Connector", version="0.2.0")
+instrument_app(app, "deploy-connector-service")
 
 RENDER_API = "https://api.render.com/v1"
 

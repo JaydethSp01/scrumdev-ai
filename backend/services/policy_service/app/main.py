@@ -17,11 +17,13 @@ from pydantic import BaseModel
 
 from shared.config.settings import settings
 from shared.observability import configure_logging, get_logger
+from shared.observability.metrics import instrument_app
 
 configure_logging("policy-service", debug=settings.app_debug)
 logger = get_logger(__name__)
 
 app = FastAPI(title=f"{settings.app_name} - Policy Service", version="0.2.0")
+instrument_app(app, "policy-service")
 
 POLICIES_DIR = Path(__file__).parent / "policies"
 

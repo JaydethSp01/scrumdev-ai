@@ -107,3 +107,17 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+# Failfast: en prod, NO permitir secrets default. Sprint 1.4.
+_DEFAULT_JWT = "change-me-in-production-please"
+if (settings.app_env or "").lower() in ("production", "prod"):
+    if settings.jwt_secret_key == _DEFAULT_JWT or len(settings.jwt_secret_key or "") < 32:
+        raise RuntimeError(
+            "SECURITY: JWT_SECRET_KEY must be set to a strong random value in production. "
+            "Generate one with: openssl rand -base64 64"
+        )
+    if not settings.github_webhook_secret or not settings.jira_webhook_secret:
+        raise RuntimeError(
+            "SECURITY: GITHUB_WEBHOOK_SECRET y JIRA_WEBHOOK_SECRET son obligatorios en production."
+        )

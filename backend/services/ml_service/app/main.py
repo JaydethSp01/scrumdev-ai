@@ -27,11 +27,13 @@ from services.ml_service.app.pipelines.risk_extractor import extract_risks
 from services.ml_service.app.pipelines.story_classifier import classify_story
 from shared.config.settings import settings
 from shared.observability import configure_logging, get_logger
+from shared.observability.metrics import instrument_app
 
 configure_logging("ml-service", debug=settings.app_debug)
 logger = get_logger(__name__)
 
 app = FastAPI(title=f"{settings.app_name} - ML Service", version="0.1.0")
+instrument_app(app, "ml-service")
 
 
 class TextRequest(BaseModel):

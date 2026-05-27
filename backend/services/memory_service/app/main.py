@@ -25,11 +25,13 @@ from shared.db import init_db
 from shared.db.models import MemoryItem
 from shared.db.session import get_session
 from shared.observability import configure_logging, get_logger
+from shared.observability.metrics import instrument_app
 
 configure_logging("memory-service", debug=settings.app_debug)
 logger = get_logger(__name__)
 
 app = FastAPI(title=f"{settings.app_name} - Memory Service", version="0.1.0")
+instrument_app(app, "memory-service")
 
 _pgvector_ready = False
 _embedding_dim: int | None = None

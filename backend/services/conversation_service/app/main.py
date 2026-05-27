@@ -15,11 +15,13 @@ from shared.events.domain_events import DomainEvent
 from shared.events.event_bus import event_bus
 from shared.events.event_types import HUMAN_MESSAGE_RECEIVED
 from shared.observability import configure_logging, get_logger
+from shared.observability.metrics import instrument_app
 
 configure_logging("conversation-service", debug=settings.app_debug)
 logger = get_logger(__name__)
 
 app = FastAPI(title=f"{settings.app_name} - Conversation Service", version="0.1.0")
+instrument_app(app, "conversation-service")
 
 
 @app.on_event("startup")

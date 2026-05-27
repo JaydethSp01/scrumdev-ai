@@ -13,11 +13,13 @@ from shared.events.event_types import (
     AGENT_EXECUTION_STARTED,
 )
 from shared.observability import configure_logging, get_logger
+from shared.observability.metrics import instrument_app
 
 configure_logging("agent-runtime-service", debug=settings.app_debug)
 logger = get_logger(__name__)
 
 app = FastAPI(title=f"{settings.app_name} - Agent Runtime", version="0.1.0")
+instrument_app(app, "agent-runtime-service")
 
 executor = AgentExecutor()
 

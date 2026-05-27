@@ -11,11 +11,13 @@ from shared.db import init_db
 from shared.db.models import AuditEvent
 from shared.db.session import get_session
 from shared.observability import configure_logging, get_logger
+from shared.observability.metrics import instrument_app
 
 configure_logging("audit-service", debug=settings.app_debug)
 logger = get_logger(__name__)
 
 app = FastAPI(title=f"{settings.app_name} - Audit Service", version="0.1.0")
+instrument_app(app, "audit-service")
 
 _in_memory: list[dict] = []
 

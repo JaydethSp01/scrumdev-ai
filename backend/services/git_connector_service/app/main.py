@@ -15,11 +15,13 @@ from pydantic import BaseModel
 from services.git_connector_service.app.repo_publisher import ensure_repo, push_files
 from shared.config.settings import settings
 from shared.observability import configure_logging, get_logger
+from shared.observability.metrics import instrument_app
 
 configure_logging("git-connector-service", debug=settings.app_debug)
 logger = get_logger(__name__)
 
 app = FastAPI(title=f"{settings.app_name} - Git Connector", version="0.2.0")
+instrument_app(app, "git-connector-service")
 
 
 class PublishRequest(BaseModel):
@@ -189,6 +191,7 @@ from fastapi import Header, Request  # noqa: E402
 
 from shared.events.domain_events import DomainEvent  # noqa: E402
 from shared.events.event_bus import event_bus  # noqa: E402
+from shared.observability.metrics import instrument_app
 
 
 def _verify_signature(secret: str, body: bytes, signature: str | None) -> bool:

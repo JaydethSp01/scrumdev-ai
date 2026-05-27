@@ -11,11 +11,13 @@ from shared.db.session import get_session
 from shared.observability import configure_logging, get_logger
 from shared.security.jwt import create_access_token, decode_token
 from shared.security.passwords import hash_password, verify_password
+from shared.observability.metrics import instrument_app
 
 configure_logging("auth-service", debug=settings.app_debug)
 logger = get_logger(__name__)
 
 app = FastAPI(title=f"{settings.app_name} - Auth Service", version="0.1.0")
+instrument_app(app, "auth-service")
 
 
 class RegisterRequest(BaseModel):
