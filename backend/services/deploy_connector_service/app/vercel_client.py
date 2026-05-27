@@ -39,10 +39,33 @@ def is_configured() -> bool:
     return bool(_token())
 
 
+async def disable_sso_protection(project_id_or_name: str) -> dict[str, Any]:
+    """Desactiva ssoProtection del proyecto.
+
+    Por default en planes Pro/Team, Vercel pone deployment protection que
+    obliga a login a Vercel para ver el preview. Para apps que entregamos
+    a usuarios finales (no-tech), esto NO tiene sentido. Lo desactivamos
+    al crear el proyecto.
+    """
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.patch(
+            f"{API_BASE}/v9/projects/{project_id_or_name}{_team_query()}",
+            json={"ssoProtection": None, "passwordProtection": None},
+            headers=_headers(),
+        )
+        if r.status_code >= 400:
+            return {"ok": False, "error": r.text}
+        return {"ok": True, "result": r.json()}
+
+
 async def create_project_from_git_repo(
     name: str, git_owner: str, git_repo: str, framework: str = "nextjs"
 ) -> dict[str, Any]:
-    """Crea proyecto Vercel apuntado al repo. Si ya existe, lo devuelve."""
+    """Crea proyecto Vercel apuntado al repo. Si ya existe, lo devuelve.
+
+    AUTOMATICO: desactiva ssoProtection inmediato para que la URL publica
+    no requiera login a Vercel (apps entregadas a usuarios finales).
+    """
     project_name = name.lower().replace("_", "-")[:100]
     payload = {
         "name": project_name,
@@ -53,16 +76,27 @@ async def create_project_from_git_repo(
         r = await client.post(
             f"{API_BASE}/v10/projects{_team_query()}", json=payload, headers=_headers()
         )
+        result: dict | None = None
         if r.status_code == 409 or (r.status_code >= 400 and "already exists" in r.text):
-            # Ya existe: devolvemos el existente
             get_r = await client.get(
                 f"{API_BASE}/v9/projects/{project_name}{_team_query()}", headers=_headers()
             )
             if get_r.status_code == 200:
-                return {**get_r.json(), "_existed": True}
-        if r.status_code >= 400:
+                result = {**get_r.json(), "_existed": True}
+        elif r.status_code < 400:
+            result = r.json()
+        else:
             return {"error": r.text, "status": r.status_code}
-        return r.json()
+
+    # Desactivar SSO (best-effort, no falla el create si esto falla)
+    try:
+        await disable_sso_protection(project_name)
+        if result is not None:
+            result["ssoProtection"] = None
+    except Exception:
+        pass
+
+    return result or {"error": "unknown", "status": r.status_code}
 
 
 async def latest_deployment(project_name_or_id: str) -> dict[str, Any]:
