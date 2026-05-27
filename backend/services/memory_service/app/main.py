@@ -35,7 +35,35 @@ _pgvector_ready = False
 _embedding_dim: int | None = None
 
 
+async def _embed_openai(content: str) -> list[float] | None:
+    """OpenAI text-embedding-3-small: 1536 dim, mas calidad que MiniLM-L6 (384)."""
+    if not (settings.openai_enabled and settings.openai_api_key):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.post(
+                "https://api.openai.com/v1/embeddings",
+                headers={
+                    "Authorization": f"Bearer {settings.openai_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"model": settings.openai_embedding_model, "input": content},
+            )
+            r.raise_for_status()
+            return r.json()["data"][0]["embedding"]
+    except Exception as exc:
+        logger.warning("openai_embed_failed", error=str(exc))
+        return None
+
+
 async def _embed(content: str) -> list[float] | None:
+    """Estrategia hibrida:
+    1. OpenAI text-embedding-3-small (1536 dim, mejor recall) si OPENAI_ENABLED
+    2. Fallback al ml_service local (sentence-transformers MiniLM, 384 dim)
+    """
+    vec = await _embed_openai(content)
+    if vec is not None:
+        return vec
     if not settings.ml_enabled:
         return None
     try:
@@ -60,14 +88,38 @@ async def _setup_pgvector() -> None:
             logger.warning("pgvector_extension_unavailable", error=str(exc))
             return
         if _embedding_dim is None:
+            # Si OpenAI esta activo: 1536 (text-embedding-3-small)
+            # Si no: caemos al dim del ml_service (sentence-transformers)
+            if settings.openai_enabled and settings.openai_api_key:
+                _embedding_dim = 1536
+                logger.info("memory_using_openai_embeddings", dim=1536)
+            else:
+                try:
+                    async with httpx.AsyncClient(timeout=120.0) as client:
+                        response = await client.get(f"{settings.ml_service_url}/ml/info")
+                        response.raise_for_status()
+                        _embedding_dim = response.json().get("dimension") or 384
+                except Exception as exc:
+                    logger.warning("ml_info_unavailable", error=str(exc))
+                    _embedding_dim = 384
+            # Si la tabla existe con dim distinto, dropearla (vacia o casi)
             try:
-                async with httpx.AsyncClient(timeout=120.0) as client:
-                    response = await client.get(f"{settings.ml_service_url}/ml/info")
-                    response.raise_for_status()
-                    _embedding_dim = response.json().get("dimension") or 384
-            except Exception as exc:
-                logger.warning("ml_info_unavailable", error=str(exc))
-                _embedding_dim = 384
+                r = await session.execute(
+                    text(
+                        "SELECT a.atttypmod FROM pg_attribute a "
+                        "JOIN pg_class c ON c.oid=a.attrelid "
+                        "WHERE c.relname='memory_embeddings' AND a.attname='embedding'"
+                    )
+                )
+                row = r.first()
+                if row and row[0] and row[0] != _embedding_dim:
+                    logger.warning(
+                        "embedding_dim_mismatch_recreating", old=row[0], new=_embedding_dim
+                    )
+                    await session.execute(text("DROP TABLE memory_embeddings"))
+                    await session.commit()
+            except Exception:
+                pass
         try:
             await session.execute(
                 text(

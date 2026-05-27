@@ -373,7 +373,29 @@ export function DeployPanel({ projectKey, user }: Props) {
                   <RefreshCw size={11} /> Refrescar
                 </button>
               </header>
-              {previewState && previewState !== "READY" ? (
+              {previewState === "ERROR" || previewState === "FAILED" ? (
+                <div className="h-[600px] grid place-items-center bg-gradient-to-b from-red-500/5 to-red-500/10 dark:from-red-500/10 dark:to-red-500/20 p-6">
+                  <div className="text-center max-w-md">
+                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-red-500/15 text-red-500 mb-4">
+                      <AlertTriangle size={28} />
+                    </div>
+                    <h3 className="text-lg font-semibold">Build de Vercel fallo</h3>
+                    <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-2">
+                      El ultimo deploy termino con error. Revisa logs en Vercel
+                      o haz click en <b>Re-desplegar</b> abajo para reintentar
+                      con el codigo actual.
+                    </p>
+                    <a
+                      href={`https://vercel.com/jaydeths-projects/${projectKey.toLowerCase().replace(/_/g, "-")}/deployments`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-5 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-500 text-white text-sm font-medium hover:opacity-90"
+                    >
+                      <Globe size={14} /> Ver logs en Vercel
+                    </a>
+                  </div>
+                </div>
+              ) : previewState && previewState !== "READY" ? (
                 <div className="h-[600px] grid place-items-center bg-gradient-to-b from-neutral-50 to-neutral-100 dark:from-neutral-900 dark:to-neutral-950">
                   <div className="text-center px-6">
                     <Loader2 size={32} className="animate-spin text-brand mx-auto" />
@@ -413,7 +435,7 @@ export function DeployPanel({ projectKey, user }: Props) {
             </section>
           )}
 
-          <PostgresConfigCard projectKey={projectKey} onConfigured={() => toasts.push({ kind: "success", text: "Postgres conectado. Re-despliega para aplicar." })} />
+          <PostgresConfigCard projectKey={projectKey} onConfigured={() => toasts.success("Postgres conectado. Re-despliega para aplicar.")} />
 
           <div className="flex justify-end">
             <button
@@ -566,40 +588,59 @@ function PostgresConfigCard({
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [autoTried, setAutoTried] = useState(false);
+  const [isConnected, setIsConnected] = useState<boolean | null>(null);
 
-  const submit = useCallback(
-    async (autoProvision: boolean) => {
-      setBusy(true);
-      setError(null);
-      try {
-        const res = await fetch(`${API}/projects/${projectKey}/postgres/configure`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            database_url: autoProvision ? null : url.trim(),
-            auto_provision: autoProvision,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (data.ok) {
-          onConfigured();
-          setOpen(false);
-          setUrl("");
-        } else if (data.needs_manual_url) {
-          setAutoTried(true);
-          setError(data.hint || data.error || "Provision automatica fallo. Pega tu POSTGRES_URL manual.");
-        } else {
-          setError(data.error || "No se pudo configurar Postgres.");
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Error inesperado");
-      } finally {
-        setBusy(false);
+  // Detectar si POSTGRES_URL ya esta seteado en el proyecto Vercel
+  const checkConnection = useCallback(async () => {
+    try {
+      const projectName = projectKey.toLowerCase().replace(/_/g, "-");
+      const res = await fetch(`${API}/vercel/env/${projectName}`);
+      if (!res.ok) {
+        setIsConnected(false);
+        return;
       }
-    },
-    [projectKey, url, onConfigured]
-  );
+      const data = await res.json();
+      const envs: { key: string }[] = data.envs || [];
+      const hasPg = envs.some(
+        (e) => e.key === "POSTGRES_URL" || e.key === "DATABASE_URL"
+      );
+      setIsConnected(hasPg);
+    } catch {
+      setIsConnected(false);
+    }
+  }, [projectKey]);
+
+  useEffect(() => {
+    void checkConnection();
+  }, [checkConnection]);
+
+  const submit = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/projects/${projectKey}/postgres/configure`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          database_url: url.trim(),
+          auto_provision: false,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) {
+        onConfigured();
+        setIsConnected(true);
+        setOpen(false);
+        setUrl("");
+      } else {
+        setError(data.error || "No se pudo guardar la conexion. Revisa el connection string.");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error inesperado");
+    } finally {
+      setBusy(false);
+    }
+  }, [projectKey, url, onConfigured]);
 
   return (
     <section className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 p-4">
@@ -609,61 +650,94 @@ function PostgresConfigCard({
         className="w-full flex items-center justify-between gap-3"
       >
         <div className="flex items-center gap-2 text-sm font-medium">
-          <Cloud size={14} className="text-brand" />
-          Conectar Postgres al deploy
+          {isConnected ? (
+            <span className="grid place-items-center w-7 h-7 rounded-lg bg-green-500/15 text-green-600 dark:text-green-300">
+              <CheckCircle2 size={14} />
+            </span>
+          ) : (
+            <span className="grid place-items-center w-7 h-7 rounded-lg bg-brand/15 text-brand">
+              <Cloud size={14} />
+            </span>
+          )}
+          <div className="text-left">
+            <p className="text-sm font-semibold">
+              Base de datos {isConnected ? "conectada" : "sin conectar"}
+            </p>
+            <p className="text-[11px] text-neutral-500">
+              {isConnected
+                ? "Tu app guarda datos reales en Postgres"
+                : "Tu app esta usando datos de ejemplo (mock). Conecta una base para guardar datos reales."}
+            </p>
+          </div>
         </div>
-        <span className="text-xs text-neutral-500">{open ? "Cerrar" : "Abrir"}</span>
+        <span className="text-xs text-neutral-500 shrink-0">{open ? "Cerrar" : (isConnected ? "Cambiar" : "Conectar")}</span>
       </button>
       {open && (
-        <div className="mt-3 space-y-3">
-          <p className="text-xs text-neutral-500">
-            Pega tu connection string de Postgres (Neon, Supabase, Railway). Se guarda como
-            <code className="mx-1 px-1 rounded bg-neutral-100 dark:bg-neutral-800">POSTGRES_URL</code>
-            y <code className="mx-1 px-1 rounded bg-neutral-100 dark:bg-neutral-800">DATABASE_URL</code>
-            en el proyecto Vercel.
-          </p>
+        <div className="mt-4 pt-4 border-t border-neutral-200 dark:border-neutral-800 space-y-3">
+          {isConnected && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-green-500/10 border border-green-500/30 text-xs text-green-700 dark:text-green-300">
+              <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
+              <span>
+                Ya tienes una base conectada. Solo cambia el connection string si
+                quieres apuntar a otra base.
+              </span>
+            </div>
+          )}
+          <ol className="space-y-2 text-xs text-neutral-600 dark:text-neutral-300">
+            <li className="flex items-start gap-2">
+              <span className="grid place-items-center w-5 h-5 rounded-full bg-brand/15 text-brand text-[10px] font-semibold shrink-0">1</span>
+              <span>
+                Crea una base gratis en{" "}
+                <a
+                  href="https://console.neon.tech"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand underline font-medium"
+                >
+                  console.neon.tech
+                </a>
+                {" "}(0.5 GB free, sin tarjeta). Tambien sirve Supabase o Railway.
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="grid place-items-center w-5 h-5 rounded-full bg-brand/15 text-brand text-[10px] font-semibold shrink-0">2</span>
+              <span>Copia el <b>connection string</b> de la base (empieza con <code className="px-1 rounded bg-neutral-100 dark:bg-neutral-800">postgresql://</code>) y pegalo abajo.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="grid place-items-center w-5 h-5 rounded-full bg-brand/15 text-brand text-[10px] font-semibold shrink-0">3</span>
+              <span>Re-despliega para que tu app use la base.</span>
+            </li>
+          </ol>
           <input
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="postgresql://user:pass@ep-x.us-east-2.aws.neon.tech/dbname?sslmode=require"
+            placeholder="postgresql://usuario:password@host.neon.tech/dbname?sslmode=require"
             className="w-full px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-sm font-mono"
           />
           {error && (
-            <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-700 dark:text-red-300">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>{error}</span>
+            </div>
           )}
-          <div className="flex gap-2 justify-end flex-wrap">
-            {!autoTried && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => submit(true)}
-                className="text-xs px-3 py-1.5 rounded border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900 disabled:opacity-60"
-              >
-                {busy ? "Intentando..." : "Provisionar automatico (Vercel Postgres)"}
-              </button>
-            )}
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={() => { setOpen(false); setUrl(""); setError(null); }}
+              className="text-xs px-3 py-1.5 rounded text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-900"
+            >
+              Cancelar
+            </button>
             <button
               type="button"
               disabled={busy || !url.trim()}
-              onClick={() => submit(false)}
-              className="text-xs px-3 py-1.5 rounded bg-brand text-white hover:opacity-90 disabled:opacity-60"
+              onClick={() => submit()}
+              className="text-xs px-4 py-1.5 rounded bg-gradient-to-r from-brand to-fuchsia-500 text-white hover:opacity-95 disabled:opacity-60 font-medium"
             >
-              {busy ? "Guardando..." : "Guardar POSTGRES_URL"}
+              {busy ? "Guardando..." : (isConnected ? "Actualizar conexion" : "Conectar base")}
             </button>
           </div>
-          <p className="text-[11px] text-neutral-400">
-            Tip: si no tienes Postgres, crea uno gratis en{" "}
-            <a
-              href="https://console.neon.tech"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-brand underline"
-            >
-              console.neon.tech
-            </a>
-            {" "}(0.5GB free, sin tarjeta).
-          </p>
         </div>
       )}
     </section>

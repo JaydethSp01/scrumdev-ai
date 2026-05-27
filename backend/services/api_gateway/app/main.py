@@ -437,6 +437,112 @@ async def project_chat_clear(project_key: str, user_id: str) -> dict:
         return r.json()
 
 
+@app.get("/vercel/env/{project_name}")
+async def vercel_env_list(project_name: str) -> dict:
+    """Proxy: lista env vars de un proyecto Vercel (usado por UI para detectar
+    si POSTGRES_URL/DATABASE_URL ya estan seteadas)."""
+    return await _proxy_get(
+        f"{settings.deploy_connector_service_url}/vercel/env/{project_name}"
+    )
+
+
+@app.get("/render/status")
+async def render_status() -> dict:
+    return await _proxy_get(f"{settings.deploy_connector_service_url}/render/status")
+
+
+@app.get("/integrations/status")
+async def integrations_status() -> dict:
+    """Estado consolidado de todas las integraciones externas."""
+    import asyncio as _asyncio
+
+    async def _g(name: str, url: str) -> tuple[str, dict]:
+        try:
+            return name, await get_json(url, timeout=5.0)
+        except Exception as exc:
+            return name, {"configured": False, "error": str(exc)}
+
+    targets = {
+        "vercel": f"{settings.deploy_connector_service_url}/vercel/status",
+        "render": f"{settings.deploy_connector_service_url}/render/status",
+        "neon": f"{settings.deploy_connector_service_url}/neon/status",
+        "jira": f"{settings.jira_connector_service_url}/health",
+        "github": f"{settings.git_connector_service_url}/health",
+    }
+    results = await _asyncio.gather(*[_g(n, u) for n, u in targets.items()])
+    out = {name: data for name, data in results}
+
+    # Detectar OpenAI + Claude desde settings
+    out["openai"] = {
+        "configured": bool(settings.openai_enabled and settings.openai_api_key),
+        "model_fast": settings.openai_model_fast,
+        "embedding_model": settings.openai_embedding_model,
+    }
+    out["claude_code"] = {
+        "configured": (settings.scrumdev_ai_provider or "").lower() == "claude_code",
+        "model": settings.scrumdev_ai_model,
+    }
+    out["temporal"] = {"enabled": settings.temporal_enabled, "host": settings.temporal_host}
+    out["rabbitmq"] = {"enabled": settings.rabbitmq_enabled, "url": settings.rabbitmq_url}
+
+    return out
+
+
+@app.get("/projects/{project_key}/integrations")
+async def project_integrations(project_key: str) -> dict:
+    """Estado de integraciones especifico al proyecto: deploy actual, DB,
+    issues Jira, decisiones pendientes."""
+    import asyncio as _asyncio
+
+    name = project_key.lower().replace("_", "-")
+
+    async def _safe(coro):
+        try:
+            return await coro
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    async def _deploy_preview():
+        return await get_json(
+            f"{settings.orchestrator_service_url}/projects/{project_key}/deploy/preview",
+            timeout=8.0,
+        )
+
+    async def _env_list():
+        return await get_json(
+            f"{settings.deploy_connector_service_url}/vercel/env/{name}",
+            timeout=8.0,
+        )
+
+    async def _decisions():
+        return await get_json(
+            f"{settings.orchestrator_service_url}/decisions/pending?project_key={project_key}",
+            timeout=5.0,
+        )
+
+    preview, envs, decisions = await _asyncio.gather(
+        _safe(_deploy_preview()), _safe(_env_list()), _safe(_decisions())
+    )
+
+    env_keys = set((envs.get("envs") or []) and [e.get("key") for e in envs.get("envs", [])])
+    has_db = "POSTGRES_URL" in env_keys or "DATABASE_URL" in env_keys
+
+    return {
+        "project_key": project_key,
+        "deploy": preview,
+        "db_connected": has_db,
+        "env_keys_count": len(env_keys),
+        "pending_decisions": (decisions.get("decisions") or []) if isinstance(decisions, dict) else [],
+    }
+
+
+@app.get("/render/services/{name}")
+async def render_service_get(name: str) -> dict:
+    return await _proxy_get(
+        f"{settings.deploy_connector_service_url}/render/services/{name}"
+    )
+
+
 @app.post("/webhooks/jira")
 async def webhook_jira(request: Request) -> dict:
     body = await request.body()

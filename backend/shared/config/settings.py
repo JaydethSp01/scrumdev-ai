@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     rabbitmq_enabled: bool = False
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
 
+    scrumdev_neon_api_key: str | None = None
+
+    # OpenAI - hibrido con Claude Code (no reemplazo)
+    openai_api_key: str | None = None
+    openai_enabled: bool = False
+    openai_model_fast: str = "gpt-4o-mini"
+    openai_model_vision: str = "gpt-4o"
+    openai_embedding_model: str = "text-embedding-3-small"
+
     scrumdev_jira_base_url: str | None = None
     scrumdev_jira_email: str | None = None
     scrumdev_jira_api_token: str | None = None

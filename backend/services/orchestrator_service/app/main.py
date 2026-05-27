@@ -222,6 +222,17 @@ async def _run_generate_full_app(
                         content=f.get("content", ""),
                     )
                 )
+            # Marcar TODAS las stories del backlog como done — el generate-app
+            # holistico produce un proyecto que CUBRE todas las historias en un
+            # solo pase (la guia Delfin lo trata como MVP completo).
+            stories_res = await session.execute(
+                select(BacklogItem).where(BacklogItem.project_key == project_key)
+            )
+            stories_marked = 0
+            for story in stories_res.scalars().all():
+                if story.status != "done":
+                    story.status = "done"
+                    stories_marked += 1
             await session.commit()
             run = await session.get(BuildRun, build_id)
             if run:
@@ -232,6 +243,7 @@ async def _run_generate_full_app(
                     "summary": resp.get("summary"),
                     "routes": resp.get("routes", []),
                     "code_files_generated": len(files),
+                    "stories_marked_done": stories_marked,
                 }
                 run.completed_at = datetime.now(timezone.utc)
                 await session.commit()
@@ -1307,6 +1319,46 @@ async def deploy_project(project_key: str, req: DeployRequest) -> dict:
                 except Exception as exc:
                     render_resp = {"error": str(exc)}
 
+        # AUTO-PROVISION Postgres con Neon API si no esta seteado.
+        # Esto evita que el user pegue connection strings manualmente — la
+        # plataforma crea la DB y la inyecta como POSTGRES_URL en Vercel.
+        neon_resp: dict | None = None
+        try:
+            # Chequear si ya hay POSTGRES_URL seteado
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                env_r = await client.get(
+                    f"{settings.deploy_connector_service_url}/vercel/env/{project_name_vercel}"
+                )
+                already_has_db = False
+                if env_r.status_code == 200:
+                    envs = env_r.json().get("envs", [])
+                    keys = {e.get("key") for e in envs}
+                    already_has_db = "POSTGRES_URL" in keys or "DATABASE_URL" in keys
+
+            if not already_has_db:
+                neon_resp = await post_json(
+                    f"{settings.deploy_connector_service_url}/neon/projects",
+                    {"name": project_name_vercel},
+                    timeout=60.0,
+                )
+                if neon_resp.get("ok") and neon_resp.get("connection_uri"):
+                    db_url = neon_resp["connection_uri"]
+                    # Setear en Vercel
+                    async with httpx.AsyncClient(timeout=20.0) as client:
+                        for key in ("POSTGRES_URL", "DATABASE_URL"):
+                            await client.post(
+                                f"{settings.deploy_connector_service_url}/vercel/env",
+                                json={
+                                    "project_id_or_name": project_name_vercel,
+                                    "key": key,
+                                    "value": db_url,
+                                    "target": ["production", "preview", "development"],
+                                },
+                            )
+                    logger.info("neon_auto_provisioned", project=project_key)
+        except Exception as exc:
+            logger.warning("neon_auto_provision_skipped", error=str(exc))
+
         await event_bus.publish(
             DomainEvent(
                 event_type="PROJECT_DEPLOYED",
@@ -1318,6 +1370,7 @@ async def deploy_project(project_key: str, req: DeployRequest) -> dict:
                     "files_pushed": git_resp.get("push", {}).get("pushed_count", 0),
                     "git_url": git_resp.get("push", {}).get("url"),
                     "vercel": bool(vercel_resp and "error" not in (vercel_resp or {})),
+                    "neon_auto": bool(neon_resp and neon_resp.get("ok")),
                 },
             )
         )

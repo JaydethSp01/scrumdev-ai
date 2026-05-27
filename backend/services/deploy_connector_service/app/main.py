@@ -27,6 +27,11 @@ from services.deploy_connector_service.app.render_client import (
     set_env_var as render_set_env_var,
     trigger_deploy as render_trigger_deploy,
 )
+from services.deploy_connector_service.app.neon_client import (
+    ensure_project as neon_ensure_project,
+    is_configured as neon_configured,
+    list_projects as neon_list_projects,
+)
 from shared.config.settings import settings
 from shared.observability import configure_logging, get_logger
 
@@ -137,6 +142,34 @@ class RenderServiceRequest(BaseModel):
 @app.get("/render/status")
 async def render_status() -> dict:
     return {"configured": render_configured()}
+
+
+# --- Neon Postgres auto-provision (sin user input) ---
+
+
+class NeonProvisionRequest(BaseModel):
+    name: str
+    region: str = "aws-us-east-2"
+
+
+@app.get("/neon/status")
+async def neon_status() -> dict:
+    out: dict = {"configured": neon_configured()}
+    if neon_configured():
+        out["projects_count"] = len(await neon_list_projects())
+    return out
+
+
+@app.post("/neon/projects")
+async def neon_provision(req: NeonProvisionRequest) -> dict:
+    """Crea (o reusa) un proyecto Neon para el deploy y devuelve connection_uri."""
+    if not neon_configured():
+        return {
+            "ok": False,
+            "needs_api_key": True,
+            "hint": "Genera una key en https://console.neon.tech/app/settings/api-keys y setea SCRUMDEV_NEON_API_KEY en .env",
+        }
+    return await neon_ensure_project(req.name, req.region)
 
 
 @app.post("/render/services")

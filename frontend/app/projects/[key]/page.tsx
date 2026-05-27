@@ -20,6 +20,7 @@ import {
   Sparkles,
   RefreshCw,
   Palette,
+  Plug,
 } from "lucide-react";
 import { useAuth } from "@/app/auth/_lib";
 import { getProject, type Project } from "@/lib/projects";
@@ -41,6 +42,7 @@ import VisionForm from "@/components/VisionForm";
 import BacklogBoard from "@/components/BacklogBoard";
 import CodeBrowser from "@/components/CodeBrowser";
 import DeployPanel from "@/components/DeployPanel";
+import IntegrationsPanel from "@/components/IntegrationsPanel";
 import PersonalizationPanel from "@/components/PersonalizationPanel";
 import BuildProgressToast, {
   fireBuildStarted,
@@ -54,6 +56,7 @@ type Tab =
   | "backlog"
   | "code"
   | "deploy"
+  | "integrations"
   | "chat";
 
 type TabDef = {
@@ -100,6 +103,12 @@ const TABS: TabDef[] = [
     label: "Despliegue",
     icon: Rocket,
     description: "Publica tu sistema en GitHub y Vercel.",
+  },
+  {
+    value: "integrations",
+    label: "Integraciones",
+    icon: Plug,
+    description: "Estado de servicios externos: IA, DB, GitHub, Jira, deploy.",
   },
   {
     value: "chat",
@@ -539,6 +548,7 @@ export default function ProjectDetailPage() {
           {tab === "deploy" && (
             <DeployPanel projectKey={project.key} user={user} />
           )}
+          {tab === "integrations" && <IntegrationsPanel projectKey={project.key} />}
           {tab === "chat" && <ProjectChat projectKey={project.key} user={user} />}
         </section>
       </div>

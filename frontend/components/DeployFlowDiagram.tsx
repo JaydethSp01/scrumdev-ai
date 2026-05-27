@@ -68,7 +68,29 @@ function computeStatus(
   const { stage, vercelState, githubReady, postgresConfigured } = props;
   const v = (vercelState || "").toUpperCase();
 
-  // Ordenamos los estados por su posicion en el pipeline
+  // Caso error de Vercel: respetar lo que sí se completó antes.
+  // code/agents/git OK si tenemos esos artefactos; vercel y live failed;
+  // postgres es pending si no se configuró.
+  if (stage === "error" || v === "ERROR" || v === "FAILED") {
+    if (step === "code") return props.filesCount ? "done" : "pending";
+    if (step === "agents") return props.filesCount ? "done" : "pending";
+    if (step === "git") return githubReady ? "done" : "failed";
+    if (step === "vercel") return "failed";
+    if (step === "db") return postgresConfigured ? "done" : "pending";
+    if (step === "live") return "failed";
+  }
+
+  // Caso ready
+  if (stage === "ready" || v === "READY") {
+    if (step === "code") return "done";
+    if (step === "agents") return "done";
+    if (step === "git") return githubReady ? "done" : "done";
+    if (step === "vercel") return "done";
+    if (step === "db") return postgresConfigured ? "done" : "pending";
+    if (step === "live") return "done";
+  }
+
+  // Caso en progreso (stage activo)
   const order: DeployStage[] = [
     "idle",
     "generating_code",
@@ -79,7 +101,6 @@ function computeStatus(
     "ready",
   ];
   const stageIdx = order.indexOf(stage);
-
   const stepStageIdx: Record<string, number> = {
     code: 0,
     agents: 1,
@@ -90,25 +111,10 @@ function computeStatus(
   };
   const stepIdx = stepStageIdx[step];
 
-  if (stage === "error" && v === "ERROR") {
-    // El paso donde rompio Vercel
-    if (step === "vercel" || step === "live") return "failed";
-    return "done";
-  }
-
-  if (stage === "ready" || (step === "live" && v === "READY")) {
-    if (step === "live") return v === "READY" ? "done" : "active";
-    if (step === "db" && !postgresConfigured) return "pending";
-    return "done";
-  }
-
   if (stepIdx < stageIdx) return "done";
   if (stepIdx === stageIdx) return "active";
-
-  // Override: si githubReady ya, marcamos git como done aunque stage diga otra cosa
-  if (step === "git" && githubReady && stage !== "pushing_git") return "done";
-  if (step === "db" && postgresConfigured && stage !== "configuring_db") return "done";
-
+  if (step === "git" && githubReady) return "done";
+  if (step === "db" && postgresConfigured) return "done";
   return "pending";
 }
 
@@ -137,11 +143,21 @@ export function DeployFlowDiagram(props: DiagramProps) {
   const dbS = computeStatus("db", props);
   const liveS = computeStatus("live", props);
 
+  // Sublabel coherente con status (no mezclar estado real con texto inconsistente)
+  function sl(status: NodeStatus, done: string, pending: string, failed = "fallo"): string {
+    if (status === "done") return done;
+    if (status === "failed") return failed;
+    if (status === "active") return "en curso";
+    return pending;
+  }
+
   const nodes: Node[] = [
     {
       id: "code",
       label: "Codigo",
-      sublabel: props.filesCount ? `${props.filesCount} archivos` : "generado",
+      sublabel: codeS === "done" && props.filesCount
+        ? `${props.filesCount} archivos`
+        : sl(codeS, "generado", "pendiente"),
       icon: Code2,
       status: codeS,
       detail: "Output del LLM persistido en BD.",
@@ -149,7 +165,7 @@ export function DeployFlowDiagram(props: DiagramProps) {
     {
       id: "agents",
       label: "Agentes IA",
-      sublabel: "PO + Arq + Dev",
+      sublabel: sl(agentsS, "completados", "PO + Arq + Dev"),
       icon: Bot,
       status: agentsS,
       detail: "Crew genera backlog + arquitectura + codigo.",
@@ -157,7 +173,7 @@ export function DeployFlowDiagram(props: DiagramProps) {
     {
       id: "git",
       label: "GitHub",
-      sublabel: props.githubReady ? "push OK" : "pushing...",
+      sublabel: sl(gitS, "push OK", "pendiente", "push fallo"),
       icon: Github,
       status: gitS,
       detail: "Repo creado y archivos pusheados a main.",
@@ -167,7 +183,12 @@ export function DeployFlowDiagram(props: DiagramProps) {
       label: props.fallbackProvider === "render" ? "Render" : "Vercel",
       sublabel: props.fallbackProvider === "render"
         ? "fallback activo"
-        : (props.vercelState ? props.vercelState.toLowerCase() : "preparando"),
+        : sl(
+            vercelS,
+            (props.vercelState || "READY").toLowerCase(),
+            "preparando",
+            "build fallo"
+          ),
       icon: Cloud,
       status: vercelS,
       detail: props.fallbackProvider === "render"
@@ -177,7 +198,7 @@ export function DeployFlowDiagram(props: DiagramProps) {
     {
       id: "db",
       label: "Postgres",
-      sublabel: props.postgresConfigured ? "Neon listo" : "pendiente",
+      sublabel: sl(dbS, "Neon conectado", "pendiente"),
       icon: Database,
       status: dbS,
       detail: "POSTGRES_URL inyectado en Vercel.",
@@ -185,7 +206,7 @@ export function DeployFlowDiagram(props: DiagramProps) {
     {
       id: "live",
       label: "Live",
-      sublabel: props.vercelUrl ? "READY" : "esperando",
+      sublabel: sl(liveS, "READY", "esperando", "no disponible"),
       icon: Globe,
       status: liveS,
       detail: "URL publica accesible.",
