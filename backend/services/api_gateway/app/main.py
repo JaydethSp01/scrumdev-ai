@@ -414,6 +414,7 @@ class AssistantPayload(BaseModel):
     message: str
     image_paths: list[str] = []
     image_urls: list[str] = []
+    session_id: str | None = None
 
 
 @app.post("/projects/{project_key}/assistant")
@@ -422,6 +423,83 @@ async def project_assistant(project_key: str, req: AssistantPayload) -> dict:
         f"{settings.orchestrator_service_url}/projects/{project_key}/assistant",
         req.model_dump(),
         timeout=240.0,
+    )
+
+
+# ===== Ciclo de vida: versiones, multi-chat, fix de bugs =====
+
+
+@app.get("/projects/{project_key}/versions")
+async def gw_list_versions(project_key: str) -> dict:
+    return await _proxy_get(f"{settings.orchestrator_service_url}/projects/{project_key}/versions")
+
+
+class GwCreateVersion(BaseModel):
+    name: str = ""
+    description: str = ""
+    copy_code: bool = True
+
+
+@app.post("/projects/{project_key}/versions")
+async def gw_create_version(project_key: str, req: GwCreateVersion) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/versions",
+        req.model_dump(), timeout=60.0,
+    )
+
+
+class GwVersionStatus(BaseModel):
+    status: str
+
+
+@app.post("/projects/{project_key}/versions/{version_id}/status")
+async def gw_version_status(project_key: str, version_id: str, req: GwVersionStatus) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/versions/{version_id}/status",
+        req.model_dump(),
+    )
+
+
+@app.get("/projects/{project_key}/chats")
+async def gw_list_chats(project_key: str, user_id: str = "po") -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/chats?user_id={user_id}"
+    )
+
+
+class GwCreateChat(BaseModel):
+    user_id: str = "po"
+    title: str = "Nuevo chat"
+    kind: str = "general"
+    version_id: str | None = None
+
+
+@app.post("/projects/{project_key}/chats")
+async def gw_create_chat(project_key: str, req: GwCreateChat) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/chats", req.model_dump(),
+    )
+
+
+@app.get("/projects/{project_key}/chats/{session_id}/messages")
+async def gw_chat_messages(project_key: str, session_id: str, limit: int = 100) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/chats/{session_id}/messages?limit={limit}"
+    )
+
+
+class GwFixBug(BaseModel):
+    bug_description: str
+    image_paths: list[str] = []
+    version_id: str | None = None
+    triggered_by: str = "po"
+
+
+@app.post("/projects/{project_key}/fix-bug")
+async def gw_fix_bug(project_key: str, req: GwFixBug) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/fix-bug",
+        req.model_dump(), timeout=300.0,
     )
 
 
