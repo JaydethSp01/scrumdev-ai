@@ -143,6 +143,7 @@ class RenderServiceRequest(BaseModel):
     runtime: str = "node"
     build_command: str | None = None
     start_command: str | None = None
+    env_vars: list[dict] | None = None
 
 
 @app.get("/render/status")
@@ -190,6 +191,7 @@ async def render_create(req: RenderServiceRequest) -> dict:
         runtime=req.runtime,
         build_command=req.build_command,
         start_command=req.start_command,
+        env_vars=req.env_vars,
     )
     if "error" in result:
         raise HTTPException(status_code=502, detail=result.get("error"))
