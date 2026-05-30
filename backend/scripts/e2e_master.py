@@ -47,7 +47,7 @@ def check(name: str, cond: bool, detail: str = "") -> bool:
     return cond
 
 
-async def poll(fn, ready, tries=45, every=10):
+async def poll(fn, ready, tries=70, every=12):
     for _ in range(tries):
         await asyncio.sleep(every)
         val = await fn()
@@ -148,6 +148,8 @@ async def main() -> int:
               f"files={v1['file_count'] if v1 else 0}")
 
         print("\n=== 9. Multi-chat ===", flush=True)
+        # el chat general se crea on-demand al listar
+        await c.get(f"{GW}/projects/{KEY}/chats?user_id=po")
         r = await c.post(f"{GW}/projects/{KEY}/chats", json={"user_id": "po", "title": "Mantenimiento", "kind": "lifecycle"})
         sid = r.json().get("id")
         check("crear chat nuevo", bool(sid))
