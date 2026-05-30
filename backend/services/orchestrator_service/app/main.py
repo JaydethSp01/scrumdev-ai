@@ -1402,6 +1402,12 @@ async def deploy_project(project_key: str, req: DeployRequest) -> dict:
             {"path": a.file_path, "content": a.content} for a in artifacts
         ]
 
+        # FASE E: validar y auto-arreglar ANTES del scaffold (0 errores deploy).
+        # Generico: detecta stack, arregla imports rotos/exports faltantes.
+        from services.orchestrator_service.app.deploy_validator import validate_and_fix
+        files, validation_report = validate_and_fix(files)
+        logger.info("deploy_validation", project=project_key, report=validation_report)
+
         # Anade scaffold (package.json, next.config, app/layout/page, vercel.json)
         # para que el deploy en Vercel funcione sin configuracion manual.
         from services.orchestrator_service.app.deploy_scaffold import build_scaffold
