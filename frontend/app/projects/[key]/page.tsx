@@ -47,6 +47,7 @@ import DeployPanel from "@/components/DeployPanel";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
 import SprintBoard from "@/components/SprintBoard";
 import PipelinePanel from "@/components/PipelinePanel";
+import VersionsPanel from "@/components/VersionsPanel";
 import PersonalizationPanel from "@/components/PersonalizationPanel";
 import BuildProgressToast, {
   fireBuildStarted,
@@ -59,6 +60,7 @@ type Tab =
   | "vision"
   | "personalization"
   | "backlog"
+  | "versions"
   | "sprints"
   | "code"
   | "deploy"
@@ -103,6 +105,13 @@ const TABS: TabDef[] = [
     label: "Backlog",
     icon: ListTodo,
     description: "Historias generadas por el crew de refinement.",
+  },
+  {
+    value: "versions",
+    label: "Versiones",
+    icon: GitBranch,
+    description:
+      "Ciclo de vida: cada versión agrupa sprints; una versión nueva parte del código de la anterior.",
   },
   {
     value: "sprints",
@@ -563,6 +572,7 @@ export default function ProjectDetailPage() {
             <BacklogBoard projectKey={project.key} user={user} />
           )}
           {tab === "pipeline" && <PipelinePanel projectKey={project.key} />}
+          {tab === "versions" && <VersionsPanel projectKey={project.key} />}
           {tab === "sprints" && <SprintBoard projectKey={project.key} />}
           {tab === "code" && <CodeBrowser projectKey={project.key} />}
           {tab === "deploy" && (

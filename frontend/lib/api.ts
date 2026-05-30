@@ -973,3 +973,101 @@ export async function apiDeleteAsset(
   );
   return jsonOrThrow(res);
 }
+
+// ===== Ciclo de vida: versiones, multi-chat, fix de bugs =====
+
+export type VersionInfo = {
+  id: string;
+  number: number;
+  name: string;
+  description: string;
+  status: string;
+  based_on_version_id: string | null;
+  sprint_count: number;
+  file_count: number;
+  created_at?: string | null;
+  released_at?: string | null;
+};
+
+export async function listVersions(
+  projectKey: string
+): Promise<{ versions: VersionInfo[]; total: number }> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/versions`
+  );
+  return jsonOrThrow(res);
+}
+
+export async function createVersion(
+  projectKey: string,
+  body: { name: string; description: string; copy_code?: boolean }
+): Promise<VersionInfo> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/versions`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+  );
+  return jsonOrThrow(res);
+}
+
+export async function setVersionStatus(
+  projectKey: string,
+  versionId: string,
+  status: string
+): Promise<{ ok: boolean; status: string }> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/versions/${encodeURIComponent(versionId)}/status`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }
+  );
+  return jsonOrThrow(res);
+}
+
+export type ChatSessionInfo = {
+  id: string;
+  title: string;
+  kind: string;
+  version_id: string | null;
+  created_at?: string | null;
+  last_message_at?: string | null;
+};
+
+export async function listChats(
+  projectKey: string,
+  userId = "po"
+): Promise<{ chats: ChatSessionInfo[] }> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/chats?user_id=${encodeURIComponent(userId)}`
+  );
+  return jsonOrThrow(res);
+}
+
+export async function createChat(
+  projectKey: string,
+  body: { user_id?: string; title: string; kind?: string; version_id?: string | null }
+): Promise<ChatSessionInfo> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/chats`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+  );
+  return jsonOrThrow(res);
+}
+
+export async function getChatMessages(
+  projectKey: string,
+  sessionId: string
+): Promise<{ messages: { role: string; content: string; image_urls?: string[] | null; action?: unknown; created_at?: string | null }[] }> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/chats/${encodeURIComponent(sessionId)}/messages`
+  );
+  return jsonOrThrow(res);
+}
+
+export async function fixBug(
+  projectKey: string,
+  body: { bug_description: string; image_paths?: string[]; version_id?: string | null }
+): Promise<{ fixed: boolean; summary?: string; files_changed?: string[]; message?: string }> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/fix-bug`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+  );
+  return jsonOrThrow(res);
+}
