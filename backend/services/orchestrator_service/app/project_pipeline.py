@@ -79,6 +79,24 @@ def is_human_gate(state: str) -> bool:
     return _PHASE_BY_STATE.get(state, {}).get("human_gate", False)
 
 
+# Accion automatica asociada a cada fase (lo que se dispara al ENTRAR a la fase).
+# Mapea state -> nombre de accion que el orchestrator ejecuta.
+PHASE_ACTION: dict[str, str] = {
+    "BACKLOG": "generate_backlog",          # PO Agent genera historias
+    "ARCHITECTURE_INCEPTION": "propose_architecture",  # Architect Agent
+    "READY_FOR_DEVELOPMENT": "plan_sprints",  # planificar sprints
+    "DEVELOPMENT": "generate_code",          # Developer Agent genera codigo del sprint
+    "CODE_REVIEW": "run_policy_check",        # policy + security
+    "QA": "run_qa",                          # QA Agent
+    "STAGING_DEPLOYMENT": "deploy_staging",   # Deploy Connector
+    "PRODUCTION_DEPLOYMENT": "deploy_production",  # Deploy Connector
+}
+
+
+def action_for(state: str) -> str | None:
+    return PHASE_ACTION.get(state)
+
+
 def build_pipeline_view(current_state: str) -> dict:
     """Devuelve las 14 fases con su status relativo al estado actual."""
     cur_idx = phase_index(current_state)

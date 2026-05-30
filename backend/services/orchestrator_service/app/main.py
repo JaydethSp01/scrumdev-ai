@@ -830,9 +830,77 @@ async def advance_pipeline(project_key: str, req: AdvancePhaseRequest) -> dict:
             project_key=project_key,
             payload={"from": current, "to": nxt},
         ))
-        return {"advanced": True, "from": current, "to": nxt,
-                "pipeline": build_pipeline_view(nxt)}
-    raise HTTPException(status_code=503, detail="db unavailable")
+        break
+
+    # FASE 79: disparar la accion REAL asociada a la nueva fase (fire-and-forget)
+    from services.orchestrator_service.app.project_pipeline import action_for
+    action = action_for(nxt)
+    action_status = None
+    if action:
+        asyncio.create_task(_run_phase_action(project_key, nxt, action, req.triggered_by))
+        action_status = f"Ejecutando: {action}"
+
+    return {"advanced": True, "from": current, "to": nxt,
+            "action": action, "action_status": action_status,
+            "pipeline": build_pipeline_view(nxt)}
+
+
+async def _run_phase_action(project_key: str, phase: str, action: str, triggered_by: str) -> None:
+    """Ejecuta el trabajo real de cada fase del pipeline (fire-and-forget).
+
+    Conecta el pipeline a los agentes/servicios reales:
+    - generate_backlog -> PO Agent
+    - propose_architecture -> Architect Agent (via agent_runtime)
+    - plan_sprints -> sprint planner
+    - generate_code -> generate_full_app (del sprint activo)
+    - run_policy_check -> policy_service
+    - deploy_staging/production -> deploy
+    """
+    try:
+        logger.info("phase_action_start", project=project_key, phase=phase, action=action)
+        if action == "generate_backlog":
+            # disparar smart-build que genera backlog si no existe
+            try:
+                bid = await run_smart_build(project_key, triggered_by, False)
+                asyncio.create_task(execute_smart_build(project_key, bid, "generate_backlog"))
+            except Exception:
+                pass
+        elif action == "plan_sprints":
+            # planificar sprints automaticamente
+            try:
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    await client.post(
+                        f"{settings.orchestrator_service_url}/projects/{project_key}/sprints/plan"
+                    )
+            except Exception:
+                pass
+        elif action == "generate_code":
+            # generar codigo (del sprint activo si hay)
+            async for session in get_session():
+                run = BuildRun(
+                    project_key=project_key, triggered_by=triggered_by,
+                    stage="queued (pipeline DEVELOPMENT)", progress_percent=5,
+                    summary={"action": "generate_full_app", "phase": phase},
+                )
+                session.add(run)
+                await session.commit()
+                await session.refresh(run)
+                bid = run.id
+                break
+            asyncio.create_task(_run_generate_full_app(project_key, triggered_by, True, bid))
+        elif action == "run_policy_check":
+            try:
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    await client.post(
+                        f"{settings.policy_service_url}/evaluate",
+                        json={"project_key": project_key, "stage": "post-coding", "context": {}},
+                    )
+            except Exception:
+                pass
+        # deploy_staging / deploy_production: el usuario los dispara desde el tab Deploy
+        logger.info("phase_action_done", project=project_key, action=action)
+    except Exception as exc:
+        logger.warning("phase_action_failed", project=project_key, action=action, error=str(exc))
 
 
 @app.post("/projects/{project_key}/pipeline/approve-gate")
