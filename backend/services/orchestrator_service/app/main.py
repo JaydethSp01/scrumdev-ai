@@ -123,6 +123,51 @@ class GenerateAppRequest(BaseModel):
     replace_existing: bool = True
 
 
+async def _load_version_files(project_key: str, version_id: str) -> list[dict]:
+    """Carga los CodeArtifact de una version como [{path, content}]."""
+    async for session in get_session():
+        rows = (await session.execute(
+            select(CodeArtifact).where(
+                CodeArtifact.project_key == project_key,
+                CodeArtifact.version_id == version_id,
+            )
+        )).scalars().all()
+        return [{"path": a.file_path, "content": a.content} for a in rows]
+    return []
+
+
+async def _merge_feature_files(project_key: str, version_id: str, feat_files: list[dict]) -> int:
+    """Merge ADITIVO: agrega archivos nuevos o actualiza los de enlace en la
+    version, sin tocar el resto del codigo base."""
+    if not feat_files:
+        return 0
+    async for session in get_session():
+        existing = (await session.execute(
+            select(CodeArtifact).where(
+                CodeArtifact.project_key == project_key,
+                CodeArtifact.version_id == version_id,
+            )
+        )).scalars().all()
+        by_path = {a.file_path: a for a in existing}
+        n = 0
+        for f in feat_files:
+            path = f.get("path")
+            if not path:
+                continue
+            content = f.get("content", "")
+            if path in by_path:
+                by_path[path].content = content
+            else:
+                session.add(CodeArtifact(
+                    project_key=project_key, version_id=version_id,
+                    story_id=None, file_path=path, language="text", content=content,
+                ))
+            n += 1
+        await session.commit()
+        return n
+    return 0
+
+
 async def _run_generate_full_app(
     project_key: str, triggered_by: str, replace_existing: bool, build_id: str
 ) -> None:
@@ -247,11 +292,60 @@ async def _run_generate_full_app(
             ]
             break
 
-        # CICLO DE VIDA: si la version activa es derivada (v2+) y trae features/
-        # bugs nuevos, aumentar la vision para que el generador los construya
-        # SOBRE el sistema base (no se queda solo con la vision original).
-        gen_vision = vision.vision
+        # CICLO DE VIDA: si la version activa es derivada (v2+) y YA tiene codigo
+        # (copy-forward de la anterior), usar GENERACION ADITIVA: no regenerar
+        # todo, sino agregar SOLO el modulo nuevo y enlazarlo. Conserva lo que ya
+        # funciona y construye la feature de verdad.
         version_feats = [b for b in backlog if b.get("origin") in ("feature_request", "bugfix")]
+        if active_version and active_version.number > 1 and version_feats:
+            existing = (await _load_version_files(project_key, active_version.id))
+            if existing:  # hay codigo base -> aditivo
+                feat = version_feats[0]
+                feat_title = feat.get("title") or active_version.name
+                feat_desc = (active_version.description or "") + "\n" + (feat.get("description") or "")
+                from services.orchestrator_service.app.deploy_split import detect_stack_from_files
+                try:
+                    fr = await post_json(
+                        f"{settings.agent_runtime_service_url}/app/generate-feature",
+                        {
+                            "project_key": project_key,
+                            "feature_title": feat_title,
+                            "feature_description": feat_desc,
+                            "existing_files": existing,
+                            "stack_id": detect_stack_from_files(existing),
+                        },
+                        timeout=600.0,
+                    )
+                    feat_files = fr.get("files", [])
+                    await _merge_feature_files(project_key, active_version.id, feat_files)
+                    # marcar la tarea de la feature como done
+                    async for s3 in get_session():
+                        for vf in version_feats:
+                            row = (await s3.execute(
+                                select(BacklogItem).where(
+                                    BacklogItem.project_key == project_key,
+                                    BacklogItem.story_key == vf["story_key"],
+                                )
+                            )).scalar_one_or_none()
+                            if row:
+                                row.status = "done"
+                        run = await s3.get(BuildRun, build_id)
+                        if run:
+                            run.stage = "completed"; run.progress_percent = 100
+                            run.summary = {"mode": "additive", "feature": feat_title,
+                                           "files_added_or_changed": len(feat_files),
+                                           "phase_label": "Módulo agregado",
+                                           "phase_detail": fr.get("summary", "")[:200]}
+                            run.completed_at = datetime.now(timezone.utc)
+                        await s3.commit()
+                        break
+                    logger.info("additive_feature_done", project=project_key,
+                                feature=feat_title, files=len(feat_files))
+                    return
+                except Exception as exc:
+                    logger.warning("additive_generation_failed_fallback_holistic", error=str(exc))
+
+        gen_vision = vision.vision
         if active_version and active_version.number > 1 and (version_feats or active_version.description):
             extra = active_version.description or ""
             feats_txt = "\n".join(

@@ -114,6 +114,27 @@ class AssistantRequest(BaseModel):
     versions: list[dict] = []
 
 
+class GenerateFeatureRequest(BaseModel):
+    project_key: str
+    feature_title: str
+    feature_description: str
+    existing_files: list[dict] = []
+    stack_id: str = "nextjs-fastapi-postgres"
+
+
+@app.post("/app/generate-feature")
+async def generate_feature_endpoint(req: GenerateFeatureRequest) -> dict:
+    from services.agent_runtime_service.app.runtime.feature_generator import generate_feature
+    try:
+        return await generate_feature(
+            req.project_key, req.feature_title, req.feature_description,
+            req.existing_files, req.stack_id,
+        )
+    except Exception as exc:
+        logger.exception("generate_feature_failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 class FixBugRequest(BaseModel):
     project_key: str
     files: list[dict] = []
