@@ -145,6 +145,22 @@ def test_backend_build_gate_catches_errors():
     assert bad["ok"] is False
 
 
+def test_dedup_parallel_routes():
+    """Next.js falla si 2 pages resuelven a la misma URL. El validador descarta
+    la duplicada (route group) y mantiene la canónica."""
+    from services.orchestrator_service.app.deploy_validator import _dedup_parallel_routes
+    files = [
+        {"path": "app/customers/page.tsx", "content": "x"},
+        {"path": "app/(dashboard)/customers/page.tsx", "content": "y"},
+        {"path": "app/login/page.tsx", "content": "z"},
+    ]
+    out = _dedup_parallel_routes(files, [])
+    paths = [f["path"] for f in out]
+    assert "app/customers/page.tsx" in paths
+    assert "app/(dashboard)/customers/page.tsx" not in paths
+    assert "app/login/page.tsx" in paths
+
+
 def test_deploy_validator_detects_stack():
     from services.orchestrator_service.app.deploy_validator import detect_stack
     assert detect_stack([{"path": "app/page.tsx", "content": ""}]) == "nextjs"

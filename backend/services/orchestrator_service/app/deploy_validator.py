@@ -196,6 +196,64 @@ def _ensure_css_imports(files: list[dict], report: list[str]) -> list[dict]:
     return files
 
 
+_ROUTE_GROUP_RE = re.compile(r"/\([^)]+\)")
+
+
+def _route_url(path: str) -> str | None:
+    """URL efectiva de una page de Next App Router. Los route groups `(x)` NO
+    cuentan en la URL, asi que app/(a)/p/page y app/p/page colisionan."""
+    p = (path or "").lstrip("/")
+    if not p.startswith("app/") and "/app/" not in p:
+        return None
+    if not (p.endswith("/page.tsx") or p.endswith("/page.jsx")):
+        return None
+    # recortar al subarbol app/
+    p = p[p.index("app/"):]
+    url = p[len("app/"):].rsplit("/", 1)[0]  # quitar 'app/' y '/page.tsx'
+    url = _ROUTE_GROUP_RE.sub("", "/" + url)  # quitar (grupos)
+    return url or "/"
+
+
+def _dedup_parallel_routes(files: list[dict], report: list[str]) -> list[dict]:
+    """Next.js falla si dos pages resuelven a la misma URL (rutas paralelas).
+    Mantiene UNA por URL (prefiere la que NO esta en route group / mas corta) y
+    descarta las demas + sus tests hermanos."""
+    by_url: dict[str, list[dict]] = {}
+    for f in files:
+        url = _route_url(f.get("path") or "")
+        if url is not None:
+            by_url.setdefault(url, []).append(f)
+
+    drop_dirs: list[str] = []
+    keep_paths: set[str] = set()
+    for url, group in by_url.items():
+        if len(group) <= 1:
+            keep_paths.add(group[0]["path"])
+            continue
+        # preferir la ruta sin route group y mas corta
+        group.sort(key=lambda f: ("(" in f["path"], len(f["path"])))
+        winner = group[0]
+        keep_paths.add(winner["path"])
+        for loser in group[1:]:
+            loser_dir = loser["path"].rsplit("/", 1)[0]
+            drop_dirs.append(loser_dir)
+            report.append(f"ruta paralela duplicada -> descartada {loser['path']} (colisiona con {winner['path']} en URL {url})")
+
+    if not drop_dirs:
+        return files
+    # descartar las pages perdedoras y cualquier archivo bajo su carpeta (tests, etc.)
+    kept: list[dict] = []
+    for f in files:
+        path = f.get("path") or ""
+        if path in keep_paths:
+            kept.append(f)
+            continue
+        if any(path.startswith(d + "/") or path == d for d in drop_dirs):
+            continue
+        kept.append(f)
+    return kept
+
+
 # --- Validacion principal ---
 
 def validate_and_fix(files: list[dict]) -> tuple[list[dict], dict]:

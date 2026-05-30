@@ -75,11 +75,12 @@ async def _run(cmd: list[str], cwd: str, env: dict, timeout: int) -> tuple[int, 
 
 
 def _apply_frontend_autofix(files_rel: list[dict]) -> tuple[list[dict], list[str]]:
-    """Reusa los fixes genericos del validador (CSS + exports faltantes)."""
+    """Reusa los fixes genericos del validador (CSS + exports + rutas paralelas)."""
     from services.orchestrator_service.app.deploy_validator import (
-        _ensure_css_imports, _autofix_missing_exports,
+        _ensure_css_imports, _autofix_missing_exports, _dedup_parallel_routes,
     )
     report: list[str] = []
+    files_rel = _dedup_parallel_routes(files_rel, report)
     files_rel = _autofix_missing_exports(files_rel, report)
     files_rel = _ensure_css_imports(files_rel, report)
     return files_rel, report
@@ -93,8 +94,14 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 2) -> d
         return {"ok": True, "skipped": True, "reason": "npm no disponible en el host",
                 "files": files_rel, "fixes": []}
 
+    # PROACTIVO: deduplicar rutas paralelas ANTES del primer build (Next falla
+    # el build entero si dos pages resuelven a la misma URL).
+    from services.orchestrator_service.app.deploy_validator import _dedup_parallel_routes
+    _pre: list[str] = []
+    files_rel = _dedup_parallel_routes(files_rel, _pre)
+
     env = _node_env()
-    all_fixes: list[str] = []
+    all_fixes: list[str] = list(_pre)
     log_tail = ""
     for attempt in range(1, max_attempts + 1):
         tmp = tempfile.mkdtemp(prefix="scrumdev_fe_")
