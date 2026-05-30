@@ -495,6 +495,38 @@ async def integrations_status() -> dict:
     return out
 
 
+# ===== FASE C: Pipeline 14 fases proxies =====
+
+
+@app.get("/projects/{project_key}/pipeline")
+async def gw_get_pipeline(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/pipeline"
+    )
+
+
+class AdvancePayload(BaseModel):
+    triggered_by: str = "po"
+    decided_by: str | None = None
+    reason: str | None = None
+
+
+@app.post("/projects/{project_key}/pipeline/advance")
+async def gw_advance_pipeline(project_key: str, req: AdvancePayload) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/pipeline/advance",
+        req.model_dump(), timeout=60.0,
+    )
+
+
+@app.post("/projects/{project_key}/pipeline/approve-gate")
+async def gw_approve_gate(project_key: str, req: AdvancePayload) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/pipeline/approve-gate",
+        req.model_dump(), timeout=60.0,
+    )
+
+
 # ===== FASE B: Sprint planning proxies =====
 
 

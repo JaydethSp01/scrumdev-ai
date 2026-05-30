@@ -680,6 +680,186 @@ async def list_backlog(project_key: str) -> dict:
     return {"items": []}
 
 
+# ===== FASE C: Pipeline de 14 fases + 4 aprobaciones humanas (guia §7) =====
+
+from shared.db.models import Project as _Project  # noqa: E402
+
+
+@app.get("/projects/{project_key}/pipeline")
+async def get_pipeline(project_key: str) -> dict:
+    """Devuelve las 14 fases con el estado actual del proyecto."""
+    from services.orchestrator_service.app.project_pipeline import build_pipeline_view
+
+    async for session in get_session():
+        proj = (await session.execute(
+            select(_Project).where(_Project.key == project_key)
+        )).scalar_one_or_none()
+        state = proj.workflow_state if proj else "BACKLOG"
+        # decisiones pendientes para mostrar en el gate
+        pending = (await session.execute(
+            select(HumanDecision).where(
+                HumanDecision.project_key == project_key,
+                HumanDecision.status == "pending",
+            )
+        )).scalars().all()
+        view = build_pipeline_view(state)
+        view["pending_decisions"] = [
+            {"id": d.id, "decision_type": d.decision_type, "title": d.title}
+            for d in pending
+        ]
+        return view
+    from services.orchestrator_service.app.project_pipeline import build_pipeline_view as _bpv
+    return _bpv("BACKLOG")
+
+
+class AdvancePhaseRequest(BaseModel):
+    triggered_by: str = "po"
+    decided_by: str | None = None
+    reason: str | None = None
+
+
+@app.post("/projects/{project_key}/pipeline/advance")
+async def advance_pipeline(project_key: str, req: AdvancePhaseRequest) -> dict:
+    """Avanza el proyecto a la siguiente fase. Si la fase ACTUAL es un gate
+    de aprobacion humana, crea la decision pendiente y NO avanza hasta aprobar.
+    Si ya hay aprobacion (o no es gate), avanza."""
+    from services.orchestrator_service.app.project_pipeline import (
+        build_pipeline_view, is_human_gate, next_phase, _PHASE_BY_STATE,
+    )
+
+    async for session in get_session():
+        proj = (await session.execute(
+            select(_Project).where(_Project.key == project_key)
+        )).scalar_one_or_none()
+        if not proj:
+            raise HTTPException(status_code=404, detail="project not found")
+
+        current = proj.workflow_state
+        meta = _PHASE_BY_STATE.get(current, {})
+
+        # Si la fase actual es un gate humano, requiere aprobacion previa
+        if is_human_gate(current):
+            # buscar decision aprobada para este gate
+            decision_type = f"gate_{meta.get('gate_n','x')}_{current}"
+            approved = (await session.execute(
+                select(HumanDecision).where(
+                    HumanDecision.project_key == project_key,
+                    HumanDecision.decision_type == decision_type,
+                    HumanDecision.status == "approved",
+                )
+            )).scalar_one_or_none()
+            if not approved:
+                # crear decision pendiente si no existe
+                existing = (await session.execute(
+                    select(HumanDecision).where(
+                        HumanDecision.project_key == project_key,
+                        HumanDecision.decision_type == decision_type,
+                        HumanDecision.status == "pending",
+                    )
+                )).scalar_one_or_none()
+                if not existing:
+                    from uuid import uuid4 as _uuid
+                    d = HumanDecision(
+                        correlation_id=str(_uuid()),
+                        project_key=project_key,
+                        decision_type=decision_type,
+                        title=f"{meta.get('label','Aprobacion')} (Gate #{meta.get('gate_n')})",
+                        description=meta.get("desc", ""),
+                        context={"phase": current},
+                        status="pending",
+                    )
+                    session.add(d)
+                    await session.commit()
+                    await event_bus.publish(DomainEvent(
+                        event_type=HUMAN_APPROVAL_REQUIRED,
+                        source_service="orchestrator-service",
+                        correlation_id=d.correlation_id,
+                        project_key=project_key,
+                        payload={"decision_id": d.id, "gate": meta.get("gate_n"), "phase": current},
+                    ))
+                return {
+                    "advanced": False,
+                    "blocked_by_gate": True,
+                    "gate_n": meta.get("gate_n"),
+                    "message": f"Esta fase requiere tu aprobacion (Gate #{meta.get('gate_n')}). Aprueba para continuar.",
+                    "pipeline": build_pipeline_view(current),
+                }
+
+        # Avanzar
+        nxt = next_phase(current)
+        if not nxt:
+            return {"advanced": False, "message": "Ya esta en RELEASED",
+                    "pipeline": build_pipeline_view(current)}
+        proj.workflow_state = nxt
+        await session.commit()
+        await event_bus.publish(DomainEvent(
+            event_type="WORKFLOW_PHASE_ADVANCED",
+            source_service="orchestrator-service",
+            correlation_id=str(uuid4()),
+            project_key=project_key,
+            payload={"from": current, "to": nxt},
+        ))
+        return {"advanced": True, "from": current, "to": nxt,
+                "pipeline": build_pipeline_view(nxt)}
+    raise HTTPException(status_code=503, detail="db unavailable")
+
+
+@app.post("/projects/{project_key}/pipeline/approve-gate")
+async def approve_current_gate(project_key: str, req: AdvancePhaseRequest) -> dict:
+    """Aprueba el gate de la fase actual y avanza automaticamente."""
+    from services.orchestrator_service.app.project_pipeline import (
+        is_human_gate, _PHASE_BY_STATE,
+    )
+
+    async for session in get_session():
+        proj = (await session.execute(
+            select(_Project).where(_Project.key == project_key)
+        )).scalar_one_or_none()
+        if not proj:
+            raise HTTPException(status_code=404, detail="project not found")
+        current = proj.workflow_state
+        if not is_human_gate(current):
+            raise HTTPException(status_code=400, detail="la fase actual no es un gate")
+        meta = _PHASE_BY_STATE.get(current, {})
+        decision_type = f"gate_{meta.get('gate_n','x')}_{current}"
+        # marcar pending como approved (o crear approved)
+        pend = (await session.execute(
+            select(HumanDecision).where(
+                HumanDecision.project_key == project_key,
+                HumanDecision.decision_type == decision_type,
+                HumanDecision.status == "pending",
+            )
+        )).scalar_one_or_none()
+        if pend:
+            pend.status = "approved"
+            pend.decided_by = req.decided_by or "po"
+            pend.decision_reason = req.reason
+            pend.decided_at = datetime.now(timezone.utc)
+        else:
+            from uuid import uuid4 as _uuid
+            d = HumanDecision(
+                correlation_id=str(_uuid()), project_key=project_key,
+                decision_type=decision_type,
+                title=f"{meta.get('label')} (Gate #{meta.get('gate_n')})",
+                description=meta.get("desc", ""), context={"phase": current},
+                status="approved", decided_by=req.decided_by or "po",
+                decided_at=datetime.now(timezone.utc),
+            )
+            session.add(d)
+        await session.commit()
+        await event_bus.publish(DomainEvent(
+            event_type=HUMAN_APPROVAL_GRANTED,
+            source_service="orchestrator-service",
+            correlation_id=str(uuid4()),
+            project_key=project_key,
+            payload={"gate": meta.get("gate_n"), "phase": current},
+        ))
+        break
+
+    # ahora avanzar
+    return await advance_pipeline(project_key, req)
+
+
 # ===== FASE B: Sprint planning (el PO decide) =====
 
 

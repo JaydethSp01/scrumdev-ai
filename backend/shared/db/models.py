@@ -79,6 +79,8 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(128))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     owner_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # FASE C: estado actual en la maquina de 14 fases (guia §7)
+    workflow_state: Mapped[str] = mapped_column(String(48), default="BACKLOG", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
