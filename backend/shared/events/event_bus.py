@@ -47,7 +47,14 @@ class HybridEventBus:
 
         tasks = [self._safe_invoke(h, event) for h in self._handlers.get(event.event_type, [])]
 
-        if settings.rabbitmq_enabled:
+        # FASE D: Kafka tiene prioridad como bus de produccion (guia §4.2).
+        # Fallback a RabbitMQ si Kafka no esta habilitado.
+        if settings.kafka_enabled:
+            from shared.events.kafka_bus import get_kafka_bus
+            kbus = get_kafka_bus()
+            if kbus is not None:
+                tasks.append(self._publish_kafka(kbus, event))
+        elif settings.rabbitmq_enabled:
             rmq = get_rabbitmq_bus()
             if rmq is not None:
                 tasks.append(self._publish_rabbitmq(rmq, event))
@@ -93,6 +100,13 @@ class HybridEventBus:
             await rmq.publish(event)
         except Exception as exc:
             logger.warning("rabbitmq_publish_warn", error=str(exc))
+
+    @staticmethod
+    async def _publish_kafka(kbus, event: DomainEvent) -> None:
+        try:
+            await kbus.publish(event)
+        except Exception as exc:
+            logger.warning("kafka_publish_warn", error=str(exc))
 
     @property
     def history(self) -> list[DomainEvent]:

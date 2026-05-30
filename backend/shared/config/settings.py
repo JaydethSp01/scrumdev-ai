@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     rabbitmq_enabled: bool = False
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
 
+    # FASE D: Kafka event bus para produccion (guia §4.2)
+    kafka_enabled: bool = False
+    kafka_bootstrap_servers: str = "localhost:9092"
+
     scrumdev_neon_api_key: str | None = None
     scrumdev_neon_org_id: str | None = None
 
