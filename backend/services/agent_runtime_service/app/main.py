@@ -111,6 +111,7 @@ class AssistantRequest(BaseModel):
     last_build: dict | None = None
     pending_decisions: list[dict] = []
     image_paths: list[str] = []
+    versions: list[dict] = []
 
 
 @app.post("/assistant/ask")
@@ -128,6 +129,7 @@ async def assistant_ask(req: AssistantRequest) -> dict:
             req.last_build,
             req.pending_decisions,
             req.image_paths,
+            req.versions,
         )
     except Exception as exc:
         logger.exception("assistant_failed")

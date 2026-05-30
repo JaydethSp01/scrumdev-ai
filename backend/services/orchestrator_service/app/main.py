@@ -1373,6 +1373,64 @@ class AssistantAskRequest(BaseModel):
     message: str
     image_paths: list[str] = []
     image_urls: list[str] = []
+    session_id: str | None = None
+
+
+async def _execute_lifecycle_action(project_key: str, action: dict, user_id: str) -> str | None:
+    """Ejecuta una accion del chat de ciclo de vida: crear tarea (feature/bug)
+    en la version activa, o crear una version nueva. El PO decide tarea vs version
+    via el campo scope. Devuelve un mensaje de estado."""
+    from services.orchestrator_service.app.versions import (
+        get_active_version, create_version,
+    )
+    a_type = action.get("type")
+    title = (action.get("title") or "").strip()
+    desc = (action.get("description") or "").strip()
+    priority = action.get("priority") or "medium"
+    scope = action.get("scope") or "task"
+
+    if a_type == "new_version" or (a_type == "add_feature" and scope == "version"):
+        async for session in get_session():
+            v = await create_version(
+                session, project_key,
+                name=title or "Nueva versión",
+                description=desc or title, copy_code_from_active=True,
+            )
+            # primera tarea de la version nueva
+            if title:
+                session.add(BacklogItem(
+                    project_key=project_key, version_id=v.id,
+                    story_key=f"V{v.number}-001", title=title,
+                    description=desc or title, priority=priority,
+                    status="backlog", origin="feature_request",
+                ))
+            await session.commit()
+            return f"Versión v{v.number} creada (parte del código de la anterior). Tarea inicial: {title or '—'}"
+    if a_type in ("add_feature", "report_bug"):
+        origin = "bugfix" if a_type == "report_bug" else "feature_request"
+        async for session in get_session():
+            version = await get_active_version(session, project_key)
+            # contar tareas para el story_key
+            n = len((await session.execute(
+                select(BacklogItem).where(BacklogItem.project_key == project_key)
+            )).scalars().all()) + 1
+            prefix = "BUG" if origin == "bugfix" else "FEAT"
+            session.add(BacklogItem(
+                project_key=project_key,
+                version_id=version.id if version else None,
+                story_key=f"{prefix}-{n:03d}", title=title or req_fallback(a_type),
+                description=desc or title, priority=("high" if origin == "bugfix" else priority),
+                status="backlog", origin=origin,
+            ))
+            await session.commit()
+            kind = "Bug registrado" if origin == "bugfix" else "Feature agregada"
+            ver_txt = f" en v{version.number}" if version else ""
+            return f"{kind}{ver_txt}: {title}. El PO puede planificarla en un sprint o pedir que la genere."
+    return None
+
+
+def req_fallback(a_type: str) -> str:
+    return "Arreglo reportado" if a_type == "report_bug" else "Nueva funcionalidad"
 
 
 async def _generate_code_for_story_async(project_key: str, story: dict) -> None:
@@ -1476,6 +1534,15 @@ async def project_assistant(project_key: str, req: AssistantAskRequest) -> dict:
             {"id": d.id, "decision_type": d.decision_type, "title": d.title}
             for d in d_res.scalars().all()
         ]
+        # versiones del proyecto (contexto de ciclo de vida)
+        vers = (await session.execute(
+            select(ProjectVersion).where(ProjectVersion.project_key == project_key)
+            .order_by(ProjectVersion.number.asc())
+        )).scalars().all()
+        versions_list = [
+            {"number": v.number, "name": v.name, "status": v.status}
+            for v in vers
+        ]
         break
 
     try:
@@ -1489,6 +1556,7 @@ async def project_assistant(project_key: str, req: AssistantAskRequest) -> dict:
                 "last_build": last_build,
                 "pending_decisions": pending,
                 "image_paths": req.image_paths,
+                "versions": versions_list,
             },
             timeout=180.0,
         )
@@ -1496,40 +1564,117 @@ async def project_assistant(project_key: str, req: AssistantAskRequest) -> dict:
         raise HTTPException(status_code=502, detail=str(exc))
 
     action = result.get("action") or {}
-    if action.get("type") == "generate_code" and action.get("story_key"):
+    a_type = action.get("type")
+    if a_type == "generate_code" and action.get("story_key"):
         story_key = action["story_key"]
         story = next((s for s in backlog_list if s["story_key"] == story_key), None)
         if story:
             asyncio.create_task(_generate_code_for_story_async(project_key, story))
             result["action_status"] = f"Generacion iniciada para {story_key}"
+    elif a_type in ("add_feature", "report_bug", "new_version"):
+        # CICLO DE VIDA: crear tarea (feature/bug) o version nueva. El PO decide.
+        try:
+            status_msg = await _execute_lifecycle_action(project_key, action, req.user_id)
+            if status_msg:
+                result["action_status"] = status_msg
+        except Exception as exc:
+            logger.warning("lifecycle_action_failed", error=str(exc))
 
-    # Persistir mensajes del chat (user + assistant) en DB, atados a project+user
+    # Persistir mensajes del chat (user + assistant), atados a project+chat session
     try:
         async for session in get_session():
-            session.add(
-                ChatMessage(
-                    project_key=project_key,
-                    user_id=req.user_id,
-                    role="user",
-                    content=req.message,
-                    image_urls=req.image_urls or None,
-                )
-            )
-            session.add(
-                ChatMessage(
-                    project_key=project_key,
-                    user_id=req.user_id,
-                    role="assistant",
-                    content=result.get("reply") or "",
-                    action=action if action.get("type") != "none" else None,
-                )
-            )
+            sid = req.session_id
+            if sid:
+                # actualizar last_message_at del chat
+                cs = (await session.execute(
+                    select(ChatSession).where(ChatSession.id == sid)
+                )).scalar_one_or_none()
+                if cs:
+                    cs.last_message_at = datetime.now(timezone.utc)
+            session.add(ChatMessage(
+                project_key=project_key, session_id=sid, user_id=req.user_id,
+                role="user", content=req.message, image_urls=req.image_urls or None,
+            ))
+            session.add(ChatMessage(
+                project_key=project_key, session_id=sid, user_id=req.user_id,
+                role="assistant", content=result.get("reply") or "",
+                action=action if a_type != "none" else None,
+            ))
             await session.commit()
             break
     except Exception as exc:
         logger.warning("chat_persist_failed", error=str(exc))
 
     return result
+
+
+# ===== Multi-chat: un proyecto tiene varios chats con su historial =====
+
+
+class CreateChatRequest(BaseModel):
+    user_id: str = "po"
+    title: str = "Nuevo chat"
+    kind: str = "general"  # general | lifecycle | bugfix | feature
+    version_id: str | None = None
+
+
+@app.get("/projects/{project_key}/chats")
+async def list_chats(project_key: str, user_id: str = "po") -> dict:
+    async for session in get_session():
+        rows = (await session.execute(
+            select(ChatSession).where(
+                ChatSession.project_key == project_key,
+                ChatSession.archived == False,  # noqa: E712
+            ).order_by(ChatSession.last_message_at.desc())
+        )).scalars().all()
+        # si no hay ninguno, crear el general por defecto
+        if not rows:
+            from services.orchestrator_service.app.versions import get_active_version
+            v = await get_active_version(session, project_key)
+            cs = ChatSession(project_key=project_key, user_id=user_id,
+                             title="Chat general", kind="general",
+                             version_id=v.id if v else None)
+            session.add(cs)
+            await session.commit()
+            rows = [cs]
+        return {"chats": [
+            {"id": c.id, "title": c.title, "kind": c.kind, "version_id": c.version_id,
+             "created_at": c.created_at.isoformat() if c.created_at else None,
+             "last_message_at": c.last_message_at.isoformat() if c.last_message_at else None}
+            for c in rows
+        ]}
+    raise HTTPException(status_code=503, detail="db unavailable")
+
+
+@app.post("/projects/{project_key}/chats")
+async def create_chat(project_key: str, req: CreateChatRequest) -> dict:
+    async for session in get_session():
+        cs = ChatSession(
+            project_key=project_key, user_id=req.user_id, title=req.title,
+            kind=req.kind, version_id=req.version_id,
+        )
+        session.add(cs)
+        await session.commit()
+        return {"id": cs.id, "title": cs.title, "kind": cs.kind, "version_id": cs.version_id}
+    raise HTTPException(status_code=503, detail="db unavailable")
+
+
+@app.get("/projects/{project_key}/chats/{session_id}/messages")
+async def chat_session_messages(project_key: str, session_id: str, limit: int = 100) -> dict:
+    async for session in get_session():
+        rows = (await session.execute(
+            select(ChatMessage).where(
+                ChatMessage.project_key == project_key,
+                ChatMessage.session_id == session_id,
+            ).order_by(ChatMessage.created_at.asc()).limit(limit)
+        )).scalars().all()
+        return {"messages": [
+            {"role": m.role, "content": m.content, "image_urls": m.image_urls,
+             "action": m.action,
+             "created_at": m.created_at.isoformat() if m.created_at else None}
+            for m in rows
+        ]}
+    raise HTTPException(status_code=503, detail="db unavailable")
 
 
 from fastapi import WebSocket, WebSocketDisconnect  # noqa: E402

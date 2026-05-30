@@ -16,16 +16,27 @@ from typing import Any
 from services.agent_runtime_service.app.runtime.claude_code_runtime import run_claude_code
 
 ASSISTANT_SYSTEM = (
-    "Eres un asistente Product Manager para una plataforma multiagente de "
-    "generacion de software. Conoces el contexto completo del proyecto del "
-    "usuario y le respondes preguntas operacionales en lenguaje natural, "
-    "claro, conciso y SIN markdown pesado (usa parrafos cortos y bullets "
-    "simples con '-'). NUNCA inventes datos: si no sabes algo, dilo. "
-    "Si el usuario pide una accion (generar codigo de una historia, refinar, "
-    "avanzar workflow), explica brevemente que harias y devuelve al FINAL "
-    "del mensaje una linea separada con formato:\n"
-    "ACTION: {\"type\":\"generate_code\"|\"refine\"|\"advance\"|\"none\",\"story_key\":\"S-XXX\"|null,\"target_state\":\"...\"|null}\n"
-    "Si no hay accion clara, ACTION: {\"type\":\"none\"}."
+    "Eres un asistente Product Manager para una plataforma multiagente que "
+    "acompana TODO el ciclo de vida del software del cliente (no solo crearlo, "
+    "tambien evolucionarlo y mantenerlo). Conoces el contexto del proyecto y "
+    "respondes en lenguaje natural, claro y conciso, SIN markdown pesado "
+    "(parrafos cortos, bullets con '-'). NUNCA inventes datos.\n\n"
+    "CICLO DE VIDA — el cliente ya puede tener su software entregado y querer:\n"
+    "- AGREGAR una funcionalidad nueva pequena/mediana -> es una TAREA en la "
+    "version activa (scope=task).\n"
+    "- Un CAMBIO GRANDE (rediseno, modulo nuevo grande, cambio de alcance) -> "
+    "conviene una VERSION nueva (scope=version). Tu RECOMIENDAS, el PO decide.\n"
+    "- Reportar un BUG / arreglo (ej. 'se ve mal en el telefono', adjunta "
+    "captura) -> es un FIX sobre la version afectada (type=report_bug).\n\n"
+    "Cuando el usuario pida algo accionable, explica breve que haras y devuelve "
+    "al FINAL una linea separada EXACTA:\n"
+    "ACTION: {\"type\":\"add_feature\"|\"report_bug\"|\"new_version\"|\"generate_code\"|\"refine\"|\"advance\"|\"none\","
+    "\"title\":\"...\"|null,\"description\":\"...\"|null,\"scope\":\"task\"|\"version\"|null,"
+    "\"priority\":\"high\"|\"medium\"|\"low\"|null,\"story_key\":\"S-XXX\"|null,\"target_state\":\"...\"|null}\n"
+    "Reglas: feature chica -> type=add_feature, scope=task. Cambio grande -> "
+    "type=add_feature, scope=version (o type=new_version). Bug/arreglo visual o "
+    "funcional -> type=report_bug (title+description claros del problema). "
+    "Si solo es una pregunta, ACTION: {\"type\":\"none\"}."
 )
 
 
@@ -35,8 +46,20 @@ def _build_context(
     backlog: list[dict],
     last_build: dict | None,
     pending_decisions: list[dict],
+    versions: list[dict] | None = None,
 ) -> str:
     lines: list[str] = [f"### Proyecto: {project_key}"]
+    if versions:
+        active = next((v for v in versions if v.get("status") == "active"), None)
+        lines.append(f"### Versiones ({len(versions)}):")
+        for v in versions:
+            mark = " (ACTIVA)" if v.get("status") == "active" else ""
+            lines.append(f"- v{v.get('number')} [{v.get('status')}]{mark}: {v.get('name')}")
+        if active:
+            lines.append(
+                f"Trabajas sobre la version ACTIVA v{active.get('number')}. "
+                "Features/bugs nuevos se aplican aqui salvo que recomiendes una version nueva."
+            )
     if vision:
         lines.append(f"### Vision\n{vision.get('vision','(sin vision)')}")
         if vision.get("target_users"):
@@ -85,8 +108,9 @@ async def ask_assistant(
     last_build: dict | None,
     pending_decisions: list[dict],
     image_paths: list[str] | None = None,
+    versions: list[dict] | None = None,
 ) -> dict[str, Any]:
-    context = _build_context(project_key, vision, backlog, last_build, pending_decisions)
+    context = _build_context(project_key, vision, backlog, last_build, pending_decisions, versions)
     image_block = ""
     if image_paths:
         lines = [
