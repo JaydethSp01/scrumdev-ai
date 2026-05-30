@@ -124,8 +124,13 @@ class GenerateAppRequest(BaseModel):
 async def _run_generate_full_app(
     project_key: str, triggered_by: str, replace_existing: bool, build_id: str
 ) -> None:
-    """Pipeline holistico: vision + backlog -> proyecto Next.js+FastAPI completo."""
+    """Pipeline holistico: vision + backlog -> proyecto Next.js+FastAPI completo.
+
+    FASE B: si hay un sprint ACTIVO, genera solo las historias de ese sprint
+    (entrega incremental). Si no hay sprint activo, genera todo el backlog.
+    """
     try:
+        active_sprint_name = None
         async for session in get_session():
             v_res = await session.execute(
                 select(ProjectVision).where(ProjectVision.project_key == project_key)
@@ -133,11 +138,23 @@ async def _run_generate_full_app(
             vision = v_res.scalar_one_or_none()
             if not vision:
                 raise ValueError("project_vision_missing")
-            b_res = await session.execute(
+
+            # buscar sprint activo
+            active = (await session.execute(
+                select(Sprint).where(
+                    Sprint.project_key == project_key, Sprint.status == "active"
+                )
+            )).scalar_one_or_none()
+
+            b_stmt = (
                 select(BacklogItem)
                 .where(BacklogItem.project_key == project_key)
                 .order_by(BacklogItem.order_index)
             )
+            if active:
+                b_stmt = b_stmt.where(BacklogItem.sprint_id == active.id)
+                active_sprint_name = f"Sprint {active.number}: {active.name}"
+
             backlog = [
                 {
                     "story_key": i.story_key,
@@ -146,9 +163,23 @@ async def _run_generate_full_app(
                     "priority": i.priority,
                     "story_points": i.story_points,
                 }
-                for i in b_res.scalars().all()
+                for i in (await session.execute(b_stmt)).scalars().all()
             ]
+            # si el sprint activo no tiene historias, caer a todo el backlog
+            if active and not backlog:
+                backlog = [
+                    {"story_key": i.story_key, "title": i.title, "description": i.description,
+                     "priority": i.priority, "story_points": i.story_points}
+                    for i in (await session.execute(
+                        select(BacklogItem).where(BacklogItem.project_key == project_key)
+                        .order_by(BacklogItem.order_index)
+                    )).scalars().all()
+                ]
+                active_sprint_name = None
             break
+
+        if active_sprint_name:
+            logger.info("generating_for_active_sprint", project=project_key, sprint=active_sprint_name, stories=len(backlog))
 
         async for session in get_session():
             run = await session.get(BuildRun, build_id)
