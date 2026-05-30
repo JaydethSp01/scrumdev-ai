@@ -1376,7 +1376,19 @@ class AssistantAskRequest(BaseModel):
     session_id: str | None = None
 
 
-async def _execute_lifecycle_action(project_key: str, action: dict, user_id: str) -> str | None:
+async def _run_bugfix_async(project_key: str, bug_description: str, image_paths: list[str]) -> None:
+    """Dispara el fix de bug en background (vision + patch + merge)."""
+    try:
+        await fix_bug_endpoint(project_key, FixBugRequest(
+            bug_description=bug_description, image_paths=image_paths or [],
+        ))
+    except Exception as exc:
+        logger.warning("bugfix_async_failed", project=project_key, error=str(exc))
+
+
+async def _execute_lifecycle_action(
+    project_key: str, action: dict, user_id: str, image_paths: list[str] | None = None,
+) -> str | None:
     """Ejecuta una accion del chat de ciclo de vida: crear tarea (feature/bug)
     en la version activa, o crear una version nueva. El PO decide tarea vs version
     via el campo scope. Devuelve un mensaje de estado."""
@@ -1425,7 +1437,14 @@ async def _execute_lifecycle_action(project_key: str, action: dict, user_id: str
             await session.commit()
             kind = "Bug registrado" if origin == "bugfix" else "Feature agregada"
             ver_txt = f" en v{version.number}" if version else ""
-            return f"{kind}{ver_txt}: {title}. El PO puede planificarla en un sprint o pedir que la genere."
+            base_msg = f"{kind}{ver_txt}: {title}."
+            # Bug CON capturas -> disparar fix automatico (vision + patch)
+            if origin == "bugfix" and image_paths:
+                asyncio.create_task(_run_bugfix_async(
+                    project_key, f"{title}. {desc}", image_paths,
+                ))
+                return base_msg + " Analizando las capturas y aplicando el fix… re-despliega cuando termine."
+            return base_msg + " El PO puede planificarla en un sprint o pedir que la genere."
     return None
 
 
@@ -1574,7 +1593,9 @@ async def project_assistant(project_key: str, req: AssistantAskRequest) -> dict:
     elif a_type in ("add_feature", "report_bug", "new_version"):
         # CICLO DE VIDA: crear tarea (feature/bug) o version nueva. El PO decide.
         try:
-            status_msg = await _execute_lifecycle_action(project_key, action, req.user_id)
+            status_msg = await _execute_lifecycle_action(
+                project_key, action, req.user_id, req.image_paths,
+            )
             if status_msg:
                 result["action_status"] = status_msg
         except Exception as exc:
@@ -1606,6 +1627,104 @@ async def project_assistant(project_key: str, req: AssistantAskRequest) -> dict:
         logger.warning("chat_persist_failed", error=str(exc))
 
     return result
+
+
+# ===== Ciclo de vida: fix de bugs con capturas (vision) =====
+
+
+class FixBugRequest(BaseModel):
+    bug_description: str
+    image_paths: list[str] = []
+    version_id: str | None = None
+    triggered_by: str = "po"
+
+
+@app.post("/projects/{project_key}/fix-bug")
+async def fix_bug_endpoint(project_key: str, req: FixBugRequest) -> dict:
+    """Arregla un bug sobre el codigo de una version: vision analiza la captura,
+    el agente parchea los archivos afectados y se mergean (PATCH quirurgico)."""
+    from services.orchestrator_service.app.versions import get_active_version
+    async for session in get_session():
+        version = None
+        if req.version_id:
+            version = (await session.execute(
+                select(ProjectVersion).where(ProjectVersion.id == req.version_id)
+            )).scalar_one_or_none()
+        if not version:
+            version = await get_active_version(session, project_key)
+        if not version:
+            raise HTTPException(status_code=400, detail="proyecto sin version/codigo")
+        artifacts = (await session.execute(
+            select(CodeArtifact).where(
+                CodeArtifact.project_key == project_key,
+                CodeArtifact.version_id == version.id,
+            )
+        )).scalars().all()
+        files = [{"path": a.file_path, "content": a.content} for a in artifacts]
+        by_path = {a.file_path: a for a in artifacts}
+        version_id = version.id
+        version_num = version.number
+        break
+    else:
+        raise HTTPException(status_code=503, detail="db unavailable")
+
+    if not files:
+        raise HTTPException(status_code=400, detail="la version no tiene codigo")
+
+    # llamar al bug fixer (vision + patch)
+    try:
+        result = await post_json(
+            f"{settings.agent_runtime_service_url}/code/fix-bug",
+            {
+                "project_key": project_key,
+                "files": files,
+                "bug_description": req.bug_description,
+                "image_paths": req.image_paths,
+            },
+            timeout=300.0,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"fix_bug_failed: {exc}")
+
+    patched = result.get("files", [])
+    if not patched:
+        return {"fixed": False, "message": "El agente no propuso cambios.",
+                "summary": result.get("summary", "")}
+
+    # merge del patch (solo archivos modificados) en la version
+    async for session in get_session():
+        existing = (await session.execute(
+            select(CodeArtifact).where(
+                CodeArtifact.project_key == project_key,
+                CodeArtifact.version_id == version_id,
+            )
+        )).scalars().all()
+        bp = {a.file_path: a for a in existing}
+        changed = []
+        for f in patched:
+            path = f.get("path")
+            content = f.get("content", "")
+            if not path:
+                continue
+            if path in bp:
+                bp[path].content = content
+            else:
+                session.add(CodeArtifact(
+                    project_key=project_key, version_id=version_id,
+                    story_id=None, file_path=path, language="text", content=content,
+                ))
+            changed.append(path)
+        await session.commit()
+    await event_bus.publish(DomainEvent(
+        event_type="BUG_FIXED", source_service="orchestrator-service",
+        correlation_id=str(uuid4()), project_key=project_key,
+        payload={"version": version_num, "files_changed": changed},
+    ))
+    return {
+        "fixed": True, "version": version_num,
+        "files_changed": changed, "summary": result.get("summary", ""),
+        "message": f"Fix aplicado a v{version_num} ({len(changed)} archivo(s)). Re-despliega para publicarlo.",
+    }
 
 
 # ===== Multi-chat: un proyecto tiene varios chats con su historial =====

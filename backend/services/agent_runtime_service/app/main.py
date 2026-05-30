@@ -114,6 +114,23 @@ class AssistantRequest(BaseModel):
     versions: list[dict] = []
 
 
+class FixBugRequest(BaseModel):
+    project_key: str
+    files: list[dict] = []
+    bug_description: str
+    image_paths: list[str] = []
+
+
+@app.post("/code/fix-bug")
+async def code_fix_bug(req: FixBugRequest) -> dict:
+    from services.agent_runtime_service.app.runtime.bug_fixer import fix_bug
+    try:
+        return await fix_bug(req.project_key, req.files, req.bug_description, req.image_paths)
+    except Exception as exc:
+        logger.exception("fix_bug_failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.post("/assistant/ask")
 async def assistant_ask(req: AssistantRequest) -> dict:
     from services.agent_runtime_service.app.runtime.project_assistant import (
