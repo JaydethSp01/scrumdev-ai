@@ -183,6 +183,66 @@ async def create_pr(req: PullRequestCreate) -> dict:
         return response.json()
 
 
+class PRComment(BaseModel):
+    body: str
+
+
+@app.post("/pulls/{number}/comments")
+async def comment_pr(number: int, req: PRComment) -> dict:
+    """Comentario en un PR (contrato guia §10). GitHub: issues/{n}/comments."""
+    if not _configured():
+        return {"mock": True, "pr": number, "body": req.body}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            f"{_repo_url()}/issues/{number}/comments",
+            json={"body": req.body}, headers=_headers(),
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return r.json()
+
+
+class PRMerge(BaseModel):
+    commit_title: str | None = None
+    merge_method: str = "squash"  # merge | squash | rebase
+
+
+@app.post("/pulls/{number}/merge")
+async def merge_pr(number: int, req: PRMerge) -> dict:
+    """Mergea un PR (contrato guia §10)."""
+    if not _configured():
+        return {"mock": True, "pr": number, "merged": True}
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        body = {"merge_method": req.merge_method}
+        if req.commit_title:
+            body["commit_title"] = req.commit_title
+        r = await client.put(
+            f"{_repo_url()}/pulls/{number}/merge", json=body, headers=_headers()
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return r.json()
+
+
+@app.get("/pulls/{number}/checks")
+async def pr_checks(number: int) -> dict:
+    """Estado de los checks/CI de un PR (contrato guia §10)."""
+    if not _configured():
+        return {"mock": True, "pr": number, "checks": [], "all_passed": True}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        # obtener el head SHA del PR
+        pr = await client.get(f"{_repo_url()}/pulls/{number}", headers=_headers())
+        if pr.status_code >= 400:
+            raise HTTPException(status_code=pr.status_code, detail=pr.text)
+        sha = pr.json().get("head", {}).get("sha")
+        cr = await client.get(
+            f"{_repo_url()}/commits/{sha}/check-runs", headers=_headers()
+        )
+        runs = cr.json().get("check_runs", []) if cr.status_code == 200 else []
+        all_passed = all(r.get("conclusion") in ("success", "neutral", None) for r in runs)
+        return {"pr": number, "sha": sha, "checks": runs, "all_passed": all_passed}
+
+
 # --- Webhook GitHub (T1 §78 - eventos push/pr/release) ---
 import hashlib  # noqa: E402
 import hmac  # noqa: E402

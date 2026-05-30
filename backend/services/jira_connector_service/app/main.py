@@ -158,6 +158,60 @@ async def add_comment(issue_key: str, req: JiraComment) -> dict:
         return response.json()
 
 
+class JiraTransition(BaseModel):
+    transition_id: str | None = None
+    transition_name: str | None = None  # ej "In Progress", "Done"
+
+
+@app.post("/issues/{issue_key}/transition")
+async def transition_issue(issue_key: str, req: JiraTransition) -> dict:
+    """Mueve un issue entre columnas del tablero Scrum (contrato guia §9)."""
+    if not _ok():
+        return {"mock": True, "key": issue_key,
+                "transitioned_to": req.transition_name or req.transition_id}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        tid = req.transition_id
+        # resolver por nombre si no dieron id
+        if not tid and req.transition_name:
+            tr = await client.get(
+                f"{_base()}/rest/api/3/issue/{issue_key}/transitions", headers=_auth()
+            )
+            if tr.status_code == 200:
+                for t in tr.json().get("transitions", []):
+                    if t.get("name", "").lower() == req.transition_name.lower():
+                        tid = t.get("id")
+                        break
+        if not tid:
+            raise HTTPException(status_code=400, detail="transition no encontrada")
+        r = await client.post(
+            f"{_base()}/rest/api/3/issue/{issue_key}/transitions",
+            json={"transition": {"id": tid}}, headers=_auth(),
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return {"transitioned": True, "key": issue_key, "transition_id": tid}
+
+
+@app.get("/sprints")
+async def list_sprints(board_id: int | None = None) -> dict:
+    """Lista sprints de un board (contrato guia §9). Usa Jira Agile API."""
+    if not _ok():
+        return {"mock": True, "sprints": [
+            {"id": 1, "name": "Sprint 1", "state": "active"},
+        ]}
+    import os as _os
+    bid = board_id or _os.environ.get("JIRA_BOARD_ID")
+    if not bid:
+        return {"sprints": [], "note": "JIRA_BOARD_ID no configurado"}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.get(
+            f"{_base()}/rest/agile/1.0/board/{bid}/sprint", headers=_auth()
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return r.json()
+
+
 @app.get("/projects/{project_key}/issues")
 async def list_issues(project_key: str, max_results: int = 50) -> dict:
     if not _ok():

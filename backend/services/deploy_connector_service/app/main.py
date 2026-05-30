@@ -266,6 +266,50 @@ def _headers() -> dict[str, str]:
     }
 
 
+# --- Contrato GENERICO de deploy (guia §11): status + rollback ---
+
+
+@app.get("/deploy/status/{project_name}")
+async def deploy_generic_status(project_name: str) -> dict:
+    """Estado del ultimo deployment de un proyecto (contrato guia §11).
+    Abstrae el proveedor: intenta Vercel y cae a Render."""
+    try:
+        v = await latest_deployment(project_name)
+        if v and not v.get("error"):
+            return {"provider": "vercel", "project": project_name,
+                    "state": v.get("readyState") or v.get("state"),
+                    "url": v.get("url"), "raw": v}
+    except Exception:
+        pass
+    return {"provider": "unknown", "project": project_name, "state": "unknown"}
+
+
+class RollbackRequest(BaseModel):
+    project_name: str
+
+
+@app.post("/deploy/rollback")
+async def deploy_rollback(req: RollbackRequest) -> dict:
+    """Rollback al deployment READY anterior (contrato guia §11).
+    Vercel: re-promueve el ultimo deployment de produccion estable previo."""
+    if not vercel_configured():
+        return {"ok": False, "error": "Vercel no configurado"}
+    try:
+        from services.deploy_connector_service.app.vercel_client import (
+            list_deployments, promote_deployment,
+        )
+        deps = await list_deployments(req.project_name, limit=10)
+        # buscar el penultimo READY (el anterior al actual)
+        ready = [d for d in deps if (d.get("readyState") or d.get("state")) == "READY"]
+        if len(ready) < 2:
+            return {"ok": False, "error": "no hay deployment previo estable para rollback"}
+        target = ready[1]  # el anterior
+        res = await promote_deployment(req.project_name, target.get("uid") or target.get("id"))
+        return {"ok": True, "rolled_back_to": target.get("uid"), "result": res}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {

@@ -124,6 +124,28 @@ async def latest_deployment(project_name_or_id: str) -> dict[str, Any]:
         }
 
 
+async def list_deployments(project_name_or_id: str, limit: int = 10) -> list[dict[str, Any]]:
+    """Lista los ultimos N deployments del proyecto (para rollback/status)."""
+    sep = "&" if _team_query() else "?"
+    url = f"{API_BASE}/v6/deployments{_team_query()}{sep}projectId={project_name_or_id}&limit={limit}"
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.get(url, headers=_headers())
+        if r.status_code >= 400:
+            return []
+        return r.json().get("deployments", [])
+
+
+async def promote_deployment(project_name_or_id: str, deployment_id: str) -> dict[str, Any]:
+    """Re-promueve un deployment previo a produccion (rollback)."""
+    sep = "&" if _team_query() else "?"
+    url = f"{API_BASE}/v10/projects/{project_name_or_id}/promote/{deployment_id}{_team_query()}"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.post(url, headers=_headers())
+        if r.status_code >= 400:
+            return {"error": r.text, "status": r.status_code}
+        return {"promoted": True, "deployment_id": deployment_id}
+
+
 async def _github_repo_id(owner: str, repo: str) -> int | None:
     """Resuelve el id numerico del repo en GitHub (requerido por Vercel v13)."""
     token = settings.scrumdev_git_token or os.environ.get("SCRUMDEV_GIT_TOKEN")
