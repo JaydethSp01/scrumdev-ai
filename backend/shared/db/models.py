@@ -109,6 +109,33 @@ class MemoryItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class BuildMemory(Base):
+    """Memoria de builds para el Stack Expert (ML que aprende de cada deploy).
+
+    Guarda, por cada proyecto generado+desplegado, la vision (+ su embedding),
+    el stack elegido, el manifiesto de archivos por tier y el resultado real del
+    build/deploy. Los builds EXITOSOS se recuperan como exemplars few-shot para
+    guiar la generacion de proyectos similares futuros.
+
+    El embedding se guarda como lista JSON (no requiere pgvector); la similitud
+    se calcula en Python (coseno) en el ml_service. Mismo patron que MemoryItem.
+    """
+
+    __tablename__ = "build_memory"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid4()))
+    project_key: Mapped[str] = mapped_column(String(64), index=True)
+    stack: Mapped[str] = mapped_column(String(64), index=True)
+    vision: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list] = mapped_column(JSON, default=list)
+    # manifiesto: {tier_name: [paths...]} de lo que efectivamente se genero
+    manifest: Mapped[dict] = mapped_column(JSON, default=dict)
+    # resultado: build local OK por tier + deploy OK + urls
+    success: Mapped[bool] = mapped_column(default=False)
+    outcome: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class NFRCapture(Base):
     """Captura de requerimientos no funcionales por proyecto/historia."""
 

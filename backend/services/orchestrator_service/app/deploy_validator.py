@@ -134,6 +134,68 @@ def _autofix_missing_exports(files: list[dict], report: list[str]) -> list[dict]
     return files
 
 
+# --- CSS / asset imports faltantes (generico) ---
+
+_CSS_IMPORT_RE = re.compile(r"""import\s+['"]([^'"]+\.css)['"]""")
+
+
+def _norm_rel(base_dir: str, rel: str) -> str:
+    """Resuelve un import relativo a un path normalizado dentro del repo."""
+    parts = [p for p in base_dir.split("/") if p] if base_dir else []
+    for seg in rel.split("/"):
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            if parts:
+                parts.pop()
+        else:
+            parts.append(seg)
+    return "/".join(parts)
+
+
+def _ensure_css_imports(files: list[dict], report: list[str]) -> list[dict]:
+    """Si un archivo importa un .css que no existe en el repo, lo crea.
+
+    Causa real de 'Module not found: Can't resolve ./globals.css' en deploy.
+    Generico: resuelve imports relativos y aliased (@/). Si hay Tailwind,
+    el css incluye las directivas; si no, queda vacio valido."""
+    paths = {(f.get("path") or "") for f in files}
+    uses_tailwind = any(
+        p in paths for p in ("tailwind.config.ts", "tailwind.config.js", "tailwind.config.mjs", "postcss.config.js", "postcss.config.mjs")
+    ) or any("tailwindcss" in (f.get("content") or "") for f in files if (f.get("path") or "").endswith(("package.json", ".css")))
+
+    to_create: dict[str, str] = {}
+    for f in files:
+        path = (f.get("path") or "")
+        if not path.endswith((".tsx", ".ts", ".jsx", ".js")):
+            continue
+        content = f.get("content") or ""
+        base_dir = "/".join(path.split("/")[:-1])
+        for m in _CSS_IMPORT_RE.finditer(content):
+            spec = m.group(1)
+            if spec.startswith("@/"):
+                target = spec[2:]
+            elif spec.startswith("./") or spec.startswith("../"):
+                target = _norm_rel(base_dir, spec)
+            elif spec.startswith("/"):
+                target = spec.lstrip("/")
+            else:
+                # paquete node (ej: 'tailwindcss/tailwind.css') -> ignorar
+                continue
+            if target and target not in paths and target not in to_create:
+                to_create[target] = spec
+
+    for target in to_create:
+        if uses_tailwind:
+            css = "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n"
+        else:
+            css = ":root{color-scheme:light dark;}\nbody{margin:0;font-family:system-ui,sans-serif;}\n"
+        files.append({"path": target, "content": css, "language": "css"})
+        report.append(f"creado CSS faltante: {target}")
+
+    return files
+
+
 # --- Validacion principal ---
 
 def validate_and_fix(files: list[dict]) -> tuple[list[dict], dict]:
@@ -145,6 +207,7 @@ def validate_and_fix(files: list[dict]) -> tuple[list[dict], dict]:
     # 1. Auto-fix exports faltantes (generico, todo stack JS)
     if stack in ("nextjs", "vite-react"):
         files = _autofix_missing_exports(files, report)
+        files = _ensure_css_imports(files, report)
 
     paths = {(f.get("path") or "") for f in files}
 

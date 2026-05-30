@@ -82,6 +82,22 @@ def test_deploy_validator_fixes_missing_exports():
     assert report["stack"] == "nextjs"
 
 
+def test_deploy_validator_creates_missing_css():
+    """Regresion: layout.tsx importa ./globals.css faltante -> deploy fallaba
+    con 'Module not found'. El validador debe crearlo."""
+    from services.orchestrator_service.app.deploy_validator import validate_and_fix
+    files = [
+        {"path": "app/layout.tsx", "content": "import './globals.css';\nexport default function L(){return null}"},
+        {"path": "app/page.tsx", "content": "export default function P(){return null}"},
+        {"path": "tailwind.config.ts", "content": "export default {content:[]}"},
+        {"path": "next.config.mjs", "content": "export default {}"},
+    ]
+    fixed, report = validate_and_fix(files)
+    css = [f for f in fixed if f["path"] == "app/globals.css"]
+    assert css, "globals.css deberia haberse creado"
+    assert "@tailwind base" in css[0]["content"]
+
+
 def test_deploy_validator_detects_stack():
     from services.orchestrator_service.app.deploy_validator import detect_stack
     assert detect_stack([{"path": "app/page.tsx", "content": ""}]) == "nextjs"

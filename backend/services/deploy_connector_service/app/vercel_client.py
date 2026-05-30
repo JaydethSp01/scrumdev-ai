@@ -124,10 +124,42 @@ async def latest_deployment(project_name_or_id: str) -> dict[str, Any]:
         }
 
 
-async def trigger_deploy(project_name: str, git_branch: str = "main") -> dict[str, Any]:
+async def _github_repo_id(owner: str, repo: str) -> int | None:
+    """Resuelve el id numerico del repo en GitHub (requerido por Vercel v13)."""
+    token = settings.scrumdev_git_token or os.environ.get("SCRUMDEV_GIT_TOKEN")
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.get(
+            f"https://api.github.com/repos/{owner}/{repo}", headers=headers
+        )
+        if r.status_code == 200:
+            return r.json().get("id")
+    return None
+
+
+async def trigger_deploy(
+    project_name: str,
+    git_branch: str = "main",
+    git_owner: str | None = None,
+    git_repo: str | None = None,
+    repo_id: int | None = None,
+) -> dict[str, Any]:
+    # Vercel v13/deployments exige gitSource.repoId para GitHub. Lo resolvemos
+    # desde la GitHub API si no nos lo pasaron explicito.
+    if repo_id is None and git_owner and git_repo:
+        repo_id = await _github_repo_id(git_owner, git_repo)
+    git_source: dict[str, Any] = {"type": "github", "ref": git_branch}
+    if repo_id is not None:
+        git_source["repoId"] = repo_id
+    elif git_owner and git_repo:
+        # fallback con org/repo (algunas cuentas lo aceptan)
+        git_source["org"] = git_owner
+        git_source["repo"] = git_repo
     payload = {
         "name": project_name,
-        "gitSource": {"type": "github", "ref": git_branch},
+        "gitSource": git_source,
         "target": "production",
     }
     async with httpx.AsyncClient(timeout=30.0) as client:

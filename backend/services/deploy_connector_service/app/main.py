@@ -84,13 +84,17 @@ class VercelDeployTrigger(BaseModel):
     git_owner: str
     git_repo: str
     git_branch: str = "main"
+    repo_id: int | None = None
 
 
 @app.post("/vercel/deploy")
 async def vercel_deploy(req: VercelDeployTrigger) -> dict:
     if not vercel_configured():
         raise HTTPException(status_code=400, detail="Vercel no configurado")
-    result = await vercel_trigger_deploy(req.name, req.git_branch)
+    result = await vercel_trigger_deploy(
+        req.name, req.git_branch,
+        git_owner=req.git_owner, git_repo=req.git_repo, repo_id=req.repo_id,
+    )
     if "error" in result:
         raise HTTPException(status_code=502, detail=result["error"])
     return result

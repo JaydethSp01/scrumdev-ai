@@ -24,6 +24,12 @@ from services.ml_service.app.models.embedder import (
 )
 from services.ml_service.app.pipelines.effort_estimator import estimate_effort
 from services.ml_service.app.pipelines.risk_extractor import extract_risks
+from services.ml_service.app.pipelines.stack_expert import (
+    choose_blueprint,
+    manifest_snapshot,
+    rank_exemplars,
+    score_completeness,
+)
 from services.ml_service.app.pipelines.story_classifier import classify_story
 from shared.config.settings import settings
 from shared.observability import configure_logging, get_logger
@@ -130,6 +136,115 @@ async def similarity(req: SimilarityRequest) -> dict:
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# --- Stack Expert: blueprints + exemplars + completitud + aprendizaje ---
+
+
+class BlueprintRequest(BaseModel):
+    classification: dict
+
+
+class ExemplarsRequest(BaseModel):
+    vision: str
+    stack: str = ""
+    top_k: int = 3
+
+
+class CompletenessRequest(BaseModel):
+    files: list[dict]
+    stack: str
+
+
+class RecordBuildRequest(BaseModel):
+    project_key: str
+    vision: str
+    stack: str
+    files: list[dict] = []
+    success: bool = False
+    outcome: dict = {}
+
+
+@app.post("/ml/stack/blueprint")
+async def stack_blueprint(req: BlueprintRequest) -> dict:
+    """Elige el stack desde la clasificacion y devuelve su contrato completo
+    (tiers, manifiesto de archivos por tier, targets de deploy, wiring)."""
+    return choose_blueprint(req.classification)
+
+
+@app.post("/ml/stack/exemplars")
+async def stack_exemplars(req: ExemplarsRequest) -> dict:
+    """Recupera los builds EXITOSOS mas parecidos (few-shot) para guiar la IA."""
+    from shared.db.session import get_session
+    from shared.db.models import BuildMemory
+    from sqlalchemy import select
+
+    try:
+        qv = embed_one(req.vision)
+    except Exception as exc:
+        return {"exemplars": [], "error": f"embed_failed: {exc}"}
+
+    candidates: list[dict] = []
+    try:
+        async for session in get_session():
+            rows = (await session.execute(
+                select(BuildMemory).where(BuildMemory.success == True)  # noqa: E712
+            )).scalars().all()
+            for r in rows:
+                candidates.append({
+                    "project_key": r.project_key,
+                    "stack": r.stack,
+                    "vision": r.vision,
+                    "embedding": r.embedding or [],
+                    "manifest": r.manifest or {},
+                    "outcome": r.outcome or {},
+                    "success": r.success,
+                })
+            break
+    except Exception as exc:
+        return {"exemplars": [], "error": f"db_unavailable: {exc}"}
+
+    ranked = rank_exemplars(qv, req.stack, candidates, top_k=req.top_k)
+    # no devolver el embedding completo (ruido)
+    for r in ranked:
+        r.pop("embedding", None)
+    return {"exemplars": ranked, "count": len(ranked), "pool": len(candidates)}
+
+
+@app.post("/ml/stack/completeness")
+async def stack_completeness(req: CompletenessRequest) -> dict:
+    """Score 0..1 de completitud del proyecto generado vs el blueprint + faltantes."""
+    return score_completeness(req.files, req.stack)
+
+
+@app.post("/ml/stack/record-build")
+async def stack_record_build(req: RecordBuildRequest) -> dict:
+    """Persiste el resultado real de un build/deploy para que el modelo aprenda."""
+    from shared.db.session import get_session
+    from shared.db.models import BuildMemory
+
+    try:
+        emb = embed_one(req.vision)
+    except Exception:
+        emb = []
+    manifest = manifest_snapshot(req.files, req.stack) if req.files else {}
+    try:
+        async for session in get_session():
+            rec = BuildMemory(
+                project_key=req.project_key,
+                stack=req.stack,
+                vision=req.vision,
+                embedding=emb,
+                manifest=manifest,
+                success=req.success,
+                outcome=req.outcome,
+            )
+            session.add(rec)
+            await session.commit()
+            return {"recorded": True, "id": rec.id, "learned_from": req.project_key}
+    except Exception as exc:
+        return {"recorded": False, "error": str(exc)}
+    return {"recorded": False}
 
 
 @app.post("/ml/analyze")
