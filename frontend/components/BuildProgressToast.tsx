@@ -24,6 +24,8 @@ const ACTIVE_STAGES = new Set([
   "backlog",
   "architecture",
   "coding",
+  "generating_app",
+  "saving_code",
   "running",
 ]);
 
@@ -45,6 +47,10 @@ function stageLabel(stage: string | undefined): string {
       return "Disenando arquitectura";
     case "coding":
       return "Generando codigo";
+    case "generating_app":
+      return "Generando el software (front + back)";
+    case "saving_code":
+      return "Guardando y validando";
     case "running":
       return "Trabajando";
     case "completed":
@@ -191,11 +197,18 @@ export function BuildProgressToast({
     ? "El build fallo"
     : "Generando sistema...";
 
+  const summary = (build.summary || {}) as {
+    phase_label?: string;
+    phase_detail?: string;
+  };
   const subtitle = completed
-    ? "Ver backlog y codigo generado."
+    ? summary.phase_detail || "Ver backlog y codigo generado."
     : failed
     ? build.error || "Revisa el log de auditoria."
-    : `${stageLabel(stage)} - ${progress}%`;
+    : `${summary.phase_label || stageLabel(stage)} - ${progress}%`;
+  // detalle explicativo (por que demora) mientras genera
+  const phaseDetail =
+    !completed && !failed ? summary.phase_detail : undefined;
 
   return (
     <div className="fixed bottom-4 right-4 z-50 max-w-sm w-[22rem]">
@@ -243,6 +256,12 @@ export function BuildProgressToast({
               style={{ width: `${Math.max(2, Math.min(100, progress))}%` }}
             />
           </div>
+        )}
+
+        {phaseDetail && (
+          <p className="mt-2 text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">
+            {phaseDetail}
+          </p>
         )}
 
         {completed && (

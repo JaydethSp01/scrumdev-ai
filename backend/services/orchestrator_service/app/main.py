@@ -188,6 +188,17 @@ async def _run_generate_full_app(
             if run:
                 run.stage = "generating_app"
                 run.progress_percent = 30
+                sprint_txt = f" del {active_sprint_name}" if active_sprint_name else ""
+                run.summary = {
+                    **(run.summary or {}),
+                    "phase_label": f"Diseñando y generando el código{sprint_txt}",
+                    "phase_detail": (
+                        "El agente desarrollador está escribiendo el frontend (Next.js) y "
+                        "el backend (FastAPI) completos. Esto toma ~5-8 min porque genera "
+                        "software real y coherente, no plantillas."
+                    ),
+                    "eta_seconds": 420,
+                }
                 await session.commit()
             break
 
@@ -241,6 +252,22 @@ async def _run_generate_full_app(
         files = resp.get("files", [])
 
         async for session in get_session():
+            run = await session.get(BuildRun, build_id)
+            if run:
+                run.stage = "saving_code"
+                run.progress_percent = 75
+                run.summary = {
+                    **(run.summary or {}),
+                    "phase_label": "Guardando el código y validando coherencia",
+                    "phase_detail": (
+                        f"Se generaron {len(files)} archivos. Guardándolos en la versión "
+                        "activa y verificando que no haya rutas rotas."
+                    ),
+                }
+                await session.commit()
+            break
+
+        async for session in get_session():
             from services.orchestrator_service.app.versions import ensure_v1
             version = await ensure_v1(session, project_key)
             # ACUMULATIVO por version (fix entrega incremental): MERGE por
@@ -288,6 +315,11 @@ async def _run_generate_full_app(
                     "routes": resp.get("routes", []),
                     "code_files_generated": len(files),
                     "stories_marked_done": stories_marked,
+                    "phase_label": "¡Software generado!",
+                    "phase_detail": (
+                        f"{len(files)} archivos listos ({resp.get('stack', '')}). "
+                        "Ya puedes revisarlo en el tab Código o desplegarlo."
+                    ),
                 }
                 run.completed_at = datetime.now(timezone.utc)
                 await session.commit()
