@@ -268,8 +268,9 @@ async def _run_generate_full_app(
             break
 
         async for session in get_session():
-            from services.orchestrator_service.app.versions import ensure_v1
-            version = await ensure_v1(session, project_key)
+            from services.orchestrator_service.app.versions import ensure_v1, get_active_version
+            # generar en la version ACTIVA (no siempre v1). Si no hay activa, v1.
+            version = await get_active_version(session, project_key) or await ensure_v1(session, project_key)
             # ACUMULATIVO por version (fix entrega incremental): MERGE por
             # file_path dentro de la version activa. Los archivos de sprints
             # previos NO se borran; si un archivo se regenera, se actualiza su
