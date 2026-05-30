@@ -39,7 +39,19 @@ async def ensure_repo(name: str, description: str = "", private: bool = True) ->
             f"https://api.github.com/repos/{owner}/{repo_name}", headers=_headers()
         )
         if existing.status_code == 200:
-            return existing.json()
+            repo = existing.json()
+            # Si el repo existe con visibilidad distinta a la pedida, ajustarla.
+            # Necesario para deploy en Render: el backend debe ser PUBLICO para
+            # que Render lo pueda fetchear (no esta conectado por OAuth).
+            if repo.get("private") != private:
+                patch = await client.patch(
+                    f"https://api.github.com/repos/{owner}/{repo_name}",
+                    json={"private": private},
+                    headers=_headers(),
+                )
+                if patch.status_code == 200:
+                    return patch.json()
+            return repo
 
         create = await client.post(
             "https://api.github.com/user/repos",

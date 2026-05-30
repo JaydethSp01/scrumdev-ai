@@ -42,14 +42,15 @@ def render_url_for(api_repo: str) -> str:
     return f"https://{api_repo}.onrender.com"
 
 
-async def _publish_repo(conn: str, repo_name: str, files: list[dict], desc: str) -> dict:
+async def _publish_repo(repo_name: str, files: list[dict], desc: str, private: bool = True) -> dict:
+    git = settings.git_connector_service_url
     async with httpx.AsyncClient(timeout=180.0) as client:
         r = await client.post(
-            f"{conn}/publish",
+            f"{git}/publish",
             json={
                 "repo_name": repo_name,
                 "description": desc,
-                "private": True,
+                "private": private,
                 "files": files,
                 "commit_message": "feat: ScrumDev AI build",
                 "branch": "main",
@@ -76,7 +77,8 @@ async def _deploy_backend(
 ) -> dict:
     """Push repo backend + crea web service python en Render con env cableado."""
     out: dict[str, Any] = {"tier": "backend", "repo": api_repo}
-    pub = await _publish_repo(conn, api_repo, files_rel, f"ScrumDev AI backend ({api_repo})")
+    # backend PUBLICO para que Render pueda fetchear el repo sin OAuth conectado
+    pub = await _publish_repo(api_repo, files_rel, f"ScrumDev AI backend ({api_repo})", private=False)
     out["git_url"] = (pub.get("push") or {}).get("url")
     if pub.get("needs_user_action"):
         out["error"] = "git_repo_failed"
@@ -117,7 +119,7 @@ async def _deploy_frontend(
 ) -> dict:
     """Push repo frontend + crea proyecto Vercel con NEXT_PUBLIC_API_URL y despliega."""
     out: dict[str, Any] = {"tier": "frontend", "repo": web_repo}
-    pub = await _publish_repo(conn, web_repo, files_rel, f"ScrumDev AI frontend ({web_repo})")
+    pub = await _publish_repo(web_repo, files_rel, f"ScrumDev AI frontend ({web_repo})")
     out["git_url"] = (pub.get("push") or {}).get("url")
     if pub.get("needs_user_action"):
         out["error"] = "git_repo_failed"

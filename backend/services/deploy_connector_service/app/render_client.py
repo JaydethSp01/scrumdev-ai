@@ -106,11 +106,15 @@ async def create_web_service(
         "autoDeploy": "yes",
         "serviceDetails": {
             "env": runtime,
+            "runtime": runtime,
             "plan": "free",
             "region": "oregon",
-            "buildCommand": build_command or "npm install && npm run build",
-            "startCommand": start_command or "npm start",
-            "envSpecificDetails": {"buildCommand": build_command or "npm install && npm run build"},
+            # Render lee build/start commands desde envSpecificDetails para
+            # runtimes nativos (python/node). startCommand es OBLIGATORIO.
+            "envSpecificDetails": {
+                "buildCommand": build_command or "npm install && npm run build",
+                "startCommand": start_command or "npm start",
+            },
             "numInstances": 1,
         },
         "envVars": env_vars or [],
