@@ -2081,6 +2081,17 @@ async def deploy_project(project_key: str, req: DeployRequest) -> dict:
 
         stack = detect_stack_from_files(files)
 
+        # Red de seguridad: completar el manifiesto (package.json, configs, etc.)
+        # ANTES del build gate. Cubre proyectos generados por caminos viejos o
+        # donde la IA omitio archivos obligatorios -> deploy nunca falla por
+        # archivos de scaffolding faltantes.
+        from services.agent_runtime_service.app.runtime.app_generator import (
+            _ensure_manifest_complete,
+        )
+        files, backfilled = _ensure_manifest_complete(files, stack, project_key)
+        if backfilled:
+            logger.info("deploy_manifest_backfilled", project=project_key, filled=backfilled)
+
         # Build gate local: compila cada tier; auto-fix + retry. Si falla, NO se
         # despliega (el usuario no quiere deploys fallidos).
         files, gate_report = await run_build_gate(files, stack)
