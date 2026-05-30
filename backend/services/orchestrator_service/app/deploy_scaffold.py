@@ -329,7 +329,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 }
 """
 
-_ROOT_PAGE = """export default function Page() {
+def _build_root_page_with_links(features: list[tuple[str, str]]) -> str:
+    """Genera app/page.tsx que muestra links a las features detectadas en el repo.
+
+    features: list de (label, href) ej. [("Eventos","/events"),("Admin","/admin")]
+    """
+    cards = "".join(
+        f'<a href="{href}" className="group rounded-xl border border-white/15 bg-white/[0.04] backdrop-blur px-4 py-4 hover:bg-white/[0.08] hover:border-white/30 transition flex items-center justify-between gap-3"><span className="text-sm font-medium">{label}</span><span className="text-white/40 group-hover:text-white/80 group-hover:translate-x-1 transition">→</span></a>'
+        for label, href in features
+    )
+    grid = f'<div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl mx-auto">{cards}</div>' if features else ""
+    return f"""export default function Page() {{
   return (
     <main className="min-h-screen grid place-items-center px-6 py-16 relative overflow-hidden">
       <div className="pointer-events-none absolute -top-40 -left-32 w-[600px] h-[600px] rounded-full bg-indigo-500/30 blur-[140px]" />
@@ -347,23 +357,56 @@ _ROOT_PAGE = """export default function Page() {
           </span>
         </h1>
         <p className="mt-6 text-base sm:text-lg text-white/70 max-w-xl mx-auto">
-          Esta es la primera version de tu aplicacion. El siguiente deploy reemplazara esta landing con la UI completa que pediste en tu vision.
+          Estas son las pantallas que los agentes generaron para tu producto. Entra a explorar.
         </p>
-        <div className="mt-10 grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-2xl mx-auto">
-          {["Backlog Scrum", "Backend FastAPI", "Postgres", "Deploy automatico"].map((f) => (
-            <div key={f} className="rounded-xl border border-white/15 bg-white/[0.04] backdrop-blur px-3 py-3 text-xs sm:text-sm font-medium">
-              {f}
-            </div>
-          ))}
-        </div>
+        {grid}
         <p className="mt-12 text-xs text-white/40">
           Powered by ScrumDev AI - Claude + OpenAI + Next.js + Vercel
         </p>
       </div>
     </main>
   );
-}
+}}
 """
+
+
+def _detect_features(files: list[dict]) -> list[tuple[str, str]]:
+    """Detecta features del repo (app/<feature>/page.tsx) y arma label+href."""
+    features: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for f in files:
+        path = (f.get("path") or "").replace("\\\\", "/")
+        if not path.endswith("/page.tsx") and not path.endswith("/page.jsx"):
+            continue
+        if not path.startswith("app/"):
+            continue
+        if path in ("app/page.tsx", "app/page.jsx"):
+            continue
+        # app/<feature>/page.tsx -> /<feature>
+        # app/events/[slug]/page.tsx -> /events
+        # app/(auth)/login/page.tsx -> /login (skip route groups)
+        relative = path[len("app/"):]
+        parts = relative.split("/")[:-1]  # quitar page.tsx
+        clean_parts: list[str] = []
+        for p in parts:
+            if p.startswith("(") and p.endswith(")"):
+                continue  # route group
+            if p.startswith("[") and p.endswith("]"):
+                break  # dynamic segment, parar aqui
+            clean_parts.append(p)
+        if not clean_parts:
+            continue
+        href = "/" + "/".join(clean_parts)
+        if href in seen:
+            continue
+        seen.add(href)
+        label = clean_parts[0].replace("-", " ").replace("_", " ").title()
+        features.append((label, href))
+    return features[:6]
+
+
+# Default _ROOT_PAGE sin features (fallback)
+_ROOT_PAGE = _build_root_page_with_links([])
 
 _README_TEMPLATE = """# {name}
 
@@ -591,7 +634,9 @@ def build_scaffold(project_name: str, files: list[dict]) -> list[dict]:
         if not _has(combined, "app/layout.tsx") and not _has(combined, "app/layout.jsx"):
             extra.append({"path": "app/layout.tsx", "content": _ROOT_LAYOUT})
         if not _has(combined, "app/page.tsx") and not _has(combined, "app/page.jsx"):
-            extra.append({"path": "app/page.tsx", "content": _ROOT_PAGE})
+            features = _detect_features(combined)
+            page_content = _build_root_page_with_links(features) if features else _ROOT_PAGE
+            extra.append({"path": "app/page.tsx", "content": page_content})
         if not _has(combined, "vercel.json"):
             extra.append({"path": "vercel.json", "content": _VERCEL_JSON})
 

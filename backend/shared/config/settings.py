@@ -109,6 +109,34 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+# FASE 0: modo bundle. Si BUNDLE_MODE=true, reescribe las _service_url para
+# que apunten a los 4 bundles (gateway, core, brain, connectors) con sub-path.
+# Asi las llamadas internas (gateway->bundle y service->service) funcionan
+# sin tocar el codigo de cada servicio.
+import os as _os
+
+if _os.environ.get("BUNDLE_MODE", "false").lower() == "true":
+    _core = _os.environ.get("CORE_BUNDLE_URL", "http://localhost:8100")
+    _brain = _os.environ.get("BRAIN_BUNDLE_URL", "http://localhost:8200")
+    _conn = _os.environ.get("CONNECTORS_BUNDLE_URL", "http://localhost:8300")
+    # core
+    settings.auth_service_url = f"{_core}/auth"
+    settings.user_service_url = f"{_core}/user"
+    settings.conversation_service_url = f"{_core}/conversation"
+    settings.notification_service_url = f"{_core}/notification"
+    settings.audit_service_url = f"{_core}/audit"
+    settings.memory_service_url = f"{_core}/memory"
+    settings.policy_service_url = f"{_core}/policy"
+    settings.ml_service_url = f"{_core}/ml"
+    # brain
+    settings.orchestrator_service_url = f"{_brain}/orchestrator"
+    settings.agent_runtime_service_url = f"{_brain}/agent"
+    # connectors
+    settings.jira_connector_service_url = f"{_conn}/jira"
+    settings.git_connector_service_url = f"{_conn}/git"
+    settings.deploy_connector_service_url = f"{_conn}/deploy"
+
+
 # Failfast: en prod, NO permitir secrets default. Sprint 1.4.
 _DEFAULT_JWT = "change-me-in-production-please"
 if (settings.app_env or "").lower() in ("production", "prod"):
