@@ -34,6 +34,7 @@ class EvaluateRequest(BaseModel):
     artifact_reference: str | None = None
     content: str | None = None
     policies: list[str] = []
+    context: dict | None = None
 
 
 def _load_policy(name: str) -> dict[str, Any] | None:
@@ -126,11 +127,54 @@ def _eval_security_policy(content: str, policy: dict) -> list[dict]:
     return violations
 
 
-EVALUATORS = {
+def _eval_quality_gates(content: str, policy: dict, context: dict | None = None) -> list[dict]:
+    """Evalua los quality gates contra el contexto del workflow (no solo declarativo).
+
+    context puede traer: test_coverage_percent, high_severity_violations,
+    critical_violations, y flags booleanos por gate (unit_tests_passed, etc.).
+    Sin contexto, no inventa violaciones (no bloquea por falta de datos).
+    """
+    violations: list[dict] = []
+    ctx = context or {}
+    thr = policy.get("thresholds", {})
+    name = policy.get("policy", "quality-gates")
+
+    cov = ctx.get("test_coverage_percent")
+    if cov is not None and cov < thr.get("min_test_coverage_percent", 0):
+        violations.append({"policy": name, "rule": "min_test_coverage",
+                           "severity": "high",
+                           "message": f"Cobertura {cov}% < minimo {thr['min_test_coverage_percent']}%"})
+    hi = ctx.get("high_severity_violations")
+    if hi is not None and hi > thr.get("max_high_severity_violations", 999):
+        violations.append({"policy": name, "rule": "max_high_severity",
+                           "severity": "high",
+                           "message": f"{hi} violaciones high > maximo {thr['max_high_severity_violations']}"})
+    crit = ctx.get("critical_violations")
+    if crit is not None and crit > thr.get("max_critical_violations", 999):
+        violations.append({"policy": name, "rule": "max_critical",
+                           "severity": "critical",
+                           "message": f"{crit} violaciones criticas > maximo {thr['max_critical_violations']}"})
+    # gates requeridos explicitamente marcados como fallidos en el contexto
+    gates = policy.get("quality_gates", {})
+    stage_gates = gates.get(ctx.get("gate_stage", ""), {}).get("required", [])
+    for g in stage_gates:
+        if ctx.get(g) is False:  # solo si explicitamente False
+            violations.append({"policy": name, "rule": g, "severity": "high",
+                               "message": f"Gate requerido no cumplido: {g}"})
+    return violations
+
+
+# evaluators que solo usan content
+_CONTENT_EVALUATORS = {
     "architecture-policy": _eval_architecture_policy,
     "twelve-factor-policy": _eval_twelve_factor,
     "security-policy": _eval_security_policy,
 }
+# evaluators que usan tambien el contexto del workflow
+_CONTEXT_EVALUATORS = {
+    "quality-gates": _eval_quality_gates,
+}
+EVALUATORS = {**_CONTENT_EVALUATORS, **_CONTEXT_EVALUATORS}
 
 
 @app.get("/health")
@@ -165,9 +209,14 @@ async def evaluate(req: EvaluateRequest) -> dict:
         if not policy:
             continue
         evaluated.append(policy_name)
-        evaluator = EVALUATORS.get(policy_name)
-        if evaluator and req.content:
-            all_violations.extend(evaluator(req.content, policy))
+        if policy_name in _CONTEXT_EVALUATORS:
+            all_violations.extend(
+                _CONTEXT_EVALUATORS[policy_name](req.content or "", policy, req.context)
+            )
+        else:
+            evaluator = _CONTENT_EVALUATORS.get(policy_name)
+            if evaluator and req.content:
+                all_violations.extend(evaluator(req.content, policy))
     return {
         "project_key": req.project_key,
         "artifact_type": req.artifact_type,
@@ -205,10 +254,16 @@ async def evaluate_workflow_gate(req: WorkflowEvalRequest) -> dict:
         if not policy:
             continue
         evaluated.append(policy_name)
-        evaluator = EVALUATORS.get(policy_name)
-        if evaluator and req.context:
-            content = req.context if isinstance(req.context, str) else str(req.context)
-            all_violations.extend(evaluator(content, policy))
+        if policy_name in _CONTEXT_EVALUATORS:
+            # quality-gates: usa el contexto estructurado del workflow
+            all_violations.extend(
+                _CONTEXT_EVALUATORS[policy_name]("", policy, req.context or {})
+            )
+        else:
+            evaluator = _CONTENT_EVALUATORS.get(policy_name)
+            if evaluator and req.context:
+                content = req.context if isinstance(req.context, str) else str(req.context)
+                all_violations.extend(evaluator(content, policy))
 
     critical = [v for v in all_violations if (v.get("severity") or "").lower() in ("critical", "high")]
     return {

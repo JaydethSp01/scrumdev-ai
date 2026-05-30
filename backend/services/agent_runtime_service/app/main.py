@@ -56,15 +56,21 @@ async def health() -> dict[str, str]:
 @app.get("/agents")
 async def list_agents() -> dict[str, list[str] | str]:
     provider = (settings.scrumdev_ai_provider or "claude_code").lower()
+    # 10 agentes de la guia Delfin (§8): roles del ciclo Scrum completo
     if provider == "claude_code":
         return {
             "provider": provider,
             "agents": [
                 "po_agent",
+                "scrum_master_agent",
+                "nfr_agent",
                 "architect_agent",
                 "developer_agent",
+                "code_review_agent",
                 "qa_agent",
                 "security_agent",
+                "devops_agent",
+                "release_agent",
             ],
         }
     from services.agent_runtime_service.app.runtime.bootstrap import get_registry
