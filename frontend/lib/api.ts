@@ -578,6 +578,7 @@ export async function apiAssistant(
     message: string;
     image_paths?: string[];
     image_urls?: string[];
+    session_id?: string | null;
   }
 ): Promise<AssistantResponse> {
   const res = await authFetch(

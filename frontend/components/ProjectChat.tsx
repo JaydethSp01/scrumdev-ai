@@ -13,20 +13,20 @@ import {
   X,
   Image as ImageIcon,
   AlertTriangle,
+  Plus,
+  MessageSquare,
 } from "lucide-react";
 import {
   apiAssistant,
   apiUploadChatImage,
+  listChats,
+  createChat,
+  getChatMessages,
   type AssistantAction,
   type ChatImageUpload,
+  type ChatSessionInfo,
 } from "@/lib/api";
-import {
-  clearChatThread,
-  fetchChatThread,
-  loadCachedThread,
-  saveCachedThread,
-  type ChatMessage,
-} from "@/lib/chat";
+import { type ChatMessage } from "@/lib/chat";
 import type { AuthUser } from "@/app/auth/_lib";
 import { ToastStack, useToasts } from "@/components/Toast";
 
@@ -87,27 +87,57 @@ export function ProjectChat({ projectKey, user }: Props) {
   const [loading, setLoading] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [sessions, setSessions] = useState<ChatSessionInfo[]>([]);
+  const [activeSession, setActiveSession] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toasts = useToasts();
 
-  // Carga inicial: primero cache local (instantanea), despues backend (autoritativo)
+  // Carga los chats del proyecto (un proyecto tiene varios chats)
   useEffect(() => {
-    const cached = loadCachedThread(projectKey, user.user_id) as ExtendedMessage[];
-    if (cached.length > 0) setMessages(cached);
     let cancelled = false;
-    void fetchChatThread(projectKey, user.user_id).then((remote) => {
-      if (!cancelled) setMessages(remote as ExtendedMessage[]);
+    void listChats(projectKey, user.user_id).then((res) => {
+      if (cancelled) return;
+      const list = res.chats || [];
+      setSessions(list);
+      if (list.length > 0) setActiveSession((cur) => cur ?? list[0].id);
     });
     return () => {
       cancelled = true;
     };
   }, [projectKey, user.user_id]);
 
-  // Persistimos cache local de respaldo (el backend es la fuente de verdad)
+  // Al cambiar de chat activo, carga su historial desde el backend
   useEffect(() => {
-    saveCachedThread(projectKey, user.user_id, messages);
-  }, [projectKey, user.user_id, messages]);
+    if (!activeSession) {
+      setMessages([]);
+      return;
+    }
+    let cancelled = false;
+    void getChatMessages(projectKey, activeSession).then((res) => {
+      if (cancelled) return;
+      const mapped: ExtendedMessage[] = (res.messages || []).map((m, i) => ({
+        id: `s_${activeSession}_${i}`,
+        role: m.role as "user" | "assistant",
+        content: m.content,
+        createdAt: m.created_at || new Date().toISOString(),
+        imageUrls: m.image_urls || undefined,
+        action: (m.action as AssistantAction) || undefined,
+      }));
+      setMessages(mapped);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectKey, activeSession]);
+
+  async function newChat() {
+    const title = `Chat ${sessions.length + 1}`;
+    const cs = await createChat(projectKey, { user_id: user.user_id, title, kind: "general" });
+    setSessions((prev) => [cs, ...prev]);
+    setActiveSession(cs.id);
+    setMessages([]);
+  }
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -185,6 +215,7 @@ export function ProjectChat({ projectKey, user }: Props) {
         message: content || "Mira las imagenes que te adjunte y dime que opinas.",
         image_paths: readyAttachments.map((a) => a.upload!.fs_path),
         image_urls: readyAttachments.map((a) => a.upload!.url),
+        session_id: activeSession,
       });
       const replyText = data.reply || "Sin respuesta del asistente.";
       const assistantMsg: ExtendedMessage = {
@@ -195,7 +226,11 @@ export function ProjectChat({ projectKey, user }: Props) {
         action: data.action,
       };
       setMessages((prev) => [...prev, assistantMsg]);
-      if (data.action && data.action.type === "generate_code") {
+      // Acciones de ciclo de vida (feature/bug/version) -> avisar al usuario
+      const status = (data as { action_status?: string }).action_status;
+      if (status) {
+        toasts.info(status);
+      } else if (data.action && data.action.type === "generate_code") {
         const sk = data.action.story_key || "historia";
         toasts.info(`Generando codigo para ${sk}`);
       }
@@ -224,9 +259,7 @@ export function ProjectChat({ projectKey, user }: Props) {
     void send(s.prompt);
   }
 
-  async function clearConversation() {
-    if (!confirm("Limpiar toda la conversacion de este proyecto?")) return;
-    await clearChatThread(projectKey, user.user_id);
+  function clearConversation() {
     setMessages([]);
   }
 
@@ -291,9 +324,33 @@ export function ProjectChat({ projectKey, user }: Props) {
             Asistente del proyecto
           </p>
           <p className="text-xs text-neutral-500">
-            Adjunta imagenes (capturas/mockups) y dale feedback visual.
+            Pide features, reporta bugs (con captura) o evoluciona a una versión nueva.
           </p>
         </div>
+        {/* Selector de chats (un proyecto tiene varios chats con su historial) */}
+        {sessions.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            <MessageSquare size={14} className="text-neutral-400" />
+            <select
+              value={activeSession ?? ""}
+              onChange={(e) => setActiveSession(e.target.value)}
+              className="text-xs rounded border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1.5 max-w-[160px] focus:outline-none focus:ring-2 focus:ring-brand/40"
+            >
+              {sessions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.title}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <button
+          onClick={newChat}
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border border-neutral-300 dark:border-neutral-700 hover:bg-brand/10 hover:border-brand hover:text-brand transition"
+          title="Nuevo chat"
+        >
+          <Plus size={14} /> Chat
+        </button>
         <button
           onClick={clearConversation}
           disabled={messages.length === 0}
