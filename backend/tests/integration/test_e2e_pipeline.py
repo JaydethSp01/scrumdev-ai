@@ -26,7 +26,8 @@ def _is_alive() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(not _is_alive(), reason="gateway no esta corriendo en :8080")
+import os as _os
+pytestmark = pytest.mark.skipif(not _is_alive() or _os.environ.get("BUNDLE_MODE")=="true", reason="requiere modo dev (14 puertos); en bundle usar test_bundle_e2e")
 
 
 @pytest.fixture
