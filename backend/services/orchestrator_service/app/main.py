@@ -141,6 +141,11 @@ async def _run_generate_full_app(
             if not vision:
                 raise ValueError("project_vision_missing")
 
+            # version ACTIVA: el backlog se filtra por su version (ciclo de vida).
+            from services.orchestrator_service.app.versions import get_active_version
+            active_version = await get_active_version(session, project_key)
+            active_version_id = active_version.id if active_version else None
+
             # buscar sprint activo
             active = (await session.execute(
                 select(Sprint).where(
@@ -153,6 +158,9 @@ async def _run_generate_full_app(
                 .where(BacklogItem.project_key == project_key)
                 .order_by(BacklogItem.order_index)
             )
+            # aislar por version activa (las tareas/features nuevas de esa version)
+            if active_version_id:
+                b_stmt = b_stmt.where(BacklogItem.version_id == active_version_id)
             if active:
                 b_stmt = b_stmt.where(BacklogItem.sprint_id == active.id)
                 active_sprint_name = f"Sprint {active.number}: {active.name}"
@@ -164,18 +172,20 @@ async def _run_generate_full_app(
                     "description": i.description,
                     "priority": i.priority,
                     "story_points": i.story_points,
+                    "origin": i.origin,
                 }
                 for i in (await session.execute(b_stmt)).scalars().all()
             ]
-            # si el sprint activo no tiene historias, caer a todo el backlog
+            # fallback: si el sprint activo no tiene historias, usar todo el
+            # backlog de la version activa
             if active and not backlog:
+                fb = select(BacklogItem).where(BacklogItem.project_key == project_key)
+                if active_version_id:
+                    fb = fb.where(BacklogItem.version_id == active_version_id)
                 backlog = [
                     {"story_key": i.story_key, "title": i.title, "description": i.description,
-                     "priority": i.priority, "story_points": i.story_points}
-                    for i in (await session.execute(
-                        select(BacklogItem).where(BacklogItem.project_key == project_key)
-                        .order_by(BacklogItem.order_index)
-                    )).scalars().all()
+                     "priority": i.priority, "story_points": i.story_points, "origin": i.origin}
+                    for i in (await session.execute(fb.order_by(BacklogItem.order_index))).scalars().all()
                 ]
                 active_sprint_name = None
             break
