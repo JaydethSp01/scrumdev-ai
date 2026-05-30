@@ -111,9 +111,15 @@ _LIB_API = (
 
 
 def _backend_main() -> str:
+    # main.py que AUTO-DESCUBRE los routers que la IA haya generado bajo app/
+    # (cualquier modulo que exponga `router = APIRouter()`). Asi un backend con
+    # routers pero sin main.py queda funcional con TODOS sus endpoints, no solo
+    # /health. Robusto: si un modulo falla al importar, lo salta (no tumba el boot).
     return (
         "import os\n"
-        "from fastapi import FastAPI\n"
+        "import importlib\n"
+        "import pkgutil\n"
+        "from fastapi import FastAPI, APIRouter\n"
         "from fastapi.middleware.cors import CORSMiddleware\n\n"
         "app = FastAPI(title='API')\n"
         "origins = os.environ.get('CORS_ORIGINS', '*').split(',')\n"
@@ -124,7 +130,25 @@ def _backend_main() -> str:
         "    return {'status': 'ok'}\n\n"
         "@app.get('/')\n"
         "def root():\n"
-        "    return {'service': 'api', 'status': 'ok'}\n"
+        "    return {'service': 'api', 'status': 'ok'}\n\n"
+        "# Auto-incluir todos los routers definidos bajo el paquete 'app'.\n"
+        "def _autoload_routers():\n"
+        "    try:\n"
+        "        import app as app_pkg\n"
+        "    except Exception:\n"
+        "        return\n"
+        "    for mod in pkgutil.walk_packages(app_pkg.__path__, 'app.'):\n"
+        "        try:\n"
+        "            m = importlib.import_module(mod.name)\n"
+        "        except Exception:\n"
+        "            continue\n"
+        "        r = getattr(m, 'router', None)\n"
+        "        if isinstance(r, APIRouter):\n"
+        "            try:\n"
+        "                app.include_router(r)\n"
+        "            except Exception:\n"
+        "                pass\n\n"
+        "_autoload_routers()\n"
     )
 
 
