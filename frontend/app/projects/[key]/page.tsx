@@ -22,6 +22,7 @@ import {
   Palette,
   Plug,
   Layers,
+  Workflow,
 } from "lucide-react";
 import { useAuth } from "@/app/auth/_lib";
 import { getProject, type Project } from "@/lib/projects";
@@ -45,6 +46,7 @@ import CodeBrowser from "@/components/CodeBrowser";
 import DeployPanel from "@/components/DeployPanel";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
 import SprintBoard from "@/components/SprintBoard";
+import PipelinePanel from "@/components/PipelinePanel";
 import PersonalizationPanel from "@/components/PersonalizationPanel";
 import BuildProgressToast, {
   fireBuildStarted,
@@ -53,6 +55,7 @@ import { ToastStack, useToasts } from "@/components/Toast";
 
 type Tab =
   | "overview"
+  | "pipeline"
   | "vision"
   | "personalization"
   | "backlog"
@@ -75,6 +78,12 @@ const TABS: TabDef[] = [
     label: "Overview",
     icon: Home,
     description: "Estado del proyecto y atajos para generar el sistema.",
+  },
+  {
+    value: "pipeline",
+    label: "Pipeline",
+    icon: Workflow,
+    description: "Las 14 fases del ciclo de vida con aprobaciones humanas.",
   },
   {
     value: "vision",
@@ -553,6 +562,7 @@ export default function ProjectDetailPage() {
           {tab === "backlog" && (
             <BacklogBoard projectKey={project.key} user={user} />
           )}
+          {tab === "pipeline" && <PipelinePanel projectKey={project.key} />}
           {tab === "sprints" && <SprintBoard projectKey={project.key} />}
           {tab === "code" && <CodeBrowser projectKey={project.key} />}
           {tab === "deploy" && (
