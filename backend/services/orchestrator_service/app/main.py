@@ -133,6 +133,7 @@ async def _run_generate_full_app(
     """
     try:
         active_sprint_name = None
+        active_version = None
         async for session in get_session():
             v_res = await session.execute(
                 select(ProjectVision).where(ProjectVision.project_key == project_key)
@@ -246,11 +247,30 @@ async def _run_generate_full_app(
             ]
             break
 
+        # CICLO DE VIDA: si la version activa es derivada (v2+) y trae features/
+        # bugs nuevos, aumentar la vision para que el generador los construya
+        # SOBRE el sistema base (no se queda solo con la vision original).
+        gen_vision = vision.vision
+        version_feats = [b for b in backlog if b.get("origin") in ("feature_request", "bugfix")]
+        if active_version and active_version.number > 1 and (version_feats or active_version.description):
+            extra = active_version.description or ""
+            feats_txt = "\n".join(
+                f"- [{b.get('origin')}] {b.get('title')}: {b.get('description','')[:200]}"
+                for b in version_feats
+            )
+            gen_vision = (
+                f"{vision.vision}\n\n"
+                f"### NUEVA VERSIÓN v{active_version.number}: {active_version.name}\n"
+                f"Esta versión EVOLUCIONA el sistema existente agregando lo siguiente "
+                f"(constrúyelo SOBRE el sistema actual, sin quitar lo que ya hay):\n"
+                f"{extra}\n{feats_txt}"
+            )
+
         resp = await post_json(
             f"{settings.agent_runtime_service_url}/app/generate",
             {
                 "project_key": project_key,
-                "vision": vision.vision,
+                "vision": gen_vision,
                 "target_users": vision.target_users,
                 "backlog": backlog,
                 "stack_preference": vision.stack_preference,
