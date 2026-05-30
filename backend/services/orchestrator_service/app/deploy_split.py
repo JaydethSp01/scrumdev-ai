@@ -85,7 +85,11 @@ async def _deploy_backend(
         out["detail"] = pub.get("repo")
         return out
 
-    env_vars = []
+    env_vars = [
+        # Render usa Python 3.14 por defecto; pydantic-core no tiene wheel para
+        # 3.14 y compila Rust (falla). Fijar 3.12 -> usa wheels precompiladas.
+        {"key": "PYTHON_VERSION", "value": "3.12.6"},
+    ]
     if db_url:
         env_vars.append({"key": "DATABASE_URL", "value": db_url})
     env_vars.append({"key": "CORS_ORIGINS", "value": front_url or "*"})

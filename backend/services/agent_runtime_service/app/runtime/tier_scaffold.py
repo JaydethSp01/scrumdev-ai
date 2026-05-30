@@ -189,6 +189,8 @@ def default_for(rel_path: str, framework: str, project_key: str) -> str | None:
     be = {
         "main.py": _backend_main(),
         "requirements.txt": _REQUIREMENTS,
+        "runtime.txt": "python-3.12.6\n",
+        ".python-version": "3.12.6\n",
         "Dockerfile": _DOCKERFILE,
         "app/__init__.py": "",
         "app/db.py": _BACKEND_DB,

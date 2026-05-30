@@ -88,6 +88,7 @@ _NEXT_FRONTEND_FILES = (
 _FASTAPI_BACKEND_FILES = (
     "main.py",
     "requirements.txt",
+    "runtime.txt",          # fija Python 3.12 en Render (wheels precompiladas)
     "Dockerfile",
     "app/__init__.py",
     "app/db.py",
