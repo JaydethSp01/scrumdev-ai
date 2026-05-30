@@ -23,6 +23,10 @@ import {
   Plug,
   Layers,
   Workflow,
+  SlidersHorizontal,
+  Building2,
+  Bot,
+  Gavel,
 } from "lucide-react";
 import { useAuth } from "@/app/auth/_lib";
 import { getProject, type Project } from "@/lib/projects";
@@ -48,6 +52,12 @@ import IntegrationsPanel from "@/components/IntegrationsPanel";
 import SprintBoard from "@/components/SprintBoard";
 import PipelinePanel from "@/components/PipelinePanel";
 import VersionsPanel from "@/components/VersionsPanel";
+import ArchitecturePanel from "@/components/ArchitecturePanel";
+import DecisionsPanel from "@/components/DecisionsPanel";
+import AgentsPanel from "@/components/AgentsPanel";
+import WorkflowsPanel from "@/components/WorkflowsPanel";
+import NFRForm from "@/components/NFRForm";
+import AuditLog from "@/components/AuditLog";
 import PersonalizationPanel from "@/components/PersonalizationPanel";
 import BuildProgressToast, {
   fireBuildStarted,
@@ -58,10 +68,14 @@ type Tab =
   | "overview"
   | "pipeline"
   | "vision"
+  | "nfr"
+  | "architecture"
   | "personalization"
   | "backlog"
   | "versions"
   | "sprints"
+  | "agents"
+  | "decisions"
   | "code"
   | "deploy"
   | "integrations"
@@ -94,6 +108,18 @@ const TABS: TabDef[] = [
     description: "Describe que vas a construir y para quien.",
   },
   {
+    value: "nfr",
+    label: "Requisitos NFR",
+    icon: SlidersHorizontal,
+    description: "Captura requisitos no funcionales: performance, escala, seguridad, deploy.",
+  },
+  {
+    value: "architecture",
+    label: "Arquitectura",
+    icon: Building2,
+    description: "Propuesta de arquitectura del Architect Agent + ADR + validacion de politicas.",
+  },
+  {
     value: "personalization",
     label: "Personalizacion",
     icon: Palette,
@@ -118,6 +144,18 @@ const TABS: TabDef[] = [
     label: "Sprints",
     icon: Layers,
     description: "Como PO decides el orden de sprints y que historias entran.",
+  },
+  {
+    value: "agents",
+    label: "Agentes",
+    icon: Bot,
+    description: "Los 10 agentes del equipo y el historial de ejecuciones de workflows.",
+  },
+  {
+    value: "decisions",
+    label: "Decisiones",
+    icon: Gavel,
+    description: "Aprobaciones humanas pendientes (gates) y bitacora de auditoria.",
   },
   {
     value: "code",
@@ -565,6 +603,12 @@ export default function ProjectDetailPage() {
           {tab === "vision" && (
             <VisionForm projectKey={project.key} user={user} />
           )}
+          {tab === "nfr" && (
+            <NFRForm projectKey={project.key} user={user} />
+          )}
+          {tab === "architecture" && (
+            <ArchitecturePanel projectKey={project.key} />
+          )}
           {tab === "personalization" && (
             <PersonalizationPanel projectKey={project.key} user={user} />
           )}
@@ -574,6 +618,18 @@ export default function ProjectDetailPage() {
           {tab === "pipeline" && <PipelinePanel projectKey={project.key} />}
           {tab === "versions" && <VersionsPanel projectKey={project.key} />}
           {tab === "sprints" && <SprintBoard projectKey={project.key} />}
+          {tab === "agents" && (
+            <div className="space-y-6">
+              <AgentsPanel />
+              <WorkflowsPanel projectKey={project.key} />
+            </div>
+          )}
+          {tab === "decisions" && (
+            <div className="space-y-6">
+              <DecisionsPanel projectKey={project.key} user={user} />
+              <AuditLog projectKey={project.key} />
+            </div>
+          )}
           {tab === "code" && <CodeBrowser projectKey={project.key} />}
           {tab === "deploy" && (
             <DeployPanel projectKey={project.key} user={user} />
