@@ -199,43 +199,50 @@ async def run_build_pipeline(
         summary["architecture_chars"] = len(architecture_output)
 
         await _update_build(build_id, stage="coding", progress_percent=60)
+        # UNIFICADO: usar el generador per-tier (/app/generate) que clasifica el
+        # producto y respeta is_static (landing = solo frontend, sin backend).
+        # Antes /code/generate generaba SIEMPRE fullstack por-historia y
+        # contaminaba los landings con backend.
         top_items = sorted(
             saved_items,
             key=lambda x: (PRIORITY_RANK.get(x.priority, 1), x.order_index),
-        )[:max_stories_to_code]
+        )
+        backlog_for_gen = [
+            {
+                "story_key": it.story_key,
+                "title": it.title,
+                "description": it.description,
+                "priority": it.priority,
+                "story_points": it.story_points,
+            }
+            for it in top_items
+        ]
+        app_resp = await _post_json(
+            "/app/generate",
+            {
+                "project_key": project_key,
+                "vision": vision.vision,
+                "target_users": vision.target_users,
+                "backlog": backlog_for_gen,
+                "stack_preference": effective_stack,
+                "nfr": nfr_data or None,
+            },
+            timeout=600.0,
+        )
+        files = app_resp.get("files", [])
+        await _save_code(project_key, None, files)
+        # marcar historias del backlog como done (el generador holistico las cubre)
+        async for session in get_session():
+            for it in saved_items:
+                db_item = await session.get(BacklogItem, it.id)
+                if db_item and db_item.status != "done":
+                    db_item.status = "done"
+            await session.commit()
+            break
+        await _update_build(build_id, progress_percent=90)
 
-        total_files = 0
-        per_story_summary = []
-        for i, item in enumerate(top_items):
-            code_resp = await _post_json(
-                "/code/generate",
-                {
-                    "project_key": project_key,
-                    "story_title": item.title,
-                    "story_description": item.description,
-                    "acceptance_criteria": item.acceptance_criteria,
-                    "architecture_context": architecture_output[:3000],
-                    "stack": effective_stack,
-                    "max_files": 4,
-                },
-            )
-            files = code_resp.get("files", [])
-            await _save_code(project_key, item.id, files)
-            async for session in get_session():
-                db_item = await session.get(BacklogItem, item.id)
-                if db_item:
-                    db_item.status = "in_progress"
-                    await session.commit()
-                break
-            total_files += len(files)
-            per_story_summary.append(
-                {"story_key": item.story_key, "title": item.title, "files": len(files)}
-            )
-            pct = 60 + int((i + 1) / max(1, len(top_items)) * 30)
-            await _update_build(build_id, progress_percent=pct)
-
-        summary["code_files_generated"] = total_files
-        summary["stories_coded"] = per_story_summary
+        summary["code_files_generated"] = len(files)
+        summary["stack_generated"] = app_resp.get("stack")
         summary["architecture_preview"] = architecture_output[:500]
 
         await _update_build(
