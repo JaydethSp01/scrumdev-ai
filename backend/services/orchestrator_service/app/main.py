@@ -33,9 +33,11 @@ from shared.db.models import (
     BuildRun,
     CodeArtifact,
     ChatMessage,
+    ChatSession,
     HumanDecision,
     NFRCapture,
     ProjectAsset,
+    ProjectVersion,
     ProjectVision,
     Sprint,
     WorkflowRun,
@@ -239,23 +241,31 @@ async def _run_generate_full_app(
         files = resp.get("files", [])
 
         async for session in get_session():
-            if replace_existing:
-                existing = await session.execute(
-                    select(CodeArtifact).where(CodeArtifact.project_key == project_key)
+            from services.orchestrator_service.app.versions import ensure_v1
+            version = await ensure_v1(session, project_key)
+            # ACUMULATIVO por version (fix entrega incremental): MERGE por
+            # file_path dentro de la version activa. Los archivos de sprints
+            # previos NO se borran; si un archivo se regenera, se actualiza su
+            # contenido; los nuevos se agregan. Asi el sprint 2 suma al sprint 1.
+            existing = (await session.execute(
+                select(CodeArtifact).where(
+                    CodeArtifact.project_key == project_key,
+                    CodeArtifact.version_id == version.id,
                 )
-                for a in existing.scalars().all():
-                    await session.delete(a)
-                await session.commit()
+            )).scalars().all()
+            by_path = {a.file_path: a for a in existing}
             for f in files:
-                session.add(
-                    CodeArtifact(
-                        project_key=project_key,
-                        story_id=None,
-                        file_path=f.get("path", "unknown"),
-                        language=f.get("language", "text"),
-                        content=f.get("content", ""),
-                    )
-                )
+                path = f.get("path", "unknown")
+                content = f.get("content", "")
+                lang = f.get("language", "text")
+                if path in by_path:
+                    by_path[path].content = content
+                    by_path[path].language = lang
+                else:
+                    session.add(CodeArtifact(
+                        project_key=project_key, version_id=version.id,
+                        story_id=None, file_path=path, language=lang, content=content,
+                    ))
             # Marcar TODAS las stories del backlog como done — el generate-app
             # holistico produce un proyecto que CUBRE todas las historias en un
             # solo pase (la guia Delfin lo trata como MVP completo).
@@ -957,6 +967,87 @@ async def approve_current_gate(project_key: str, req: AdvancePhaseRequest) -> di
 
     # ahora avanzar
     return await advance_pipeline(project_key, req)
+
+
+# ===== Ciclo de vida: Versiones (Proyecto -> Version -> Sprint -> Tarea) =====
+
+
+class CreateVersionRequest(BaseModel):
+    name: str = ""
+    description: str = ""
+    copy_code: bool = True
+
+
+class VersionStatusRequest(BaseModel):
+    status: str  # draft | active | released | archived
+
+
+@app.get("/projects/{project_key}/versions")
+async def list_versions(project_key: str) -> dict:
+    from services.orchestrator_service.app.versions import ensure_v1, version_dict
+    async for session in get_session():
+        await ensure_v1(session, project_key)
+        await session.commit()
+        versions = (await session.execute(
+            select(ProjectVersion).where(ProjectVersion.project_key == project_key)
+            .order_by(ProjectVersion.number.asc())
+        )).scalars().all()
+        out = []
+        for v in versions:
+            sprints = (await session.execute(
+                select(Sprint).where(Sprint.version_id == v.id)
+            )).scalars().all()
+            files = (await session.execute(
+                select(CodeArtifact).where(CodeArtifact.version_id == v.id)
+            )).scalars().all()
+            out.append(version_dict(v, len(sprints), len(files)))
+        return {"versions": out, "total": len(out)}
+    raise HTTPException(status_code=503, detail="db unavailable")
+
+
+@app.post("/projects/{project_key}/versions")
+async def create_project_version(project_key: str, req: CreateVersionRequest) -> dict:
+    """Crea una version nueva (parte del codigo de la activa por defecto)."""
+    from services.orchestrator_service.app.versions import (
+        create_version, version_dict,
+    )
+    async for session in get_session():
+        v = await create_version(session, project_key, req.name, req.description, req.copy_code)
+        await session.commit()
+        await event_bus.publish(DomainEvent(
+            event_type="VERSION_CREATED", source_service="orchestrator-service",
+            correlation_id=str(uuid4()), project_key=project_key,
+            payload={"version_id": v.id, "number": v.number, "name": v.name},
+        ))
+        return version_dict(v)
+    raise HTTPException(status_code=503, detail="db unavailable")
+
+
+@app.post("/projects/{project_key}/versions/{version_id}/status")
+async def set_version_status(project_key: str, version_id: str, req: VersionStatusRequest) -> dict:
+    """Cambia estado de una version: draft|active|released|archived. Al activar
+    una, desactiva las demas (solo una activa a la vez)."""
+    async for session in get_session():
+        v = (await session.execute(
+            select(ProjectVersion).where(ProjectVersion.id == version_id)
+        )).scalar_one_or_none()
+        if not v:
+            raise HTTPException(status_code=404, detail="version not found")
+        if req.status == "active":
+            others = (await session.execute(
+                select(ProjectVersion).where(
+                    ProjectVersion.project_key == project_key,
+                    ProjectVersion.status == "active",
+                )
+            )).scalars().all()
+            for o in others:
+                o.status = "released" if o.released_at else "draft"
+        v.status = req.status
+        if req.status == "released":
+            v.released_at = datetime.now(timezone.utc)
+        await session.commit()
+        return {"ok": True, "version_id": version_id, "status": v.status}
+    raise HTTPException(status_code=503, detail="db unavailable")
 
 
 # ===== FASE B: Sprint planning (el PO decide) =====
@@ -1668,9 +1759,13 @@ async def deploy_project(project_key: str, req: DeployRequest) -> dict:
     """Publica todos los CodeArtifact al repo GitHub del usuario y opcionalmente
     crea un proyecto Vercel apuntado al repo (Vercel hace auto-deploy en cada push)."""
     async for session in get_session():
-        result = await session.execute(
-            select(CodeArtifact).where(CodeArtifact.project_key == project_key)
-        )
+        # desplegar el codigo de la VERSION ACTIVA (ciclo de vida)
+        from services.orchestrator_service.app.versions import get_active_version
+        active_version = await get_active_version(session, project_key)
+        art_q = select(CodeArtifact).where(CodeArtifact.project_key == project_key)
+        if active_version:
+            art_q = art_q.where(CodeArtifact.version_id == active_version.id)
+        result = await session.execute(art_q)
         artifacts = result.scalars().all()
         if not artifacts:
             raise HTTPException(
