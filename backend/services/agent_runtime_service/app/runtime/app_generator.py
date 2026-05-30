@@ -49,82 +49,95 @@ def _extract_json(raw: str):
         raise
 
 
-_STACK_INSTRUCTIONS = """**Stack OBLIGATORIO (deploy target = Vercel fullstack):**
+_STACK_FULLSTACK = """**Stack OBLIGATORIO: FULLSTACK SEPARADO (front Vercel, back Render, db Neon).**
+El frontend y el backend son DOS proyectos independientes en DOS carpetas raiz
+(`frontend/` y `backend/`). NUNCA mezcles codigo de uno en la carpeta del otro.
+NUNCA dupliques un archivo en raiz y dentro de `frontend/` a la vez.
 
-### Frontend Next.js (TODO va en la RAIZ del repo, NO en `frontend/`):
+### TIER 1 - FRONTEND (TODO bajo `frontend/`, deploy = Vercel):
 - Next.js 14 App Router + Tailwind + lucide-react.
-- Estructura raiz: `app/layout.tsx`, `app/page.tsx`, `app/globals.css`, `app/<feature>/page.tsx`.
-- Componentes en `components/`: Navbar, Footer, Button, Card, Hero, FeatureGrid.
-- `lib/api.ts` con helper `apiGet/apiPost` que apunta a `/api` (mismo dominio, sin CORS). Si responde 404/500, fallback a MOCK DATA de `lib/mock.ts`.
-- `lib/mock.ts` con la MISMA forma de datos del backend (mismos campos snake_case), 8-12 items por entidad con imagenes Unsplash.
-- `package.json` con deps: next@14.2.13, react@18.3.1, react-dom@18.3.1, lucide-react@0.451.0. DevDeps: typescript@5.5.4, tailwindcss@3.4.13, autoprefixer@10.4.20, postcss@8.4.47, @types/node@20.16.10, @types/react@18.3.11, @types/react-dom@18.3.0.
-- `next.config.mjs` con `typescript.ignoreBuildErrors:true` y `eslint.ignoreDuringBuilds:true`.
-- `tailwind.config.ts` con content `['./app/**/*.{ts,tsx}','./components/**/*.{ts,tsx}']` + colors brand/secondary/accent.
-- `postcss.config.mjs` con tailwindcss + autoprefixer. `tsconfig.json` con strict:false y paths `@/*`.
+- `frontend/app/layout.tsx` (importa `./globals.css`), `frontend/app/page.tsx`,
+  `frontend/app/globals.css` (con `@tailwind base; @tailwind components; @tailwind utilities;`).
+- 1 pagina por entidad: `frontend/app/<entidad>/page.tsx`.
+- `frontend/components/`: Sidebar, Navbar, Table, Card, Button (los que uses).
+- `frontend/lib/api.ts`: helper que lee `const API = process.env.NEXT_PUBLIC_API_URL || ''`
+  y hace fetch a `${API}/<recurso>`. Si la respuesta NO es ok, hace fallback a `frontend/lib/mock.ts`.
+- `frontend/lib/mock.ts`: misma forma de datos del backend (campos snake_case), 8-12 items por entidad.
+- `frontend/package.json`: next@14.2.13, react@18.3.1, react-dom@18.3.1, lucide-react@0.451.0;
+  devDeps typescript@5.5.4, tailwindcss@3.4.13, autoprefixer@10.4.20, postcss@8.4.47,
+  @types/node, @types/react, @types/react-dom. scripts: dev/build/start de Next.
+- `frontend/next.config.mjs` con `typescript.ignoreBuildErrors:true` y `eslint.ignoreDuringBuilds:true`.
+- `frontend/tailwind.config.ts` content `['./app/**/*.{ts,tsx}','./components/**/*.{ts,tsx}']`.
+- `frontend/postcss.config.mjs` (tailwindcss + autoprefixer). `frontend/tsconfig.json` strict:false, paths `@/*`.
+- `frontend/.env.example` con `NEXT_PUBLIC_API_URL=https://tu-backend.onrender.com`.
+- `frontend/README.md`.
+- El frontend NO tiene codigo Python. NO uses `/api/*` del mismo dominio: usa NEXT_PUBLIC_API_URL.
 
-### Backend FastAPI Serverless (carpeta `api/` en la raiz):
-- Archivo UNICO: `api/index.py` que exporta `handler = Mangum(app)` o directamente `app: FastAPI` (Vercel detecta ASGI).
-- TODO el backend en ese archivo (FastAPI + modelos + endpoints) — max 280 lineas. Si necesitas mas, usa `api/_db.py` y `api/_models.py` con prefijo `_` para que Vercel no los exponga como functions.
-- Usa **psycopg[binary]** (sync, no asyncpg) — funciona mejor en serverless.
-- Connection string desde `os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL")` (Vercel Postgres inyecta `POSTGRES_URL` automaticamente).
-- Pool: usar `psycopg_pool.ConnectionPool(min_size=0, max_size=1)` o conexion por request (serverless = procesos efimeros).
-- Init schema + seed condicional en startup: usar `@app.on_event("startup")` que ejecuta `CREATE TABLE IF NOT EXISTS ...` + chequea `SELECT COUNT(*)` y si vacio inserta 8-12 rows realistas con imagenes Unsplash.
-- Si la DB falla (no env, error conexion), endpoints devuelven JSON con datos hardcoded (NO 500). NUNCA estallar.
-- Endpoints REST CRUD: GET lista, POST crea, GET por id. Health en GET `/api/health`.
-- 2-3 tablas relacionadas con FK reales y validacion via Pydantic v2.
+### TIER 2 - BACKEND (TODO bajo `backend/`, deploy = Render web service):
+- FastAPI standalone (NO serverless). `backend/main.py` crea `app = FastAPI()`,
+  agrega CORSMiddleware con origins desde `os.environ.get("CORS_ORIGINS","*").split(",")`,
+  incluye los routers, y expone `GET /health`. Ultima linea deja `app` accesible.
+- `backend/requirements.txt`: fastapi==0.115.0, uvicorn[standard]==0.30.6,
+  psycopg[binary]==3.2.3, pydantic==2.9.2.
+- `backend/Dockerfile`: `FROM python:3.12-slim`, copia requirements, `pip install -r requirements.txt`,
+  copia el codigo, `CMD ["sh","-c","uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]`.
+- `backend/app/__init__.py` (vacio), `backend/app/db.py` (conexion psycopg leyendo
+  `os.environ.get("DATABASE_URL")`; si falta o falla -> modo memoria/mock, NUNCA 500),
+  `backend/app/models.py` (Pydantic v2 por entidad).
+- `backend/app/routers/<entidad>.py`: CRUD REST por entidad (GET lista, GET id, POST, PUT, DELETE).
+- Schema init + seed condicional en startup (`@app.on_event("startup")`): CREATE TABLE IF NOT EXISTS
+  + si vacio inserta 8-12 filas realistas. Idempotente.
+- `backend/.env.example` con `DATABASE_URL=postgres://...` y `CORS_ORIGINS=https://tu-front.vercel.app`.
+- `backend/README.md`.
+- El backend NO tiene codigo TypeScript/React.
 
-### requirements.txt (en RAIZ, para que Vercel detecte Python builds):
-```
-fastapi==0.115.0
-pydantic==2.9.2
-psycopg[binary]==3.2.3
-```
+### Imagenes Unsplash (ids verificados, ciclar): 1546026423-e4d3a8e1ee62,
+1517466787929-bc90951d0974, 1554151228-14d9def656e4, 1438761681033-6461ffad8d80,
+1500648767791-00dcc994a43e, 1531123897727-8f129e1688ce.
+URL: `https://images.unsplash.com/photo-{id}?w=800&q=80`."""
 
-### vercel.json (en RAIZ - NO especificar `runtime`, Vercel autodetecta):
-```json
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "nextjs",
-  "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/index" }
-  ]
-}
-```
-IMPORTANTE: NO incluyas "functions" con "runtime", Vercel da error
-"Function Runtimes must have a valid version". Solo framework + rewrites.
 
-### Archivos OBLIGATORIOS (lista exacta, NO inventes paths distintos):
-1. `package.json`
-2. `next.config.mjs`
-3. `tailwind.config.ts`
-4. `postcss.config.mjs`
-5. `tsconfig.json`
-6. `app/layout.tsx`
-7. `app/page.tsx`
-8. `app/globals.css`
-9. `app/<feature1>/page.tsx`
-10. `app/<feature2>/page.tsx`
-11. `app/<feature3>/page.tsx`
-12. `components/Navbar.tsx`
-13. `components/Footer.tsx`
-14. `components/Hero.tsx`
-15. `components/Card.tsx`
-16. `components/Button.tsx`
-17. `components/FeatureGrid.tsx`
-18. `lib/api.ts`
-19. `lib/mock.ts`
-20. `api/index.py`
-21. `requirements.txt`
-22. `vercel.json`
-23. `.env.example` (con `POSTGRES_URL=postgres://...`)
-24. `README.md`
+_STACK_STATIC = """**Stack OBLIGATORIO: LANDING ESTATICO (un solo tier Next.js en Vercel).**
+TODO bajo `frontend/`. Sin backend ni DB.
+- `frontend/app/layout.tsx` (importa `./globals.css`), `frontend/app/page.tsx` (landing
+  completa: Hero, Features, Testimonios, CTA, Footer), `frontend/app/globals.css`
+  (`@tailwind base; @tailwind components; @tailwind utilities;`).
+- `frontend/components/` (Navbar, Hero, FeatureGrid, Footer, Button, Card).
+- `frontend/package.json` (next@14.2.13, react@18.3.1, react-dom@18.3.1, lucide-react@0.451.0
+  + devDeps typescript/tailwindcss/autoprefixer/postcss/@types).
+- `frontend/next.config.mjs`, `frontend/tailwind.config.ts`, `frontend/postcss.config.mjs`,
+  `frontend/tsconfig.json`, `frontend/README.md`.
+- Paginas extra (Sobre nosotros/Contacto/Precios) SOLO si el cliente las menciona."""
 
-### Imagenes Unsplash (usa SOLO estos ids verificados):
-1546026423-e4d3a8e1ee62, 1517466787929-bc90951d0974, 1554151228-14d9def656e4,
-1438761681033-6461ffad8d80, 1500648767791-00dcc994a43e, 1531123897727-8f129e1688ce,
-1488161628813-04466f872be2, 1502823403499-6ccfcf4fb453
 
-URL: `https://images.unsplash.com/photo-{id}?w=800&q=80`. Distribuye ciclicamente."""
+def _manifest_block(blueprint: dict) -> str:
+    """Lista EXACTA de archivos obligatorios por tier (del blueprint del Stack Expert)."""
+    lines = ["### Archivos OBLIGATORIOS por tier (paths EXACTOS, con su prefijo):"]
+    for t in blueprint.get("tiers", []):
+        prefix = t.get("path_prefix", "")
+        lines.append(f"\n**{t['name']} ({t['framework']} -> {t['target']}):**")
+        for req in t.get("required_files", []):
+            lines.append(f"  - {prefix}{req}")
+    wiring = blueprint.get("wiring", [])
+    if wiring:
+        lines.append("\n### Cableado entre tiers (env vars que ya inyecta el deploy):")
+        for w in wiring:
+            lines.append(f"  - [{w['tier']}] {w['key']} = {w['source']}  ({w['note']})")
+    return "\n".join(lines)
+
+
+def _exemplars_block(exemplars: list[dict]) -> str:
+    """Few-shot: proyectos similares que SI compilaron y desplegaron."""
+    if not exemplars:
+        return ""
+    lines = ["### Referencias de proyectos similares que SI funcionaron (imita su estructura):"]
+    for e in exemplars[:3]:
+        manifest = e.get("manifest", {})
+        tiers_summary = "; ".join(
+            f"{tier}: {len(paths)} archivos" for tier, paths in manifest.items()
+        )
+        lines.append(f"  - \"{(e.get('vision') or '')[:80]}\" -> {tiers_summary}")
+    return "\n".join(lines) + "\n"
 
 
 def _format_brand_block(brand_kit: dict | None, assets: list[dict] | None) -> str:
@@ -226,6 +239,73 @@ def _build_software_block(classification: dict) -> str:
     )
 
 
+def _ensure_manifest_complete(
+    files: list[dict], stack_id: str, project_key: str
+) -> tuple[list[dict], list[str]]:
+    """Rellena archivos obligatorios faltantes por tier con defaults validos.
+
+    Garantiza que cada tier tenga su manifiesto completo -> deploy_ready. No
+    pisa lo que la IA genero (solo agrega lo que falta).
+    """
+    from shared.stacks.stack_blueprints import (
+        get_blueprint, split_by_tier, missing_required,
+    )
+    from services.agent_runtime_service.app.runtime.tier_scaffold import default_for
+
+    bp = get_blueprint(stack_id)
+    buckets = split_by_tier(files, stack_id)
+    existing = {(f.get("path") or "").lstrip("/") for f in files}
+    filled: list[str] = []
+
+    for tier in bp.tiers:
+        tier_files = buckets.get(tier.name, [])
+        for rel in missing_required(tier_files, tier):
+            content = default_for(rel, tier.framework, project_key)
+            if content is None:
+                continue
+            full_path = f"{tier.path_prefix}{rel}"
+            if full_path in existing:
+                continue
+            files.append({"path": full_path, "content": content})
+            existing.add(full_path)
+            filled.append(full_path)
+    return files, filled
+
+
+async def _fetch_blueprint_and_exemplars(classification: dict, vision: str) -> tuple[dict, list[dict], str]:
+    """Consulta al Stack Expert (ml_service): elige stack + manifiesto + few-shot.
+
+    Si el ml_service no esta disponible, cae al blueprint local (sin few-shot).
+    """
+    from shared.config.settings import settings
+    from shared.stacks.stack_blueprints import manifest_for, pick_stack
+
+    base = settings.ml_service_url
+    blueprint: dict | None = None
+    exemplars: list[dict] = []
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(
+                f"{base}/ml/stack/blueprint", json={"classification": classification}
+            )
+            if r.status_code == 200:
+                blueprint = r.json()
+            stack_id = (blueprint or {}).get("stack") or pick_stack(classification)
+            r2 = await client.post(
+                f"{base}/ml/stack/exemplars",
+                json={"vision": vision, "stack": stack_id, "top_k": 3},
+            )
+            if r2.status_code == 200:
+                exemplars = r2.json().get("exemplars", [])
+    except Exception as exc:
+        logger.warning("stack_expert_unavailable", error=str(exc))
+    if not blueprint:
+        stack_id = pick_stack(classification)
+        blueprint = manifest_for(stack_id)
+    return blueprint, exemplars, blueprint["stack"]
+
+
 async def generate_full_app(
     project_key: str,
     vision: str,
@@ -238,14 +318,21 @@ async def generate_full_app(
 ) -> dict:
     # FASE A: clasificar el producto ANTES de generar
     classification = await classify_product(vision, nfr)
+    # Stack Expert (ML): elige stack + manifiesto + few-shot de builds exitosos
+    blueprint, exemplars, stack_id = await _fetch_blueprint_and_exemplars(classification, vision)
     logger.info(
         "product_classified",
         project=project_key,
         type=classification["type"],
         is_static=classification["is_static"],
+        stack=stack_id,
+        exemplars=len(exemplars),
         entities=classification["entities"],
     )
     software_block = _build_software_block(classification)
+    stack_block = _STACK_STATIC if stack_id == "nextjs-static" else _STACK_FULLSTACK
+    manifest_block = _manifest_block(blueprint)
+    exemplars_block = _exemplars_block(exemplars)
 
     style_prefix = await build_style_prefix(project_key, vision, top_k=4)
     brand_block = _format_brand_block(brand_kit, assets)
@@ -264,33 +351,31 @@ async def generate_full_app(
         f"Vision:\n{vision}\n{users_block}\n\n"
         f"{software_block}\n"
         f"### Backlog priorizado (las historias guian QUE features construir):\n{backlog_block}\n\n"
-        f"{_STACK_INSTRUCTIONS}\n\n"
+        f"{exemplars_block}"
+        f"{stack_block}\n\n"
+        f"{manifest_block}\n\n"
         "**REGLAS GLOBALES OBLIGATORIAS:**\n"
         "1. Disenio profesional: tipografia generosa, espaciado, gradientes sutiles, "
         "rounded-xl/2xl, shadow-lg, dark mode (`dark:` variants), grids responsive. "
         "NO HTML plano. Usa iconos lucide.\n"
-        "2. Persistencia REAL: backend FastAPI en `api/index.py` con psycopg + "
-        "Postgres. Frontend consume via `/api/*`. Si DB falla, fallback a `lib/mock.ts` "
-        "y backend devuelve hardcoded (NUNCA 500).\n"
-        "3. COHERENCIA TOTAL: `app/page.tsx` SIEMPRE existe y es la entrada. TODOS "
-        "los `<Link href=>` apuntan a paginas que CREES. Cero rutas rotas. "
-        "Lista exacta en `routes`.\n"
-        "4. Mobile responsive (sm/md/lg breakpoints).\n"
-        "5. Datos demo REALISTAS y coherentes con el dominio del cliente. NO Lorem Ipsum.\n"
-        "6. Genera 18-30 archivos: package/config (8) + app/page.tsx home + 1 pagina "
-        "CRUD por entidad + components (Sidebar/Navbar/Table/Form/Card/Button) + "
-        "lib/api + lib/mock + api/index.py + requirements + vercel.json + README.\n"
-        "7. Cada archivo COMPLETO Y EJECUTABLE, max 300 lineas.\n"
-        "8. NO uses react-router-dom NI react-helmet (Next.js usa next/link).\n"
-        "9. Todo va a la RAIZ del repo (NO carpetas `frontend/`/`backend/`).\n"
-        "10. El backend `api/index.py` EXPORTA `app` (FastAPI) como ultima linea.\n\n"
+        "2. SEPARACION ESTRICTA: todo el frontend bajo `frontend/`, todo el backend "
+        "bajo `backend/`. NUNCA dupliques un mismo archivo en raiz y en `frontend/`.\n"
+        "3. COHERENCIA TOTAL: `frontend/app/page.tsx` SIEMPRE existe y es la entrada. "
+        "TODOS los `<Link href=>` apuntan a paginas que CREES. Cero rutas rotas.\n"
+        "4. El frontend habla con el backend SOLO via `process.env.NEXT_PUBLIC_API_URL`. "
+        "Si el backend no responde, fallback a `frontend/lib/mock.ts`. NUNCA hardcodees localhost.\n"
+        "5. Datos demo REALISTAS coherentes con el dominio del cliente. NO Lorem Ipsum.\n"
+        "6. GENERA TODOS los archivos del manifiesto de arriba (son obligatorios) + "
+        "1 pagina/router CRUD por entidad. Cada archivo COMPLETO Y EJECUTABLE, max 300 lineas.\n"
+        "7. NO uses react-router-dom NI react-helmet (Next.js usa next/link).\n"
+        "8. El backend `backend/main.py` deja `app` (FastAPI) accesible y tiene CORS.\n\n"
         "**Formato JSON exacto (sin texto extra):**\n"
         "{\n"
-        '  "stack": "vercel-fullstack-fastapi-nextjs-postgres",\n'
+        f'  "stack": "{stack_id}",\n'
         '  "product_type": "' + classification["type"] + '",\n'
         '  "summary": "1-2 frases del producto",\n'
         '  "routes": ["/", "/<entidad>", ...],\n'
-        '  "files": [{"path": "app/page.tsx", "content": "..."}, ...]\n'
+        '  "files": [{"path": "frontend/app/page.tsx", "content": "..."}, ...]\n'
         "}\n"
     )
 
@@ -302,25 +387,27 @@ async def generate_full_app(
     if not isinstance(files, list) or not files:
         raise ValueError("files must be a non-empty list")
 
-    # VALIDACION DE COHERENCIA (FASE A): garantizar app/page.tsx raiz existe
-    paths = {(f.get("path") or "") for f in files}
-    if "app/page.tsx" not in paths and "app/page.jsx" not in paths:
-        logger.warning("missing_root_page_will_be_scaffolded", project=project_key)
-        # El scaffold lo genera con links a las features (FASE E lo cubre)
+    # GATE DE COMPLETITUD: rellenar archivos obligatorios faltantes por tier
+    files, fill_report = _ensure_manifest_complete(files, stack_id, project_key)
+    if fill_report:
+        logger.info("manifest_backfilled", project=project_key, filled=fill_report)
 
-    data["stack"] = "vercel-fullstack-fastapi-nextjs-postgres"
+    data["files"] = files
+    data["stack"] = stack_id
     data["classification"] = classification
+    data["blueprint"] = blueprint
 
     logger.info(
         "full_app_generated",
         project=project_key,
         type=classification["type"],
+        stack=stack_id,
         files=len(files),
         routes=len(data.get("routes", [])),
     )
     await remember(
         project_key,
-        f"APP COMPLETA [{classification['type']}]: {data.get('summary','')} | "
+        f"APP COMPLETA [{classification['type']}/{stack_id}]: {data.get('summary','')} | "
         f"entidades: {classification['entities']} | routes: {data.get('routes')}",
         kind="app",
     )
