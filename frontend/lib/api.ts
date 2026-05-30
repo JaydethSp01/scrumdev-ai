@@ -633,6 +633,66 @@ export async function apiGetBacklog(projectKey: string): Promise<BacklogItem[]> 
   return data.items || [];
 }
 
+// ===== Sprints (FASE B) =====
+export type SprintStory = {
+  story_key: string;
+  title: string;
+  story_points: number;
+  status: string;
+};
+export type SprintData = {
+  id: string;
+  number: number;
+  name: string;
+  goal: string;
+  order_index: number;
+  status: "planned" | "active" | "completed" | "cancelled";
+  total_points: number;
+  stories: SprintStory[];
+};
+export type SprintBoard = {
+  sprints: SprintData[];
+  unassigned: SprintStory[];
+};
+
+export async function apiPlanSprints(projectKey: string): Promise<SprintBoard> {
+  const res = await fetch(`${API}/projects/${encodeURIComponent(projectKey)}/sprints/plan`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`plan sprints ${res.status}`);
+  return apiGetSprints(projectKey);
+}
+
+export async function apiGetSprints(projectKey: string): Promise<SprintBoard> {
+  const res = await fetch(`${API}/projects/${encodeURIComponent(projectKey)}/sprints`);
+  if (!res.ok) return { sprints: [], unassigned: [] };
+  return res.json();
+}
+
+export async function apiReorderSprints(projectKey: string, sprintIds: string[]): Promise<void> {
+  await fetch(`${API}/projects/${encodeURIComponent(projectKey)}/sprints/reorder`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sprint_ids: sprintIds }),
+  });
+}
+
+export async function apiMoveStory(projectKey: string, storyKey: string, sprintId: string | null): Promise<void> {
+  await fetch(`${API}/projects/${encodeURIComponent(projectKey)}/sprints/move-story`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ story_key: storyKey, sprint_id: sprintId }),
+  });
+}
+
+export async function apiSetSprintStatus(projectKey: string, sprintId: string, status: string): Promise<void> {
+  await fetch(`${API}/projects/${encodeURIComponent(projectKey)}/sprints/${sprintId}/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
 // Code
 export async function apiGetCode(projectKey: string): Promise<CodeFile[]> {
   const res = await authFetch(

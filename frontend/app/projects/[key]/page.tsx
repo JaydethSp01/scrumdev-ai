@@ -21,6 +21,7 @@ import {
   RefreshCw,
   Palette,
   Plug,
+  Layers,
 } from "lucide-react";
 import { useAuth } from "@/app/auth/_lib";
 import { getProject, type Project } from "@/lib/projects";
@@ -43,6 +44,7 @@ import BacklogBoard from "@/components/BacklogBoard";
 import CodeBrowser from "@/components/CodeBrowser";
 import DeployPanel from "@/components/DeployPanel";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
+import SprintBoard from "@/components/SprintBoard";
 import PersonalizationPanel from "@/components/PersonalizationPanel";
 import BuildProgressToast, {
   fireBuildStarted,
@@ -54,6 +56,7 @@ type Tab =
   | "vision"
   | "personalization"
   | "backlog"
+  | "sprints"
   | "code"
   | "deploy"
   | "integrations"
@@ -91,6 +94,12 @@ const TABS: TabDef[] = [
     label: "Backlog",
     icon: ListTodo,
     description: "Historias generadas por el crew de refinement.",
+  },
+  {
+    value: "sprints",
+    label: "Sprints",
+    icon: Layers,
+    description: "Como PO decides el orden de sprints y que historias entran.",
   },
   {
     value: "code",
@@ -544,6 +553,7 @@ export default function ProjectDetailPage() {
           {tab === "backlog" && (
             <BacklogBoard projectKey={project.key} user={user} />
           )}
+          {tab === "sprints" && <SprintBoard projectKey={project.key} />}
           {tab === "code" && <CodeBrowser projectKey={project.key} />}
           {tab === "deploy" && (
             <DeployPanel projectKey={project.key} user={user} />
