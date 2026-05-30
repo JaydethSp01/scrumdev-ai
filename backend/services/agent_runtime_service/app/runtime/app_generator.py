@@ -16,6 +16,7 @@ import json
 import re
 
 from services.agent_runtime_service.app.runtime.claude_code_runtime import run_claude_code
+from services.agent_runtime_service.app.runtime.product_classifier import classify_product
 from shared.observability import get_logger
 from shared.personalization import build_style_prefix, remember
 
@@ -23,11 +24,13 @@ logger = get_logger(__name__)
 
 
 APP_GENERATOR_SYSTEM = (
-    "Eres un Tech Lead y product designer senior. Generas proyectos web "
-    "PROFESIONALES, COHERENTES y comercialmente competitivos sobre el stack "
-    "OFICIAL ScrumDev AI: FastAPI + Next.js + PostgreSQL + Docker. "
-    "Tu trabajo NO es demos academicos: el output debe poder competir con "
-    "productos reales en diseno, UX, datos realistas y arquitectura limpia. "
+    "Eres un Tech Lead y product designer senior. Generas SOFTWARE REAL "
+    "FUNCIONAL, COHERENTE y comercialmente competitivo. "
+    "Tu trabajo NO es demos academicos ni fragmentos sueltos: el output es un "
+    "PRODUCTO COMPLETO que un empresario podria usar de verdad. "
+    "Cuando el cliente pide un SISTEMA (inventario, CRM, gestion, pedidos), "
+    "construyes CRUD real con todas las entidades, navegacion coherente, auth, "
+    "dashboard de entrada y datos persistidos. NO paginas estaticas sueltas. "
     "Devuelves SIEMPRE JSON puro valido, sin markdown ni fences. Sin "
     "placeholders ni ellipsis: cada archivo COMPLETO Y EJECUTABLE."
 )
@@ -171,15 +174,79 @@ def _format_brand_block(brand_kit: dict | None, assets: list[dict] | None) -> st
     return "\n".join(parts) + "\n\n"
 
 
+def _build_software_block(classification: dict) -> str:
+    """Instrucciones especificas segun el producto clasificado.
+
+    Para software real (saas_crud, dashboard, etc): exige CRUD funcional con
+    las entidades detectadas, dashboard de entrada, auth, navegacion coherente.
+    Para landing: sitio estatico bonito.
+    """
+    ptype = classification.get("type", "saas_crud")
+    entities = classification.get("entities", []) or []
+    roles = classification.get("roles", []) or ["admin", "usuario"]
+    features = classification.get("key_features", []) or []
+    is_static = classification.get("is_static", False)
+
+    if is_static:
+        return (
+            "### TIPO DE PRODUCTO: LANDING / SITIO ESTATICO\n"
+            "El cliente pide un sitio informativo/landing. Construye un sitio "
+            "estatico profesional con secciones: Hero, Features, Testimonios, "
+            "CTA, Footer. NO necesita backend ni DB. `app/page.tsx` es la home "
+            "completa con todas las secciones. Paginas extra solo si el cliente "
+            "las menciona (Sobre nosotros, Contacto, Precios).\n"
+        )
+
+    entities_block = ", ".join(entities) if entities else "las entidades del dominio"
+    roles_block = ", ".join(roles)
+    features_block = "\n".join(f"  - {f}" for f in features) if features else "  - CRUD de las entidades principales"
+
+    return (
+        f"### TIPO DE PRODUCTO: SOFTWARE REAL ({ptype})\n"
+        f"El cliente pide un SISTEMA FUNCIONAL, NO una landing. Debes construir "
+        f"software de verdad con CRUD real.\n\n"
+        f"**Entidades del dominio (modelos de datos):** {entities_block}\n"
+        f"**Roles de usuario:** {roles_block}\n"
+        f"**Funcionalidades core:**\n{features_block}\n\n"
+        "**OBLIGATORIO para software real:**\n"
+        "1. `app/page.tsx` = DASHBOARD de entrada (NO landing marketing). Muestra "
+        "metricas clave (totales por entidad), accesos rapidos a cada modulo, "
+        "y una tabla/grid de actividad reciente. Es el centro de control.\n"
+        "2. UNA pagina CRUD por cada entidad principal: "
+        "`app/<entidad>/page.tsx` con tabla (listar), boton 'Nuevo' que abre "
+        "form (crear), acciones editar/eliminar por fila. Conectada al backend real.\n"
+        "3. `components/Sidebar.tsx`: navegacion lateral con links a TODAS las "
+        "entidades + dashboard. Presente en el layout, siempre visible.\n"
+        "4. Backend `api/index.py`: CRUD REST completo (GET lista, GET id, POST, "
+        "PUT, DELETE) por cada entidad, con tablas Postgres relacionadas (FK reales), "
+        "validacion Pydantic, y seed de 8-12 registros realistas por tabla.\n"
+        "5. Auth: pagina `app/login/page.tsx` + endpoint `/api/auth/login` (puede "
+        "ser mock JWT simple). El dashboard asume usuario logueado.\n"
+        "6. Cada `<Link>` apunta a una pagina que EXISTE. Cero links rotos.\n"
+    )
+
+
 async def generate_full_app(
     project_key: str,
     vision: str,
     target_users: str | None,
     backlog: list[dict],
-    stack_preference: str | None = None,  # ignorado: stack es fijo
+    stack_preference: str | None = None,
     brand_kit: dict | None = None,
     assets: list[dict] | None = None,
+    nfr: dict | None = None,
 ) -> dict:
+    # FASE A: clasificar el producto ANTES de generar
+    classification = await classify_product(vision, nfr)
+    logger.info(
+        "product_classified",
+        project=project_key,
+        type=classification["type"],
+        is_static=classification["is_static"],
+        entities=classification["entities"],
+    )
+    software_block = _build_software_block(classification)
+
     style_prefix = await build_style_prefix(project_key, vision, top_k=4)
     brand_block = _format_brand_block(brand_kit, assets)
 
@@ -195,33 +262,34 @@ async def generate_full_app(
         f"{brand_block}"
         f"Proyecto: **{project_key}**\n"
         f"Vision:\n{vision}\n{users_block}\n\n"
-        f"### Backlog priorizado:\n{backlog_block}\n\n"
+        f"{software_block}\n"
+        f"### Backlog priorizado (las historias guian QUE features construir):\n{backlog_block}\n\n"
         f"{_STACK_INSTRUCTIONS}\n\n"
         "**REGLAS GLOBALES OBLIGATORIAS:**\n"
         "1. Disenio profesional: tipografia generosa, espaciado, gradientes sutiles, "
         "rounded-xl/2xl, shadow-lg, dark mode (`dark:` variants), grids responsive. "
-        "NO HTML plano, NO bullets con letras sueltas. Usa iconos lucide.\n"
+        "NO HTML plano. Usa iconos lucide.\n"
         "2. Persistencia REAL: backend FastAPI en `api/index.py` con psycopg + "
-        "Postgres (Vercel Postgres inyecta `POSTGRES_URL`). Frontend consume via "
-        "`/api/*` mismo dominio. Si backend o DB fallan, frontend cae a `lib/mock.ts` "
+        "Postgres. Frontend consume via `/api/*`. Si DB falla, fallback a `lib/mock.ts` "
         "y backend devuelve hardcoded (NUNCA 500).\n"
-        "3. Rutas coherentes: TODOS los `<Link href=>` apuntan a paginas que CREES. "
+        "3. COHERENCIA TOTAL: `app/page.tsx` SIEMPRE existe y es la entrada. TODOS "
+        "los `<Link href=>` apuntan a paginas que CREES. Cero rutas rotas. "
         "Lista exacta en `routes`.\n"
         "4. Mobile responsive (sm/md/lg breakpoints).\n"
-        "5. Datos demo REALISTAS: nombres hispanos, lugares reales, descripciones "
-        "creibles. NO Lorem Ipsum, NO 'User 1, User 2'.\n"
-        "6. Genera EXACTAMENTE los 24 archivos listados en STACK_INSTRUCTIONS. NO inventes paths.\n"
-        "7. Cada archivo COMPLETO Y EJECUTABLE, max 280 lineas.\n"
+        "5. Datos demo REALISTAS y coherentes con el dominio del cliente. NO Lorem Ipsum.\n"
+        "6. Genera 18-30 archivos: package/config (8) + app/page.tsx home + 1 pagina "
+        "CRUD por entidad + components (Sidebar/Navbar/Table/Form/Card/Button) + "
+        "lib/api + lib/mock + api/index.py + requirements + vercel.json + README.\n"
+        "7. Cada archivo COMPLETO Y EJECUTABLE, max 300 lineas.\n"
         "8. NO uses react-router-dom NI react-helmet (Next.js usa next/link).\n"
-        "9. NO crees Dockerfile, docker-compose, seed.py externo, ni carpetas "
-        "`frontend/` o `backend/` (todo va a la RAIZ del repo para Vercel).\n"
-        "10. El backend `api/index.py` debe EXPORTAR la variable `app` (tipo FastAPI) "
-        "como ultima linea para que Vercel la detecte como ASGI handler.\n\n"
+        "9. Todo va a la RAIZ del repo (NO carpetas `frontend/`/`backend/`).\n"
+        "10. El backend `api/index.py` EXPORTA `app` (FastAPI) como ultima linea.\n\n"
         "**Formato JSON exacto (sin texto extra):**\n"
         "{\n"
         '  "stack": "vercel-fullstack-fastapi-nextjs-postgres",\n'
-        '  "summary": "1-2 frases del proyecto",\n'
-        '  "routes": ["/", "/<feature>", ...],\n'
+        '  "product_type": "' + classification["type"] + '",\n'
+        '  "summary": "1-2 frases del producto",\n'
+        '  "routes": ["/", "/<entidad>", ...],\n'
         '  "files": [{"path": "app/page.tsx", "content": "..."}, ...]\n'
         "}\n"
     )
@@ -233,18 +301,27 @@ async def generate_full_app(
     files = data.get("files", [])
     if not isinstance(files, list) or not files:
         raise ValueError("files must be a non-empty list")
+
+    # VALIDACION DE COHERENCIA (FASE A): garantizar app/page.tsx raiz existe
+    paths = {(f.get("path") or "") for f in files}
+    if "app/page.tsx" not in paths and "app/page.jsx" not in paths:
+        logger.warning("missing_root_page_will_be_scaffolded", project=project_key)
+        # El scaffold lo genera con links a las features (FASE E lo cubre)
+
     data["stack"] = "vercel-fullstack-fastapi-nextjs-postgres"
+    data["classification"] = classification
 
     logger.info(
         "full_app_generated",
         project=project_key,
+        type=classification["type"],
         files=len(files),
         routes=len(data.get("routes", [])),
     )
     await remember(
         project_key,
-        f"APP COMPLETA [vercel-fullstack]: {data.get('summary','')} | "
-        f"routes: {data.get('routes')}",
+        f"APP COMPLETA [{classification['type']}]: {data.get('summary','')} | "
+        f"entidades: {classification['entities']} | routes: {data.get('routes')}",
         kind="app",
     )
     return data

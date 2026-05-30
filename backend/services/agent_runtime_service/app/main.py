@@ -162,6 +162,7 @@ class FullAppRequest(BaseModel):
     stack_preference: str | None = None
     brand_kit: dict | None = None
     assets: list[dict] = []
+    nfr: dict | None = None
 
 
 @app.post("/app/generate")
@@ -177,9 +178,28 @@ async def generate_full_app_endpoint(req: FullAppRequest) -> dict:
             req.stack_preference,
             req.brand_kit,
             req.assets,
+            req.nfr,
         )
     except Exception as exc:
         logger.exception("full_app_generation_failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class ClassifyRequest(BaseModel):
+    vision: str
+    nfr: dict | None = None
+
+
+@app.post("/product/classify")
+async def classify_product_endpoint(req: ClassifyRequest) -> dict:
+    """Clasifica el producto (software real vs estatico) — usado por orchestrator
+    para mostrar al PO que se va a construir antes de generar."""
+    from services.agent_runtime_service.app.runtime.product_classifier import classify_product
+
+    try:
+        return await classify_product(req.vision, req.nfr)
+    except Exception as exc:
+        logger.exception("classify_failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 
