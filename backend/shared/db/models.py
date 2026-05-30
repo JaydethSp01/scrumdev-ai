@@ -201,6 +201,28 @@ class BacklogItem(Base):
     priority: Mapped[str] = mapped_column(String(16), default="medium")
     status: Mapped[str] = mapped_column(String(32), default="backlog", index=True)
     order_index: Mapped[int] = mapped_column(default=0)
+    # FASE B: a que sprint pertenece (null = backlog sin asignar)
+    sprint_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class Sprint(Base):
+    """Sprint Scrum. El PO decide el orden y que historias entran. FASE B."""
+
+    __tablename__ = "sprints"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid4()))
+    project_key: Mapped[str] = mapped_column(String(64), index=True)
+    number: Mapped[int] = mapped_column(default=1)  # Sprint 1, 2, 3...
+    name: Mapped[str] = mapped_column(String(255))
+    goal: Mapped[str] = mapped_column(Text, default="")  # objetivo del sprint
+    order_index: Mapped[int] = mapped_column(default=0)  # orden que el PO decide
+    # planned | active | completed | cancelled
+    status: Mapped[str] = mapped_column(String(32), default="planned", index=True)
+    total_points: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow

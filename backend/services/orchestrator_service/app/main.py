@@ -37,6 +37,7 @@ from shared.db.models import (
     NFRCapture,
     ProjectAsset,
     ProjectVision,
+    Sprint,
     WorkflowRun,
 )
 from shared.db.session import get_session
@@ -670,12 +671,209 @@ async def list_backlog(project_key: str) -> dict:
                     "priority": i.priority,
                     "status": i.status,
                     "order_index": i.order_index,
+                    "sprint_id": i.sprint_id,
                     "created_at": i.created_at.isoformat(),
                 }
                 for i in items
             ]
         }
     return {"items": []}
+
+
+# ===== FASE B: Sprint planning (el PO decide) =====
+
+
+@app.post("/projects/{project_key}/sprints/plan")
+async def plan_project_sprints(project_key: str) -> dict:
+    """PO Agent agrupa el backlog en sprints sugeridos y los persiste.
+    El PO humano luego ajusta (reordenar, mover historias, activar)."""
+    # cargar vision + backlog
+    vision_txt = ""
+    backlog: list[dict] = []
+    async for session in get_session():
+        v = (await session.execute(
+            select(ProjectVision).where(ProjectVision.project_key == project_key)
+        )).scalar_one_or_none()
+        vision_txt = v.vision if v else ""
+        rows = (await session.execute(
+            select(BacklogItem).where(BacklogItem.project_key == project_key)
+            .order_by(BacklogItem.order_index)
+        )).scalars().all()
+        backlog = [
+            {"story_key": r.story_key, "title": r.title, "story_points": r.story_points,
+             "priority": r.priority}
+            for r in rows
+        ]
+        break
+
+    if not backlog:
+        raise HTTPException(status_code=400, detail="No hay backlog. Genera historias primero.")
+
+    # llamar al PO Agent planner
+    try:
+        resp = await post_json(
+            f"{settings.agent_runtime_service_url}/sprints/plan",
+            {"project_key": project_key, "vision": vision_txt, "backlog": backlog},
+            timeout=90.0,
+        )
+        suggested = resp.get("sprints", [])
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"planner failed: {exc}")
+
+    # persistir: borrar sprints previos, crear nuevos, asignar historias
+    async for session in get_session():
+        from sqlalchemy import delete as sa_delete
+        await session.execute(sa_delete(Sprint).where(Sprint.project_key == project_key))
+        # reset sprint_id de historias
+        rows = (await session.execute(
+            select(BacklogItem).where(BacklogItem.project_key == project_key)
+        )).scalars().all()
+        by_key = {r.story_key: r for r in rows}
+        for r in rows:
+            r.sprint_id = None
+        created = []
+        for s in suggested:
+            sp = Sprint(
+                project_key=project_key,
+                number=s.get("number", 1),
+                name=s.get("name", f"Sprint {s.get('number',1)}"),
+                goal=s.get("goal", ""),
+                order_index=s.get("order_index", 0),
+                total_points=s.get("total_points", 0),
+                status="planned",
+            )
+            session.add(sp)
+            await session.flush()  # obtener sp.id
+            for k in s.get("story_keys", []):
+                if k in by_key:
+                    by_key[k].sprint_id = sp.id
+            created.append({"id": sp.id, "number": sp.number, "name": sp.name,
+                            "goal": sp.goal, "story_keys": s.get("story_keys", []),
+                            "total_points": sp.total_points})
+        await session.commit()
+        break
+
+    return {"sprints": created, "count": len(created)}
+
+
+@app.get("/projects/{project_key}/sprints")
+async def list_sprints(project_key: str) -> dict:
+    async for session in get_session():
+        sprints = (await session.execute(
+            select(Sprint).where(Sprint.project_key == project_key)
+            .order_by(Sprint.order_index.asc())
+        )).scalars().all()
+        items = (await session.execute(
+            select(BacklogItem).where(BacklogItem.project_key == project_key)
+        )).scalars().all()
+        by_sprint: dict[str, list] = {}
+        for it in items:
+            if it.sprint_id:
+                by_sprint.setdefault(it.sprint_id, []).append({
+                    "story_key": it.story_key, "title": it.title,
+                    "story_points": it.story_points, "status": it.status,
+                })
+        unassigned = [
+            {"story_key": it.story_key, "title": it.title, "story_points": it.story_points,
+             "status": it.status}
+            for it in items if not it.sprint_id
+        ]
+        return {
+            "sprints": [
+                {
+                    "id": s.id, "number": s.number, "name": s.name, "goal": s.goal,
+                    "order_index": s.order_index, "status": s.status,
+                    "total_points": s.total_points,
+                    "stories": by_sprint.get(s.id, []),
+                }
+                for s in sprints
+            ],
+            "unassigned": unassigned,
+        }
+    return {"sprints": [], "unassigned": []}
+
+
+class SprintReorderRequest(BaseModel):
+    sprint_ids: list[str]  # orden nuevo
+
+
+@app.post("/projects/{project_key}/sprints/reorder")
+async def reorder_sprints(project_key: str, req: SprintReorderRequest) -> dict:
+    """El PO decide el orden de ejecucion de los sprints."""
+    async for session in get_session():
+        for idx, sid in enumerate(req.sprint_ids):
+            sp = await session.get(Sprint, sid)
+            if sp and sp.project_key == project_key:
+                sp.order_index = idx
+        await session.commit()
+        break
+    return {"ok": True, "order": req.sprint_ids}
+
+
+class MoveStoryRequest(BaseModel):
+    story_key: str
+    sprint_id: str | None = None  # null = mover a backlog sin asignar
+
+
+@app.post("/projects/{project_key}/sprints/move-story")
+async def move_story_to_sprint(project_key: str, req: MoveStoryRequest) -> dict:
+    """El PO mueve una historia entre sprints (o al backlog)."""
+    async for session in get_session():
+        story = (await session.execute(
+            select(BacklogItem).where(
+                BacklogItem.project_key == project_key,
+                BacklogItem.story_key == req.story_key,
+            )
+        )).scalar_one_or_none()
+        if not story:
+            raise HTTPException(status_code=404, detail="story not found")
+        story.sprint_id = req.sprint_id
+        await session.commit()
+        # recalcular puntos de sprints afectados
+        await _recalc_sprint_points(session, project_key)
+        break
+    return {"ok": True, "story_key": req.story_key, "sprint_id": req.sprint_id}
+
+
+class SprintStatusRequest(BaseModel):
+    status: str  # planned | active | completed | cancelled
+
+
+@app.post("/projects/{project_key}/sprints/{sprint_id}/status")
+async def set_sprint_status(project_key: str, sprint_id: str, req: SprintStatusRequest) -> dict:
+    """El PO activa/completa un sprint. Solo 1 sprint activo a la vez."""
+    if req.status not in ("planned", "active", "completed", "cancelled"):
+        raise HTTPException(status_code=400, detail="status invalido")
+    async for session in get_session():
+        sp = await session.get(Sprint, sprint_id)
+        if not sp or sp.project_key != project_key:
+            raise HTTPException(status_code=404, detail="sprint not found")
+        if req.status == "active":
+            # desactivar otros activos
+            others = (await session.execute(
+                select(Sprint).where(
+                    Sprint.project_key == project_key, Sprint.status == "active"
+                )
+            )).scalars().all()
+            for o in others:
+                if o.id != sprint_id:
+                    o.status = "planned"
+        sp.status = req.status
+        await session.commit()
+        break
+    return {"ok": True, "sprint_id": sprint_id, "status": req.status}
+
+
+async def _recalc_sprint_points(session, project_key: str) -> None:
+    sprints = (await session.execute(
+        select(Sprint).where(Sprint.project_key == project_key)
+    )).scalars().all()
+    items = (await session.execute(
+        select(BacklogItem).where(BacklogItem.project_key == project_key)
+    )).scalars().all()
+    for sp in sprints:
+        sp.total_points = sum(it.story_points for it in items if it.sprint_id == sp.id)
+    await session.commit()
 
 
 @app.get("/projects/{project_key}/code")

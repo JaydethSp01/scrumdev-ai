@@ -185,6 +185,28 @@ async def generate_full_app_endpoint(req: FullAppRequest) -> dict:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+class SprintPlanRequest(BaseModel):
+    project_key: str
+    vision: str
+    backlog: list[dict] = []
+    sprint_capacity: int = 13
+
+
+@app.post("/sprints/plan")
+async def plan_sprints_endpoint(req: SprintPlanRequest) -> dict:
+    """PO Agent agrupa historias en sprints sugeridos. El PO humano ajusta."""
+    from services.agent_runtime_service.app.runtime.sprint_planner import plan_sprints
+
+    try:
+        sprints = await plan_sprints(
+            req.project_key, req.vision, req.backlog, req.sprint_capacity
+        )
+        return {"sprints": sprints, "count": len(sprints)}
+    except Exception as exc:
+        logger.exception("sprint_plan_failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 class ClassifyRequest(BaseModel):
     vision: str
     nfr: dict | None = None

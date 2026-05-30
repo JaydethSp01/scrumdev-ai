@@ -495,6 +495,61 @@ async def integrations_status() -> dict:
     return out
 
 
+# ===== FASE B: Sprint planning proxies =====
+
+
+@app.post("/projects/{project_key}/sprints/plan")
+async def gw_plan_sprints(project_key: str) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/sprints/plan",
+        {}, timeout=120.0,
+    )
+
+
+@app.get("/projects/{project_key}/sprints")
+async def gw_list_sprints(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/sprints"
+    )
+
+
+class SprintReorderPayload(BaseModel):
+    sprint_ids: list[str]
+
+
+@app.post("/projects/{project_key}/sprints/reorder")
+async def gw_reorder_sprints(project_key: str, req: SprintReorderPayload) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/sprints/reorder",
+        req.model_dump(),
+    )
+
+
+class MoveStoryPayload(BaseModel):
+    story_key: str
+    sprint_id: str | None = None
+
+
+@app.post("/projects/{project_key}/sprints/move-story")
+async def gw_move_story(project_key: str, req: MoveStoryPayload) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/sprints/move-story",
+        req.model_dump(),
+    )
+
+
+class SprintStatusPayload(BaseModel):
+    status: str
+
+
+@app.post("/projects/{project_key}/sprints/{sprint_id}/status")
+async def gw_sprint_status(project_key: str, sprint_id: str, req: SprintStatusPayload) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/sprints/{sprint_id}/status",
+        req.model_dump(),
+    )
+
+
 @app.get("/projects/{project_key}/integrations")
 async def project_integrations(project_key: str) -> dict:
     """Estado de integraciones especifico al proyecto: deploy actual, DB,
