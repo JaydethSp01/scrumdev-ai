@@ -100,8 +100,26 @@ async def main() -> int:
                 break
         check("backlog generado", len(backlog) >= 4, f"{len(backlog)} historias")
 
-        # --- 4. GENERAR APP DEPLOYABLE PER-TIER ---
-        print("\n=== 4. Generar app deployable per-tier (/generate-app) ===", flush=True)
+        # --- 3.5 PLANIFICAR SPRINTS (PO Agent) + PO ACTIVA SPRINT 1 ---
+        print("\n=== 3.5 Sprints: PO planifica y decide orden ===", flush=True)
+        r = await c.post(f"{ORQ}/projects/{KEY}/sprints/plan", timeout=120.0)
+        plan = r.json()
+        sprints = plan.get("sprints", [])
+        check("PO Agent planifico sprints", r.status_code == 200 and len(sprints) >= 2,
+              f"{len(sprints)} sprints")
+        # distribucion de historias por sprint (entrega incremental)
+        dist = ", ".join(f"S{s.get('number')}:{len(s.get('story_keys', []))}" for s in sprints)
+        check("historias repartidas por sprint", all(s.get("story_keys") for s in sprints), dist)
+        # el PO decide: activar el sprint 1 (primero en orden)
+        sprints_sorted = sorted(sprints, key=lambda s: s.get("number", 0))
+        first = sprints_sorted[0]
+        ra = await c.post(f"{ORQ}/projects/{KEY}/sprints/{first['id']}/status",
+                          json={"status": "active"})
+        check("PO activa Sprint 1", ra.status_code == 200, first.get("name", ""))
+        active_story_count = len(first.get("story_keys", []))
+
+        # --- 4. GENERAR APP DEPLOYABLE PER-TIER (DEL SPRINT ACTIVO) ---
+        print(f"\n=== 4. Generar app del sprint activo ({active_story_count} historias) ===", flush=True)
         r = await c.post(f"{ORQ}/projects/{KEY}/generate-app",
                          json={"triggered_by": "po", "replace_existing": True}, timeout=60.0)
         check("generate-app disparado", r.status_code == 200, r.json().get("stage", ""))
