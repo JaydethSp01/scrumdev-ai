@@ -98,9 +98,14 @@ async def _save_backlog(project_key: str, stories: list[dict]) -> list[BacklogIt
 async def _save_code(project_key: str, story_id: str, files: list[dict]) -> list[CodeArtifact]:
     artifacts: list[CodeArtifact] = []
     async for session in get_session():
+        # asociar el codigo a la version activa (ciclo de vida)
+        from services.orchestrator_service.app.versions import ensure_v1
+        version = await ensure_v1(session, project_key)
+        await session.commit()
         for f in files:
             a = CodeArtifact(
                 project_key=project_key,
+                version_id=version.id,
                 story_id=story_id,
                 file_path=f.get("path", "unknown"),
                 language=f.get("language", "text"),
