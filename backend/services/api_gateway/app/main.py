@@ -495,6 +495,53 @@ async def integrations_status() -> dict:
     return out
 
 
+# ===== Creacion inteligente: industria/intake/doc =====
+
+
+@app.get("/intake/industries")
+async def gw_industries() -> dict:
+    return await _proxy_get(f"{settings.agent_runtime_service_url}/intake/industries")
+
+
+class IntakeFormPayload(BaseModel):
+    industry: str
+    product_hint: str = ""
+
+
+@app.post("/intake/form")
+async def gw_intake_form(req: IntakeFormPayload) -> dict:
+    return await _proxy_post(
+        f"{settings.agent_runtime_service_url}/intake/form", req.model_dump(), timeout=90.0
+    )
+
+
+class IntakeVisionPayload(BaseModel):
+    industry: str
+    answers: dict
+    project_name: str = ""
+
+
+@app.post("/intake/vision")
+async def gw_intake_vision(req: IntakeVisionPayload) -> dict:
+    return await _proxy_post(
+        f"{settings.agent_runtime_service_url}/intake/vision", req.model_dump(), timeout=90.0
+    )
+
+
+@app.post("/intake/document")
+async def gw_intake_document(request: Request) -> dict:
+    body = await request.body()
+    ct = request.headers.get("content-type", "")
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        r = await client.post(
+            f"{settings.agent_runtime_service_url}/intake/document",
+            content=body, headers={"content-type": ct},
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return r.json()
+
+
 # ===== FASE C: Pipeline 14 fases proxies =====
 
 

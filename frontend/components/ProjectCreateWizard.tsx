@@ -27,6 +27,7 @@ type Props = {
   onClose: () => void;
   user: AuthUser;
   onCreated?: (project: Project) => void;
+  prefill?: { vision?: string; targetUsers?: string; name?: string } | null;
 };
 
 type Step = 1 | 2 | 3;
@@ -41,7 +42,7 @@ const STACKS = [
 const VISION_PLACEHOLDER = `Ejemplo:
 "Una plataforma SaaS donde gerentes de PYME suben sus ventas mensuales en Excel y obtienen un dashboard con prediccion de demanda y alertas de stock bajo. Los usuarios pueden invitar a su equipo y exportar reportes a PDF."`;
 
-export function ProjectCreateWizard({ open, onClose, user, onCreated }: Props) {
+export function ProjectCreateWizard({ open, onClose, user, onCreated, prefill }: Props) {
   const router = useRouter();
   const [step, setStep] = useState<Step>(1);
   const [key, setKey] = useState("");
@@ -56,19 +57,20 @@ export function ProjectCreateWizard({ open, onClose, user, onCreated }: Props) {
 
   useEffect(() => {
     if (!open) return;
+    // Si viene prefill (de industria/doc), saltar al paso 1 con la vision cargada
     setStep(1);
     setKey("");
-    setName("");
+    setName(prefill?.name || "");
     setDescription("");
-    setVision("");
-    setTargetUsers("");
+    setVision(prefill?.vision || "");
+    setTargetUsers(prefill?.targetUsers || "");
     setStack("fastapi-next");
     setError(null);
     setSubmitting(false);
     listProjects(user.user_id)
       .then((list) => setExistingKeys(new Set(list.map((p) => p.key))))
       .catch(() => setExistingKeys(new Set()));
-  }, [open, user.user_id]);
+  }, [open, user.user_id, prefill]);
 
   const normalizedKey = useMemo(() => normalizeKey(key), [key]);
   const keyTaken = normalizedKey.length > 0 && existingKeys.has(normalizedKey);

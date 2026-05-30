@@ -633,6 +633,66 @@ export async function apiGetBacklog(projectKey: string): Promise<BacklogItem[]> 
   return data.items || [];
 }
 
+// ===== Creacion inteligente: industria / intake / doc =====
+export type Industry = { id: string; label: string; icon: string };
+export type IntakeField = {
+  id: string;
+  label: string;
+  type: "text" | "textarea" | "select" | "multiselect" | "number" | "boolean";
+  options?: string[];
+  placeholder?: string;
+  help?: string;
+  required?: boolean;
+};
+export type IntakeForm = {
+  industry: string;
+  title: string;
+  intro: string;
+  fields: IntakeField[];
+};
+
+export async function apiGetIndustries(): Promise<Industry[]> {
+  const res = await fetch(`${API}/intake/industries`);
+  if (!res.ok) return [];
+  return (await res.json()).industries || [];
+}
+
+export async function apiGenIntakeForm(industry: string, productHint = ""): Promise<IntakeForm> {
+  const res = await fetch(`${API}/intake/form`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ industry, product_hint: productHint }),
+  });
+  if (!res.ok) throw new Error(`intake form ${res.status}`);
+  return res.json();
+}
+
+export async function apiIntakeVision(
+  industry: string,
+  answers: Record<string, unknown>,
+  projectName = ""
+): Promise<string> {
+  const res = await fetch(`${API}/intake/vision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ industry, answers, project_name: projectName }),
+  });
+  if (!res.ok) throw new Error(`intake vision ${res.status}`);
+  return (await res.json()).vision || "";
+}
+
+export async function apiVisionFromDocument(
+  file: File,
+  projectName = ""
+): Promise<{ vision: string; target_users: string; summary: string }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("project_name", projectName);
+  const res = await fetch(`${API}/intake/document`, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(`doc extract ${res.status}`);
+  return res.json();
+}
+
 // ===== Sprints (FASE B) =====
 export type SprintStory = {
   story_key: string;

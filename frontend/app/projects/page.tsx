@@ -24,6 +24,7 @@ import { apiGetBacklog, apiGetCode, apiListBuilds, type BuildRecord } from "@/li
 import EmptyState from "@/components/EmptyState";
 import Spinner from "@/components/Spinner";
 import ProjectCreateWizard from "@/components/ProjectCreateWizard";
+import CreateModeModal from "@/components/CreateModeModal";
 import OnboardingHero from "@/components/OnboardingHero";
 
 type ProjectMetrics = {
@@ -42,6 +43,8 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [modeOpen, setModeOpen] = useState(false);
+  const [prefill, setPrefill] = useState<{ vision?: string; targetUsers?: string; name?: string } | null>(null);
   const [showWelcome, setShowWelcome] = useState(false);
 
   useEffect(() => {
@@ -172,7 +175,7 @@ export default function ProjectsPage() {
               <RefreshCw size={14} /> Refrescar
             </button>
             <button
-              onClick={() => setWizardOpen(true)}
+              onClick={() => setModeOpen(true)}
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-brand to-fuchsia-500 text-white rounded-xl hover:opacity-95 transition font-semibold shadow-lg shadow-brand/30"
             >
               <Plus size={16} /> Nuevo proyecto
@@ -202,7 +205,7 @@ export default function ProjectsPage() {
       ) : projects.length === 0 ? (
         <OnboardingHero
           userName={user.name}
-          onStart={() => setWizardOpen(true)}
+          onStart={() => setModeOpen(true)}
         />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -216,10 +219,21 @@ export default function ProjectsPage() {
         </div>
       )}
 
+      <CreateModeModal
+        open={modeOpen}
+        onClose={() => setModeOpen(false)}
+        onReady={(r) => {
+          setPrefill(r);
+          setModeOpen(false);
+          setWizardOpen(true);
+        }}
+      />
+
       <ProjectCreateWizard
         open={wizardOpen}
-        onClose={() => setWizardOpen(false)}
+        onClose={() => { setWizardOpen(false); setPrefill(null); }}
         user={user}
+        prefill={prefill}
         onCreated={(p) => {
           setProjects((prev) => (prev.find((x) => x.key === p.key) ? prev : [...prev, p]));
         }}

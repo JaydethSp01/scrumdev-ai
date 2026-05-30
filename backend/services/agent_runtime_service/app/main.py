@@ -207,6 +207,69 @@ async def plan_sprints_endpoint(req: SprintPlanRequest) -> dict:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ===== Creacion inteligente: industria -> intake + doc upload =====
+
+
+@app.get("/intake/industries")
+async def list_industries() -> dict:
+    from services.agent_runtime_service.app.runtime.intake_generator import INDUSTRIES
+    return {"industries": INDUSTRIES}
+
+
+class IntakeFormRequest(BaseModel):
+    industry: str
+    product_hint: str = ""
+
+
+@app.post("/intake/form")
+async def gen_intake_form(req: IntakeFormRequest) -> dict:
+    """Genera formulario de recoleccion dinamico para la industria."""
+    from services.agent_runtime_service.app.runtime.intake_generator import generate_intake_form
+    try:
+        return await generate_intake_form(req.industry, req.product_hint)
+    except Exception as exc:
+        logger.exception("intake_form_failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class IntakeVisionRequest(BaseModel):
+    industry: str
+    answers: dict
+    project_name: str = ""
+
+
+@app.post("/intake/vision")
+async def vision_from_intake_endpoint(req: IntakeVisionRequest) -> dict:
+    """Convierte respuestas del intake en vision rica."""
+    from services.agent_runtime_service.app.runtime.intake_generator import vision_from_intake
+    try:
+        vision = await vision_from_intake(req.industry, req.answers, req.project_name)
+        return {"vision": vision}
+    except Exception as exc:
+        logger.exception("intake_vision_failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+from fastapi import File, Form, UploadFile  # noqa: E402
+
+
+@app.post("/intake/document")
+async def vision_from_document_endpoint(
+    file: UploadFile = File(...), project_name: str = Form("")
+) -> dict:
+    """Extrae vision de un documento de requerimientos subido."""
+    from services.agent_runtime_service.app.runtime.doc_extractor import (
+        extract_text, vision_from_document,
+    )
+    data = await file.read()
+    text = extract_text(file.filename or "", data)
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="No se pudo extraer texto del documento")
+    result = await vision_from_document(text, project_name)
+    result["chars_extracted"] = len(text)
+    return result
+
+
 class ClassifyRequest(BaseModel):
     vision: str
     nfr: dict | None = None
