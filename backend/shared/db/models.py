@@ -232,10 +232,39 @@ class BacklogItem(Base):
     order_index: Mapped[int] = mapped_column(default=0)
     # FASE B: a que sprint pertenece (null = backlog sin asignar)
     sprint_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # ciclo de vida: a que version pertenece la tarea
+    version_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # origen de la tarea: backlog | feature_request | bugfix
+    origin: Mapped[str] = mapped_column(String(32), default="backlog")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
+
+
+class ProjectVersion(Base):
+    """Version de un proyecto. Concepto de ciclo de vida:
+
+      Proyecto -> N Versiones -> N Sprints -> N Tareas (BacklogItem).
+
+    v1 = lo que el cliente pidio inicialmente. Versiones nuevas se crean para
+    cambios grandes y PARTEN del codigo de la version anterior (copy-forward).
+    Cambios chicos / bugs se manejan como tareas dentro de la version activa.
+    """
+
+    __tablename__ = "project_versions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid4()))
+    project_key: Mapped[str] = mapped_column(String(64), index=True)
+    number: Mapped[int] = mapped_column(default=1)  # v1, v2, v3...
+    name: Mapped[str] = mapped_column(String(255), default="")
+    description: Mapped[str] = mapped_column(Text, default="")  # que agrega esta version
+    # draft | active | released | archived
+    status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
+    based_on_version_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    order_index: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Sprint(Base):
@@ -245,6 +274,7 @@ class Sprint(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid4()))
     project_key: Mapped[str] = mapped_column(String(64), index=True)
+    version_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     number: Mapped[int] = mapped_column(default=1)  # Sprint 1, 2, 3...
     name: Mapped[str] = mapped_column(String(255))
     goal: Mapped[str] = mapped_column(Text, default="")  # objetivo del sprint
@@ -265,6 +295,7 @@ class CodeArtifact(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid4()))
     project_key: Mapped[str] = mapped_column(String(64), index=True)
+    version_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     story_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     file_path: Mapped[str] = mapped_column(String(512))
     language: Mapped[str] = mapped_column(String(32))
@@ -331,6 +362,28 @@ class ProjectAsset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class ChatSession(Base):
+    """Un chat dentro de un proyecto. Un proyecto puede tener VARIOS chats, cada
+    uno con su historial. Un chat puede atarse a una version (ej. chat dedicado a
+    arreglar bugs de la v2) o ser general del proyecto.
+    """
+
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid4()))
+    project_key: Mapped[str] = mapped_column(String(64), index=True)
+    version_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(128), index=True)
+    title: Mapped[str] = mapped_column(String(255), default="Nuevo chat")
+    # general | lifecycle | bugfix | feature
+    kind: Mapped[str] = mapped_column(String(32), default="general")
+    archived: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_message_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+
+
 class ChatMessage(Base):
     """Mensaje del Chat IA del proyecto. Atado a project+user para privacidad."""
 
@@ -338,6 +391,8 @@ class ChatMessage(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid4()))
     project_key: Mapped[str] = mapped_column(String(64), index=True)
+    # a que chat pertenece el mensaje (un proyecto tiene varios chats)
+    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     user_id: Mapped[str] = mapped_column(String(128), index=True)
     role: Mapped[str] = mapped_column(String(32))  # 'user' | 'assistant'
     content: Mapped[str] = mapped_column(Text)
