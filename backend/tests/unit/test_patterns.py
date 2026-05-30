@@ -98,6 +98,53 @@ def test_deploy_validator_creates_missing_css():
     assert "@tailwind base" in css[0]["content"]
 
 
+def test_blueprint_picks_stack_and_splits_tiers():
+    from shared.stacks.stack_blueprints import pick_stack, split_by_tier, get_blueprint
+    assert pick_stack({"type": "saas_crud", "is_static": False}) == "nextjs-fastapi-postgres"
+    assert pick_stack({"type": "landing", "is_static": True}) == "nextjs-static"
+    files = [
+        {"path": "frontend/app/page.tsx", "content": "x"},
+        {"path": "backend/main.py", "content": "from fastapi import FastAPI\napp=FastAPI()"},
+        {"path": "api/index.py", "content": "y"},  # sin prefijo -> backend por contenido
+    ]
+    buckets = split_by_tier(files, "nextjs-fastapi-postgres")
+    assert "app/page.tsx" in [f["path"] for f in buckets["frontend"]]
+    assert "main.py" in [f["path"] for f in buckets["backend"]]
+
+
+def test_completeness_gate_blocks_incomplete():
+    from services.ml_service.app.pipelines.stack_expert import score_completeness
+    # casi vacio -> no deploy_ready
+    poor = score_completeness([{"path": "frontend/app/page.tsx"}], "nextjs-fastapi-postgres")
+    assert poor["deploy_ready"] is False
+    assert poor["global_score"] < 0.5
+
+
+def test_manifest_backfill_makes_deploy_ready():
+    from services.agent_runtime_service.app.runtime.app_generator import _ensure_manifest_complete
+    from services.ml_service.app.pipelines.stack_expert import score_completeness
+    files = [{"path": "frontend/app/login/page.tsx", "content": "x"}]
+    filled, report = _ensure_manifest_complete(files, "nextjs-fastapi-postgres", "DEMO")
+    assert len(report) >= 10
+    sc = score_completeness(filled, "nextjs-fastapi-postgres")
+    assert sc["deploy_ready"] is True
+
+
+def test_detect_stack_from_files():
+    from services.orchestrator_service.app.deploy_split import detect_stack_from_files, render_url_for
+    assert detect_stack_from_files([{"path": "backend/main.py"}]) == "nextjs-fastapi-postgres"
+    assert detect_stack_from_files([{"path": "frontend/app/page.tsx"}]) == "nextjs-static"
+    assert render_url_for("demo-api") == "https://demo-api.onrender.com"
+
+
+def test_backend_build_gate_catches_errors():
+    from services.orchestrator_service.app.build_gate import build_gate_backend
+    ok = build_gate_backend([{"path": "main.py", "content": "from fastapi import FastAPI\napp=FastAPI()"}])
+    assert ok["ok"] is True
+    bad = build_gate_backend([{"path": "main.py", "content": "def x(:\n pass"}])
+    assert bad["ok"] is False
+
+
 def test_deploy_validator_detects_stack():
     from services.orchestrator_service.app.deploy_validator import detect_stack
     assert detect_stack([{"path": "app/page.tsx", "content": ""}]) == "nextjs"
