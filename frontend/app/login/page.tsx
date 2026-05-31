@@ -42,12 +42,30 @@ export default function LoginPage() {
 
   return (
     <main className="min-h-screen grid lg:grid-cols-[1.05fr_1fr] bg-neutral-950 text-neutral-100 overflow-hidden">
+      {/* Animaciones (respetan prefers-reduced-motion) */}
+      <style>{`
+        @keyframes sd-blob {
+          0%,100% { transform: translate(0,0) scale(1); }
+          33%     { transform: translate(36px,-28px) scale(1.08); }
+          66%     { transform: translate(-26px,22px) scale(0.95); }
+        }
+        @keyframes sd-fade-up {
+          from { opacity: 0; transform: translateY(14px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .sd-blob { animation: sd-blob 16s ease-in-out infinite; }
+        .sd-fade { opacity: 0; animation: sd-fade-up .7s cubic-bezier(.22,1,.36,1) forwards; }
+        @media (prefers-reduced-motion: reduce) {
+          .sd-blob { animation: none !important; }
+          .sd-fade { opacity: 1 !important; animation: none !important; }
+        }
+      `}</style>
       {/* --- BRAND PANEL --- */}
       <div className="relative hidden lg:flex flex-col justify-between p-12 overflow-hidden">
-        {/* Decorative gradient blobs */}
-        <div className="pointer-events-none absolute -top-32 -left-24 w-[520px] h-[520px] rounded-full bg-brand/40 blur-[120px] opacity-50" />
-        <div className="pointer-events-none absolute top-1/3 -right-32 w-[480px] h-[480px] rounded-full bg-fuchsia-500/30 blur-[120px] opacity-50" />
-        <div className="pointer-events-none absolute bottom-0 left-1/4 w-[420px] h-[420px] rounded-full bg-cyan-500/20 blur-[120px] opacity-50" />
+        {/* Decorative gradient blobs (animados) */}
+        <div className="sd-blob pointer-events-none absolute -top-32 -left-24 w-[520px] h-[520px] rounded-full bg-brand/40 blur-[120px] opacity-50" style={{ animationDelay: "0s" }} />
+        <div className="sd-blob pointer-events-none absolute top-1/3 -right-32 w-[480px] h-[480px] rounded-full bg-fuchsia-500/30 blur-[120px] opacity-50" style={{ animationDelay: "-5s", animationDuration: "20s" }} />
+        <div className="sd-blob pointer-events-none absolute bottom-0 left-1/4 w-[420px] h-[420px] rounded-full bg-cyan-500/20 blur-[120px] opacity-50" style={{ animationDelay: "-9s", animationDuration: "24s" }} />
         {/* Grid pattern overlay */}
         <div
           className="pointer-events-none absolute inset-0 opacity-[0.06]"
@@ -65,7 +83,7 @@ export default function LoginPage() {
           <span className="font-semibold text-lg tracking-tight">ScrumDev AI</span>
         </Link>
 
-        <div className="relative z-10 max-w-md">
+        <div className="sd-fade relative z-10 max-w-md" style={{ animationDelay: ".05s" }}>
           <h2 className="text-4xl font-semibold tracking-tight leading-tight">
             De una idea
             <br />
@@ -81,26 +99,18 @@ export default function LoginPage() {
           </p>
 
           <ul className="mt-8 space-y-3.5">
-            <FeatureBullet
-              icon={<Bot size={16} />}
+            <FeatureBullet delay={0.18} icon={<Bot size={16} />}
               title="Agentes especializados"
-              desc="PO, Arquitecto, Dev y QA trabajan en paralelo."
-            />
-            <FeatureBullet
-              icon={<Zap size={16} />}
+              desc="PO, Arquitecto, Dev y QA trabajan en paralelo." />
+            <FeatureBullet delay={0.28} icon={<Zap size={16} />}
               title="Personalizacion real"
-              desc="Tus colores, fonts e imagenes en el codigo generado."
-            />
-            <FeatureBullet
-              icon={<Rocket size={16} />}
+              desc="Tus colores, fonts e imagenes en el codigo generado." />
+            <FeatureBullet delay={0.38} icon={<Rocket size={16} />}
               title="Deploy fullstack"
-              desc="Next.js + FastAPI + Postgres a Vercel con 1 click."
-            />
-            <FeatureBullet
-              icon={<ShieldCheck size={16} />}
+              desc="Next.js + FastAPI + Postgres a Vercel con 1 click." />
+            <FeatureBullet delay={0.48} icon={<ShieldCheck size={16} />}
               title="Tu codigo, tu repo"
-              desc="Todo va a tu GitHub. Sin lock-in."
-            />
+              desc="Todo va a tu GitHub. Sin lock-in." />
           </ul>
         </div>
 
@@ -110,7 +120,9 @@ export default function LoginPage() {
       </div>
 
       {/* --- FORM PANEL --- */}
-      <div className="relative grid place-items-center p-6 bg-gradient-to-b from-neutral-950 to-neutral-900">
+      <div className="relative grid place-items-center p-6 bg-gradient-to-b from-neutral-950 to-neutral-900 overflow-hidden">
+        {/* blob animado de fondo (también visible en mobile) */}
+        <div className="sd-blob pointer-events-none absolute -top-24 -right-24 w-[360px] h-[360px] rounded-full bg-brand/20 blur-[110px] opacity-60 lg:hidden" style={{ animationDuration: "18s" }} />
         <div className="absolute top-6 left-6 lg:hidden">
           <Link href="/" className="flex items-center gap-2">
             <span className="grid place-items-center w-9 h-9 rounded-lg bg-gradient-to-br from-brand to-fuchsia-500 text-white">
@@ -120,8 +132,8 @@ export default function LoginPage() {
           </Link>
         </div>
 
-        <div className="w-full max-w-md">
-          <div className="relative border border-white/10 rounded-2xl p-8 bg-white/[0.03] backdrop-blur-xl shadow-2xl">
+        <div className="sd-fade w-full max-w-md" style={{ animationDelay: ".12s" }}>
+          <div className="relative border border-white/10 rounded-2xl p-6 sm:p-8 bg-white/[0.03] backdrop-blur-xl shadow-2xl">
             <div className="absolute inset-0 rounded-2xl pointer-events-none bg-gradient-to-br from-brand/10 via-transparent to-fuchsia-500/10" />
             <div className="relative">
               <span className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-semibold px-2 py-1 rounded-full bg-brand/15 text-brand border border-brand/20">
@@ -194,13 +206,15 @@ function FeatureBullet({
   icon,
   title,
   desc,
+  delay = 0,
 }: {
   icon: React.ReactNode;
   title: string;
   desc: string;
+  delay?: number;
 }) {
   return (
-    <li className="flex items-start gap-3">
+    <li className="sd-fade flex items-start gap-3" style={{ animationDelay: `${delay}s` }}>
       <span className="grid place-items-center w-8 h-8 rounded-lg bg-white/5 border border-white/10 text-brand shrink-0 mt-0.5">
         {icon}
       </span>
