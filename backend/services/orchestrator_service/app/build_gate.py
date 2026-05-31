@@ -180,9 +180,18 @@ def _stub_missing_local_imports(files_rel: list[dict], report: list[str]) -> lis
     # recolectar imports default/named de módulos locales (@/ y relativos ./ ../)
     need: dict[str, dict] = {}
     imp_re = re.compile(r"""import\s+(.+?)\s+from\s+['"](@/[^'"]+|\.\.?/[^'"]+)['"]""", re.S)
+    # también require('./x') / await import('@/x') que la IA mezcla a veces
+    req_re = re.compile(r"""(?:require|import)\(\s*['"](@/[^'"]+|\.\.?/[^'"]+)['"]\s*\)""")
     for f in src_files:
         fdir = posixpath.dirname((f.get("path") or "").lstrip("/"))
-        for clause, spec in imp_re.findall(f.get("content") or ""):
+        content = f.get("content") or ""
+        # require/import() -> tratar como import default
+        for spec in req_re.findall(content):
+            base = spec[2:] if spec.startswith("@/") else posixpath.normpath(posixpath.join(fdir, spec))
+            if base.startswith("..") or not base or has(base):
+                continue
+            need.setdefault(base, {"default": True, "named": set()})["default"] = True
+        for clause, spec in imp_re.findall(content):
             if spec.startswith("@/"):
                 base = spec[2:]                       # relativo al root frontend
             else:
@@ -237,7 +246,53 @@ def _relax_next_config(files_rel: list[dict], report: list[str]) -> list[dict]:
     return files_rel
 
 
-def _apply_frontend_autofix(files_rel: list[dict]) -> tuple[list[dict], list[str]]:
+def _fix_from_build_log(files_rel: list[dict], log: str, report: list[str]) -> list[dict]:
+    """Robustez genérica: parsea CUALQUIER 'Module not found: Can't resolve X'
+    del log y lo arregla -> paquete npm faltante a package.json, o stub si es un
+    módulo local (@/ o relativo). Cubre casos no contemplados por los fixes fijos."""
+    import json as _json
+    specs = set(re.findall(r"Can't resolve ['\"]([^'\"]+)['\"]", log))
+    specs |= set(re.findall(r"Cannot find module ['\"]([^'\"]+)['\"]", log))
+    if not specs:
+        return files_rel
+    builtins = {"next", "react", "react-dom", "fs", "path", "crypto", "http",
+                "https", "stream", "os", "url", "util", "buffer", "process"}
+    existing = {(f.get("path") or "").lstrip("/") for f in files_rel}
+    pkg = next((f for f in files_rel if (f.get("path") or "").endswith("package.json")), None)
+    added_pkg, added_stub = [], []
+    pkg_data = {}
+    if pkg:
+        try:
+            pkg_data = _json.loads(pkg.get("content") or "{}")
+        except Exception:
+            pkg_data = {}
+    deps = pkg_data.setdefault("dependencies", {}) if pkg else {}
+    for spec in specs:
+        if spec.startswith("."):  # relativo -> lo cubre _stub (scan de source)
+            continue
+        if spec.startswith("@/"):  # alias local -> stub directo
+            base = spec[2:]
+            if any(base + e in existing for e in (".tsx", ".ts", ".jsx", ".js")):
+                continue
+            files_rel.append({"path": base + ".tsx",
+                              "content": '"use client";\nconst Noop=(p:any)=>null;\nexport default Noop;\n'})
+            existing.add(base + ".tsx"); added_stub.append(base)
+            continue
+        # paquete npm bare
+        name = "/".join(spec.split("/")[:2]) if spec.startswith("@") else spec.split("/")[0]
+        if name in builtins or not pkg or name in deps:
+            continue
+        deps[name] = "latest"
+        added_pkg.append(name)
+    if pkg and added_pkg:
+        pkg["content"] = _json.dumps(pkg_data, indent=2)
+        report.append(f"deps (del log) -> {', '.join(added_pkg)}")
+    if added_stub:
+        report.append(f"stubs (del log) -> {', '.join(added_stub)}")
+    return files_rel
+
+
+def _apply_frontend_autofix(files_rel: list[dict], log: str = "") -> tuple[list[dict], list[str]]:
     """Reusa los fixes genericos del validador (CSS + exports + rutas paralelas)."""
     from services.orchestrator_service.app.deploy_validator import (
         _ensure_css_imports, _autofix_missing_exports, _dedup_parallel_routes,
@@ -251,10 +306,12 @@ def _apply_frontend_autofix(files_rel: list[dict]) -> tuple[list[dict], list[str
     files_rel = _relax_next_config(files_rel, report)
     files_rel = _autofix_missing_exports(files_rel, report)
     files_rel = _ensure_css_imports(files_rel, report)
+    if log:
+        files_rel = _fix_from_build_log(files_rel, log, report)
     return files_rel, report
 
 
-async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 2) -> dict:
+async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4) -> dict:
     """Compila el frontend; auto-fix + retry. Devuelve {ok, files, log, fixes}."""
     npm = _npm_path()
     if not npm:
@@ -291,9 +348,9 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 2) -> d
             if rc_b == 0:
                 return {"ok": True, "files": files_rel, "fixes": all_fixes,
                         "attempts": attempt, "log": log_b[-400:]}
-            log_tail = log_b[-1500:]
-            # build fallo: intentar auto-fix y reintentar
-            files_rel, fixes = _apply_frontend_autofix(files_rel)
+            log_tail = log_b[-3000:]
+            # build fallo: auto-fix (incl. fixer dirigido por el log) y reintentar
+            files_rel, fixes = _apply_frontend_autofix(files_rel, log_tail)
             all_fixes.extend(fixes)
             logger.warning("frontend_build_failed_retry", attempt=attempt, fixes=fixes)
         finally:
