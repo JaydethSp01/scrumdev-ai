@@ -195,6 +195,12 @@ export default function ProjectDetailPage() {
   );
   const [project, setProject] = useState<Project | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
+
+  // permitir abrir un tab directo via ?tab=boards (deep-link)
+  useEffect(() => {
+    const t = search.get("tab");
+    if (t && TABS.some((d) => d.value === t)) setTab(t as Tab);
+  }, [search]);
   const [notFound, setNotFound] = useState(false);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<{
