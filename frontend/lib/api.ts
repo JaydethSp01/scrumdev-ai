@@ -1102,3 +1102,28 @@ export async function deleteTask(projectKey: string, taskId: string): Promise<{ 
   });
   return jsonOrThrow(res);
 }
+
+// ===== Config Jira por proyecto (onboarding) =====
+
+export type JiraConfigStatus = {
+  configured: boolean;
+  source: "project" | "global" | "none";
+  base_url?: string; email?: string; project_key_jira?: string; board_id?: string;
+  has_token?: boolean;
+  help?: { title: string; steps: string[]; token_url: string };
+};
+
+export async function getJiraConfig(projectKey: string): Promise<JiraConfigStatus> {
+  const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/integrations/jira`);
+  return jsonOrThrow(res);
+}
+
+export async function setJiraConfig(
+  projectKey: string,
+  body: { base_url: string; email: string; api_token: string; project_key_jira?: string; board_id?: string }
+): Promise<{ saved: boolean; connection_ok: boolean; message: string }> {
+  const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/integrations/jira`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  return jsonOrThrow(res);
+}

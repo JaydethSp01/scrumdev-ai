@@ -46,6 +46,7 @@ import Spinner from "@/components/Spinner";
 import ProjectOverview from "@/components/ProjectOverview";
 import VisionForm from "@/components/VisionForm";
 import BoardsPanel from "@/components/BoardsPanel";
+import JiraConnectPanel from "@/components/JiraConnectPanel";
 import CodeBrowser from "@/components/CodeBrowser";
 import DeployPanel from "@/components/DeployPanel";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
@@ -629,7 +630,12 @@ export default function ProjectDetailPage() {
           {tab === "deploy" && (
             <DeployPanel projectKey={project.key} user={user} />
           )}
-          {tab === "integrations" && <IntegrationsPanel projectKey={project.key} />}
+          {tab === "integrations" && (
+            <div className="space-y-8">
+              <JiraConnectPanel projectKey={project.key} />
+              <IntegrationsPanel projectKey={project.key} />
+            </div>
+          )}
           {tab === "chat" && <ProjectChat projectKey={project.key} user={user} />}
         </section>
       </div>
