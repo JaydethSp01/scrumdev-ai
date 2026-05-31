@@ -74,6 +74,31 @@ async def _run(cmd: list[str], cwd: str, env: dict, timeout: int) -> tuple[int, 
         return 127, f"comando no encontrado: {exc}"
 
 
+def _fix_next_router(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """App Router NO tiene `next/router` (es de Pages Router). La IA a veces lo
+    importa -> el build falla. Lo reescribimos a `next/navigation` (cuyo
+    useRouter cubre push/replace/back/refresh, el uso típico generado)."""
+    import re
+    fixed = 0
+    for f in files_rel:
+        path = (f.get("path") or "")
+        if not path.endswith((".tsx", ".ts", ".jsx", ".js")):
+            continue
+        c = f.get("content") or ""
+        if "next/router" not in c:
+            continue
+        new = re.sub(r"""(['"])next/router\1""", r"\1next/navigation\1", c)
+        # useRouter().query/pathname no existen en next/navigation; degradar a
+        # accesos seguros para que el build no rompa por esos campos.
+        new = new.replace("router.query", "({} as any)").replace("router.pathname", '""')
+        if new != c:
+            f["content"] = new
+            fixed += 1
+    if fixed:
+        report.append(f"next/router->next/navigation en {fixed} archivo(s)")
+    return files_rel
+
+
 def _apply_frontend_autofix(files_rel: list[dict]) -> tuple[list[dict], list[str]]:
     """Reusa los fixes genericos del validador (CSS + exports + rutas paralelas)."""
     from services.orchestrator_service.app.deploy_validator import (
@@ -81,6 +106,7 @@ def _apply_frontend_autofix(files_rel: list[dict]) -> tuple[list[dict], list[str
     )
     report: list[str] = []
     files_rel = _dedup_parallel_routes(files_rel, report)
+    files_rel = _fix_next_router(files_rel, report)
     files_rel = _autofix_missing_exports(files_rel, report)
     files_rel = _ensure_css_imports(files_rel, report)
     return files_rel, report
@@ -99,6 +125,7 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 2) -> d
     from services.orchestrator_service.app.deploy_validator import _dedup_parallel_routes
     _pre: list[str] = []
     files_rel = _dedup_parallel_routes(files_rel, _pre)
+    files_rel = _fix_next_router(files_rel, _pre)  # App Router: next/router -> next/navigation
 
     env = _node_env()
     all_fixes: list[str] = list(_pre)
