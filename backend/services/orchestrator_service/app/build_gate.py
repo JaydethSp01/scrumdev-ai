@@ -232,13 +232,39 @@ def _stub_missing_local_imports(files_rel: list[dict], report: list[str]) -> lis
                 info["default"] = True
     added = []
     for base, info in need.items():
-        lines = ['"use client";', "// stub auto-generado por el build gate (import faltante)",
-                 "const Noop = (props: any) => null;"]
-        for n in sorted(info["named"]):
-            lines.append(f"export const {n}: any = Noop;")
-        if info["default"] or not info["named"]:
-            lines.append("export default Noop;")
-        files_rel.append({"path": f"{base}.tsx", "content": "\n".join(lines) + "\n"})
+        low = base.lower()
+        is_data = any(k in low for k in ("mock", "/data", "store", "constant",
+                                          "config", "/api", "fixture", "seed"))
+        if is_data:
+            # Módulo de datos/mock: default seguro (Proxy que nunca rompe .map/.length/
+            # indexado) -> la app NO crashea aunque falten datos reales.
+            lines = [
+                "// stub de datos auto-generado (seguro contra accesos a undefined)",
+                "const _arr: any = new Proxy([], { get: (t: any, p: any) => p in t ? t[p] : _arr });",
+                "const _obj: any = new Proxy({}, { get: () => _arr });",
+            ]
+            for n in sorted(info["named"]):
+                lines.append(f"export const {n}: any = _arr;")
+            if info["default"] or not info["named"]:
+                lines.append("export default _obj;")
+            files_rel.append({"path": f"{base}.ts", "content": "\n".join(lines) + "\n"})
+        else:
+            # Componente: funcional real (renderiza children y muestra props básicas),
+            # no un null vacío -> la UI no queda en blanco ni crashea.
+            comp = (
+                '"use client";\n'
+                "// componente stub funcional auto-generado por el build gate\n"
+                "export default function Stub(props: any) {\n"
+                "  const label = props?.title ?? props?.label ?? null;\n"
+                "  if (label || props?.children) {\n"
+                '    return <div className="p-4 rounded-lg border border-neutral-200 dark:border-neutral-800">{label}{props?.children}</div>;\n'
+                "  }\n"
+                "  return null;\n"
+                "}\n"
+            )
+            for n in sorted(info["named"]):
+                comp += f"export const {n}: any = Stub;\n"
+            files_rel.append({"path": f"{base}.tsx", "content": comp})
         added.append(base)
     if added:
         report.append(f"stubs creados para imports faltantes: {', '.join(added)}")
