@@ -50,6 +50,10 @@ RUN poetry export \
 
 RUN pip install --prefix=/install -r requirements.txt
 
+# Salvaguarda: certifi es dep transitiva de httpx pero `poetry export` la omite
+# en algunos entornos. Lo instalamos explícito para que httpx funcione en runtime.
+RUN pip install --prefix=/install certifi
+
 
 # --------- Stage 2: runtime ---------
 FROM python:3.11-slim AS runtime
