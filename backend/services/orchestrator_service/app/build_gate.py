@@ -246,6 +246,33 @@ def _relax_next_config(files_rel: list[dict], report: list[str]) -> list[dict]:
     return files_rel
 
 
+def _force_dynamic_pages(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """Evita errores de PRERENDER (SSG) en build: Next intenta generar las páginas
+    estáticamente y el componente puede lanzar (datos, hooks, stubs). Forzamos
+    `dynamic = "force-dynamic"` en cada page/layout -> se renderizan en runtime,
+    no en build. Robustez clave para que el deploy del cliente nunca falle por SSG."""
+    fixed = 0
+    for f in files_rel:
+        path = (f.get("path") or "").lstrip("/")
+        base = path.split("/")[-1]
+        if base not in ("page.tsx", "layout.tsx", "page.jsx", "layout.jsx"):
+            continue
+        c = f.get("content") or ""
+        if "force-dynamic" in c or "export const dynamic" in c:
+            continue
+        # insertar tras el "use client" si existe, si no al inicio
+        line = 'export const dynamic = "force-dynamic";\n'
+        lines = c.split("\n", 1)
+        if lines and lines[0].strip().strip('"').strip("'") == "use client":
+            f["content"] = lines[0] + "\n" + line + (lines[1] if len(lines) > 1 else "")
+        else:
+            f["content"] = line + c
+        fixed += 1
+    if fixed:
+        report.append(f"force-dynamic en {fixed} página(s)")
+    return files_rel
+
+
 def _fix_from_build_log(files_rel: list[dict], log: str, report: list[str]) -> list[dict]:
     """Robustez genérica: parsea CUALQUIER 'Module not found: Can't resolve X'
     del log y lo arregla -> paquete npm faltante a package.json, o stub si es un
@@ -304,6 +331,7 @@ def _apply_frontend_autofix(files_rel: list[dict], log: str = "") -> tuple[list[
     files_rel = _ensure_npm_deps(files_rel, report)
     files_rel = _stub_missing_local_imports(files_rel, report)
     files_rel = _relax_next_config(files_rel, report)
+    files_rel = _force_dynamic_pages(files_rel, report)
     files_rel = _autofix_missing_exports(files_rel, report)
     files_rel = _ensure_css_imports(files_rel, report)
     if log:
@@ -329,6 +357,7 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4) -> d
     files_rel = _ensure_npm_deps(files_rel, _pre)    # libs importadas -> package.json
     files_rel = _stub_missing_local_imports(files_rel, _pre)  # @/ faltantes -> stub
     files_rel = _relax_next_config(files_rel, _pre)  # ignorar errores TS/lint
+    files_rel = _force_dynamic_pages(files_rel, _pre)  # sin SSG -> sin prerender errors
 
     env = _node_env()
     all_fixes: list[str] = list(_pre)
