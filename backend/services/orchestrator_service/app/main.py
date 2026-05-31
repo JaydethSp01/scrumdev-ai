@@ -878,6 +878,96 @@ async def list_backlog(project_key: str) -> dict:
     return {"items": []}
 
 
+# ===== Gestion de tareas por el PO (estilo Azure DevOps boards) =====
+
+
+class TaskCreateReq(BaseModel):
+    title: str
+    description: str = ""
+    priority: str = "medium"  # high | medium | low
+    story_points: int = 3
+    status: str = "backlog"
+    sprint_id: str | None = None
+    acceptance_criteria: list[str] = []
+
+
+class TaskUpdateReq(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    priority: str | None = None
+    story_points: int | None = None
+    status: str | None = None
+    sprint_id: str | None = None
+    acceptance_criteria: list[str] | None = None
+
+
+def _task_dict(i: BacklogItem) -> dict:
+    return {
+        "id": i.id, "story_key": i.story_key, "title": i.title,
+        "description": i.description, "acceptance_criteria": i.acceptance_criteria,
+        "story_points": i.story_points, "priority": i.priority, "status": i.status,
+        "order_index": i.order_index, "sprint_id": i.sprint_id, "origin": i.origin,
+    }
+
+
+@app.post("/projects/{project_key}/tasks")
+async def create_task(project_key: str, req: TaskCreateReq) -> dict:
+    """El PO crea una tarea nueva en el backlog (la asocia a la version activa)."""
+    from services.orchestrator_service.app.versions import get_active_version
+    async for session in get_session():
+        version = await get_active_version(session, project_key)
+        # story_key incremental
+        n = len((await session.execute(
+            select(BacklogItem).where(BacklogItem.project_key == project_key)
+        )).scalars().all()) + 1
+        item = BacklogItem(
+            project_key=project_key, story_key=f"T-{n:03d}", title=req.title,
+            description=req.description, acceptance_criteria=req.acceptance_criteria,
+            story_points=req.story_points, priority=req.priority, status=req.status,
+            order_index=n, sprint_id=req.sprint_id, origin="manual",
+            version_id=version.id if version else None,
+        )
+        session.add(item)
+        await session.commit()
+        await session.refresh(item)
+        return _task_dict(item)
+    raise HTTPException(status_code=503, detail="db unavailable")
+
+
+@app.put("/projects/{project_key}/tasks/{task_id}")
+async def update_task(project_key: str, task_id: str, req: TaskUpdateReq) -> dict:
+    """El PO edita una tarea: titulo, descripcion, prioridad, puntos, estado, sprint."""
+    async for session in get_session():
+        item = (await session.execute(
+            select(BacklogItem).where(BacklogItem.id == task_id,
+                                      BacklogItem.project_key == project_key)
+        )).scalar_one_or_none()
+        if not item:
+            raise HTTPException(status_code=404, detail="task not found")
+        data = req.model_dump(exclude_none=True)
+        for field, val in data.items():
+            setattr(item, field, val)
+        await session.commit()
+        await session.refresh(item)
+        return _task_dict(item)
+    raise HTTPException(status_code=503, detail="db unavailable")
+
+
+@app.delete("/projects/{project_key}/tasks/{task_id}")
+async def delete_task(project_key: str, task_id: str) -> dict:
+    async for session in get_session():
+        item = (await session.execute(
+            select(BacklogItem).where(BacklogItem.id == task_id,
+                                      BacklogItem.project_key == project_key)
+        )).scalar_one_or_none()
+        if not item:
+            raise HTTPException(status_code=404, detail="task not found")
+        await session.delete(item)
+        await session.commit()
+        return {"deleted": True, "id": task_id}
+    raise HTTPException(status_code=503, detail="db unavailable")
+
+
 # ===== FASE C: Pipeline de 14 fases + 4 aprobaciones humanas (guia §7) =====
 
 from shared.db.models import Project as _Project  # noqa: E402

@@ -379,10 +379,84 @@ async def get_vision(project_key: str) -> dict:
     )
 
 
+async def _proxy_put(url: str, payload: dict, timeout: float = 30.0) -> dict:
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.put(url, json=payload)
+            if r.status_code >= 400:
+                raise HTTPException(status_code=r.status_code, detail=r.text)
+            return r.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+async def _proxy_delete(url: str, timeout: float = 30.0) -> dict:
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.delete(url)
+            if r.status_code >= 400:
+                raise HTTPException(status_code=r.status_code, detail=r.text)
+            return r.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 @app.get("/projects/{project_key}/backlog")
 async def get_backlog(project_key: str) -> dict:
     return await _proxy_get(
         f"{settings.orchestrator_service_url}/projects/{project_key}/backlog"
+    )
+
+
+# --- Gestion de tareas por el PO (CRUD estilo Azure DevOps) ---
+
+
+class GwTaskCreate(BaseModel):
+    title: str
+    description: str = ""
+    priority: str = "medium"
+    story_points: int = 3
+    status: str = "backlog"
+    sprint_id: str | None = None
+    acceptance_criteria: list[str] = []
+
+
+class GwTaskUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    priority: str | None = None
+    story_points: int | None = None
+    status: str | None = None
+    sprint_id: str | None = None
+    acceptance_criteria: list[str] | None = None
+
+
+@app.post("/projects/{project_key}/tasks")
+async def gw_create_task(project_key: str, req: GwTaskCreate) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/tasks",
+        req.model_dump(),
+    )
+
+
+@app.put("/projects/{project_key}/tasks/{task_id}")
+async def gw_update_task(project_key: str, task_id: str, req: GwTaskUpdate) -> dict:
+    return await _proxy_put(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/tasks/{task_id}",
+        req.model_dump(exclude_none=True),
+    )
+
+
+@app.delete("/projects/{project_key}/tasks/{task_id}")
+async def gw_delete_task(project_key: str, task_id: str) -> dict:
+    return await _proxy_delete(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/tasks/{task_id}"
     )
 
 

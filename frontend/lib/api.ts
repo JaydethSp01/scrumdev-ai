@@ -1072,3 +1072,32 @@ export async function fixBug(
   );
   return jsonOrThrow(res);
 }
+
+// ===== Gestión de tareas por el PO (board estilo Azure DevOps) =====
+
+export async function createTask(
+  projectKey: string,
+  body: { title: string; description?: string; priority?: string; story_points?: number; status?: string; sprint_id?: string | null; acceptance_criteria?: string[] }
+): Promise<BacklogItem> {
+  const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/tasks`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  return jsonOrThrow(res);
+}
+
+export async function updateTask(
+  projectKey: string, taskId: string,
+  body: Partial<{ title: string; description: string; priority: string; story_points: number; status: string; sprint_id: string | null; acceptance_criteria: string[] }>
+): Promise<BacklogItem> {
+  const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/tasks/${encodeURIComponent(taskId)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  return jsonOrThrow(res);
+}
+
+export async function deleteTask(projectKey: string, taskId: string): Promise<{ deleted: boolean }> {
+  const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/tasks/${encodeURIComponent(taskId)}`, {
+    method: "DELETE",
+  });
+  return jsonOrThrow(res);
+}
