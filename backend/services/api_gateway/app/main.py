@@ -22,6 +22,9 @@ instrument_app(app, "api-gateway")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
+    # Permite cualquier subdominio *.vercel.app (deploys de preview y producción)
+    # además de los orígenes exactos. Configurable vía CORS_ORIGIN_REGEX.
+    allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

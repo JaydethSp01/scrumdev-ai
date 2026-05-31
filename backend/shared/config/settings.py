@@ -104,6 +104,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
 
     cors_allowed_origins: str = "http://localhost:3000,http://localhost:5173"
+    # Regex de orígenes permitidos (además de la lista exacta). Por defecto
+    # acepta cualquier *.vercel.app para los deploys de la plataforma.
+    cors_origin_regex: str = r"https://.*\.vercel\.app"
 
     @property
     def cors_origins_list(self) -> list[str]:
