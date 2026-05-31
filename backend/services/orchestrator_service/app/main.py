@@ -1528,33 +1528,34 @@ async def plan_project_sprints(project_key: str) -> dict:
 
 
 @app.get("/projects/{project_key}/sprints")
-async def list_sprints(project_key: str) -> dict:
+async def list_sprints(project_key: str, version_id: str | None = None) -> dict:
     async for session in get_session():
-        sprints = (await session.execute(
-            select(Sprint).where(Sprint.project_key == project_key)
-            .order_by(Sprint.order_index.asc())
-        )).scalars().all()
-        items = (await session.execute(
-            select(BacklogItem).where(BacklogItem.project_key == project_key)
-        )).scalars().all()
+        s_q = select(Sprint).where(Sprint.project_key == project_key)
+        if version_id:
+            s_q = s_q.where(Sprint.version_id == version_id)
+        sprints = (await session.execute(s_q.order_by(Sprint.order_index.asc()))).scalars().all()
+        i_q = select(BacklogItem).where(BacklogItem.project_key == project_key)
+        if version_id:
+            i_q = i_q.where(BacklogItem.version_id == version_id)
+        items = (await session.execute(i_q)).scalars().all()
+
+        def _story(it: BacklogItem) -> dict:
+            return {"id": it.id, "story_key": it.story_key, "title": it.title,
+                    "description": it.description, "story_points": it.story_points,
+                    "status": it.status, "priority": it.priority,
+                    "sprint_id": it.sprint_id, "origin": it.origin}
+
         by_sprint: dict[str, list] = {}
         for it in items:
             if it.sprint_id:
-                by_sprint.setdefault(it.sprint_id, []).append({
-                    "story_key": it.story_key, "title": it.title,
-                    "story_points": it.story_points, "status": it.status,
-                })
-        unassigned = [
-            {"story_key": it.story_key, "title": it.title, "story_points": it.story_points,
-             "status": it.status}
-            for it in items if not it.sprint_id
-        ]
+                by_sprint.setdefault(it.sprint_id, []).append(_story(it))
+        unassigned = [_story(it) for it in items if not it.sprint_id]
         return {
             "sprints": [
                 {
                     "id": s.id, "number": s.number, "name": s.name, "goal": s.goal,
                     "order_index": s.order_index, "status": s.status,
-                    "total_points": s.total_points,
+                    "total_points": s.total_points, "version_id": s.version_id,
                     "stories": by_sprint.get(s.id, []),
                 }
                 for s in sprints

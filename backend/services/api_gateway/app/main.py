@@ -738,9 +738,10 @@ async def gw_plan_sprints(project_key: str) -> dict:
 
 
 @app.get("/projects/{project_key}/sprints")
-async def gw_list_sprints(project_key: str) -> dict:
+async def gw_list_sprints(project_key: str, version_id: str | None = None) -> dict:
+    suffix = f"?version_id={version_id}" if version_id else ""
     return await _proxy_get(
-        f"{settings.orchestrator_service_url}/projects/{project_key}/sprints"
+        f"{settings.orchestrator_service_url}/projects/{project_key}/sprints{suffix}"
     )
 
 

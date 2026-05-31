@@ -724,8 +724,9 @@ export async function apiPlanSprints(projectKey: string): Promise<SprintBoard> {
   return apiGetSprints(projectKey);
 }
 
-export async function apiGetSprints(projectKey: string): Promise<SprintBoard> {
-  const res = await fetch(`${API}/projects/${encodeURIComponent(projectKey)}/sprints`);
+export async function apiGetSprints(projectKey: string, versionId?: string): Promise<SprintBoard> {
+  const q = versionId ? `?version_id=${encodeURIComponent(versionId)}` : "";
+  const res = await fetch(`${API}/projects/${encodeURIComponent(projectKey)}/sprints${q}`);
   if (!res.ok) return { sprints: [], unassigned: [] };
   return res.json();
 }

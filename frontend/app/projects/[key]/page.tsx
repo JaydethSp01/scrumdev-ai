@@ -45,11 +45,10 @@ import ProjectChat from "@/components/ProjectChat";
 import Spinner from "@/components/Spinner";
 import ProjectOverview from "@/components/ProjectOverview";
 import VisionForm from "@/components/VisionForm";
-import BacklogBoard from "@/components/BacklogBoard";
+import BoardsPanel from "@/components/BoardsPanel";
 import CodeBrowser from "@/components/CodeBrowser";
 import DeployPanel from "@/components/DeployPanel";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
-import SprintBoard from "@/components/SprintBoard";
 import PipelinePanel from "@/components/PipelinePanel";
 import VersionsPanel from "@/components/VersionsPanel";
 import ArchitecturePanel from "@/components/ArchitecturePanel";
@@ -71,9 +70,8 @@ type Tab =
   | "nfr"
   | "architecture"
   | "personalization"
-  | "backlog"
   | "versions"
-  | "sprints"
+  | "boards"
   | "agents"
   | "decisions"
   | "code"
@@ -127,12 +125,6 @@ const TABS: TabDef[] = [
       "Define colores, tipografia e imagenes que usaran los agentes al generar el sistema.",
   },
   {
-    value: "backlog",
-    label: "Backlog",
-    icon: ListTodo,
-    description: "Historias generadas por el crew de refinement.",
-  },
-  {
     value: "versions",
     label: "Versiones",
     icon: GitBranch,
@@ -140,10 +132,10 @@ const TABS: TabDef[] = [
       "Ciclo de vida: cada versión agrupa sprints; una versión nueva parte del código de la anterior.",
   },
   {
-    value: "sprints",
-    label: "Sprints",
+    value: "boards",
+    label: "Boards",
     icon: Layers,
-    description: "Como PO decides el orden de sprints y que historias entran.",
+    description: "Tablero ágil por versión y sprint: crea, mueve y gestiona tareas (estilo Azure DevOps).",
   },
   {
     value: "agents",
@@ -612,12 +604,9 @@ export default function ProjectDetailPage() {
           {tab === "personalization" && (
             <PersonalizationPanel projectKey={project.key} user={user} />
           )}
-          {tab === "backlog" && (
-            <BacklogBoard projectKey={project.key} user={user} />
-          )}
+          {tab === "boards" && <BoardsPanel projectKey={project.key} />}
           {tab === "pipeline" && <PipelinePanel projectKey={project.key} />}
           {tab === "versions" && <VersionsPanel projectKey={project.key} />}
-          {tab === "sprints" && <SprintBoard projectKey={project.key} />}
           {tab === "agents" && (
             <div className="space-y-6">
               <AgentsPanel />
