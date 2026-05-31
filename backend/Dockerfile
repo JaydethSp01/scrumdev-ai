@@ -65,11 +65,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     PIP_NO_CACHE_DIR=1
 
-# curl para healthchecks; libpq5 runtime de asyncpg/psycopg
+# curl healthchecks; libpq5 runtime asyncpg/psycopg; nodejs+npm para el BUILD
+# GATE de las apps generadas (deploy_split corre `npm install && next build`).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         libpq5 \
         tini \
+        nodejs \
+        npm \
+        git \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 1000 scrumdev \
     && useradd  --system --uid 1000 --gid scrumdev --create-home --home-dir /home/scrumdev scrumdev
