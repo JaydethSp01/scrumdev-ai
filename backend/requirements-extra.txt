@@ -18,3 +18,4 @@ packaging
 regex
 filelock
 fsspec
+claude-agent-sdk==0.1.1

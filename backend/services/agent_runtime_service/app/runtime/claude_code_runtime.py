@@ -65,16 +65,30 @@ async def run_claude_code(
     max_turns: int = 1,
     image_paths: Optional[list[str]] = None,
 ) -> str:
-    """Punto único de generación con LLM.
+    """Punto único de generación con LLM (HÍBRIDO).
 
-    - provider=claude_code (LOCAL, plan Pro/Max): usa el SDK/CLI de Claude.
-    - cualquier otro provider (cloud): rutea a la API (OpenAI por defecto), ya
-      que el CLI de Claude no corre en un servidor. Así los generadores
-      (app/backlog/code) funcionan igual en la nube sin tocar a sus callers.
+    - provider=claude_code: usa el SDK/CLI de Claude (plan Pro/Max vía
+      CLAUDE_CODE_OAUTH_TOKEN headless -> NO gasta API). Si falla, cae a OpenAI.
+    - otro provider: OpenAI directo.
+    Claude lleva el peso de la generación; OpenAI es el apoyo/fallback.
     """
     provider = (settings.scrumdev_ai_provider or "claude_code").lower()
     if provider != "claude_code":
         return await _run_via_api(prompt, system_prompt, image_paths, provider)
+    try:
+        return await _run_claude_sdk(prompt, system_prompt, max_turns, image_paths)
+    except Exception as exc:  # noqa: BLE001 -> apoyo OpenAI si Claude Code falla
+        logger.warning("claude_code_failed_fallback_openai", error=str(exc)[:200])
+        return await _run_via_api(prompt, system_prompt, image_paths, "openai")
+
+
+async def _run_claude_sdk(
+    prompt: str,
+    system_prompt: Optional[str] = None,
+    max_turns: int = 1,
+    image_paths: Optional[list[str]] = None,
+) -> str:
+    """Generación vía Claude Code SDK/CLI (plan, sin API)."""
     try:
         from claude_agent_sdk import (
             AssistantMessage,

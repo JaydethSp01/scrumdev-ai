@@ -87,6 +87,10 @@ COPY --from=builder /install /usr/local
 COPY backend/requirements-extra.txt /tmp/requirements-extra.txt
 RUN pip install --no-cache-dir -r /tmp/requirements-extra.txt
 
+# Claude Code CLI: el SDK (claude-agent-sdk) lo spawnea para generar con Claude
+# vía plan Pro/Max (CLAUDE_CODE_OAUTH_TOKEN headless, sin gastar API).
+RUN npm install -g @anthropic-ai/claude-code || true
+
 WORKDIR /app
 
 # Sólo el código backend (no node_modules ni .next del frontend, ignorado por .dockerignore)
