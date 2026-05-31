@@ -75,6 +75,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Trae deps Python desde el builder
 COPY --from=builder /install /usr/local
 
+# Salvaguarda definitiva: certifi (dep de httpx) a veces no llega vía el copy del
+# prefix builder. Lo instalamos DIRECTO en el runtime para garantizar el import.
+RUN pip install --no-cache-dir certifi || true
+
 WORKDIR /app
 
 # Sólo el código backend (no node_modules ni .next del frontend, ignorado por .dockerignore)
