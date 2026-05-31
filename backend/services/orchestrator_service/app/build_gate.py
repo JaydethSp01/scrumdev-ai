@@ -127,6 +127,45 @@ def _ensure_use_client(files_rel: list[dict], report: list[str]) -> list[dict]:
     return files_rel
 
 
+_KNOWN_DEPS = {
+    "axios": "^1.7.7", "clsx": "^2.1.1", "date-fns": "^3.6.0", "zod": "^3.23.8",
+    "zustand": "^4.5.5", "swr": "^2.2.5", "@tanstack/react-query": "^5.59.0",
+    "react-icons": "^5.3.0", "tailwind-merge": "^2.5.0", "recharts": "^2.12.0",
+    "react-hook-form": "^7.53.0", "uuid": "^10.0.0",
+}
+
+
+def _ensure_npm_deps(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """La IA importa libs (axios, clsx, zod...) sin declararlas en package.json
+    -> 'Module not found'. Detectamos imports de libs conocidas y las añadimos a
+    dependencies para que `npm install` las traiga."""
+    import json as _json
+    pkg = next((f for f in files_rel if (f.get("path") or "").endswith("frontend/package.json")
+                or (f.get("path") or "") == "package.json"), None)
+    if not pkg:
+        return files_rel
+    # qué libs se importan en el código
+    src = "\n".join(f.get("content") or "" for f in files_rel
+                    if (f.get("path") or "").endswith((".ts", ".tsx", ".js", ".jsx")))
+    imported = set(re.findall(r"""from\s+['"]([^'".][^'"]*)['"]""", src))
+    bare = {m.split("/")[0] if not m.startswith("@") else "/".join(m.split("/")[:2])
+            for m in imported}
+    try:
+        data = _json.loads(pkg.get("content") or "{}")
+    except Exception:
+        return files_rel
+    deps = data.setdefault("dependencies", {})
+    added = []
+    for lib, ver in _KNOWN_DEPS.items():
+        if lib in bare and lib not in deps:
+            deps[lib] = ver
+            added.append(lib)
+    if added:
+        pkg["content"] = _json.dumps(data, indent=2)
+        report.append(f"deps añadidas a package.json: {', '.join(added)}")
+    return files_rel
+
+
 def _apply_frontend_autofix(files_rel: list[dict]) -> tuple[list[dict], list[str]]:
     """Reusa los fixes genericos del validador (CSS + exports + rutas paralelas)."""
     from services.orchestrator_service.app.deploy_validator import (
@@ -136,6 +175,7 @@ def _apply_frontend_autofix(files_rel: list[dict]) -> tuple[list[dict], list[str
     files_rel = _dedup_parallel_routes(files_rel, report)
     files_rel = _fix_next_router(files_rel, report)
     files_rel = _ensure_use_client(files_rel, report)
+    files_rel = _ensure_npm_deps(files_rel, report)
     files_rel = _autofix_missing_exports(files_rel, report)
     files_rel = _ensure_css_imports(files_rel, report)
     return files_rel, report
@@ -156,6 +196,7 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 2) -> d
     files_rel = _dedup_parallel_routes(files_rel, _pre)
     files_rel = _fix_next_router(files_rel, _pre)   # App Router: next/router -> next/navigation
     files_rel = _ensure_use_client(files_rel, _pre)  # hooks de cliente -> "use client"
+    files_rel = _ensure_npm_deps(files_rel, _pre)    # libs importadas -> package.json
 
     env = _node_env()
     all_fixes: list[str] = list(_pre)
