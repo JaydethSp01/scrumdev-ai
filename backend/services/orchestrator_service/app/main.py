@@ -1620,14 +1620,22 @@ async def plan_project_sprints(project_key: str) -> dict:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"planner failed: {exc}")
 
-    # persistir: borrar sprints previos, crear nuevos, asignar historias
+    # persistir: borrar sprints previos DE LA VERSION ACTIVA, crear nuevos
+    from services.orchestrator_service.app.versions import get_active_version
     async for session in get_session():
         from sqlalchemy import delete as sa_delete
-        await session.execute(sa_delete(Sprint).where(Sprint.project_key == project_key))
-        # reset sprint_id de historias
-        rows = (await session.execute(
-            select(BacklogItem).where(BacklogItem.project_key == project_key)
-        )).scalars().all()
+        active_v = await get_active_version(session, project_key)
+        version_id = active_v.id if active_v else None
+        # solo borrar/replanificar los sprints de ESTA version (no de otras)
+        del_q = sa_delete(Sprint).where(Sprint.project_key == project_key)
+        if version_id:
+            del_q = del_q.where(Sprint.version_id == version_id)
+        await session.execute(del_q)
+        # historias de la version activa (reset sprint_id)
+        b_q = select(BacklogItem).where(BacklogItem.project_key == project_key)
+        if version_id:
+            b_q = b_q.where(BacklogItem.version_id == version_id)
+        rows = (await session.execute(b_q)).scalars().all()
         by_key = {r.story_key: r for r in rows}
         for r in rows:
             r.sprint_id = None
@@ -1635,6 +1643,7 @@ async def plan_project_sprints(project_key: str) -> dict:
         for s in suggested:
             sp = Sprint(
                 project_key=project_key,
+                version_id=version_id,
                 number=s.get("number", 1),
                 name=s.get("name", f"Sprint {s.get('number',1)}"),
                 goal=s.get("goal", ""),
