@@ -2684,6 +2684,9 @@ async def deploy_project(project_key: str, req: DeployRequest) -> dict:
         art_q = select(CodeArtifact).where(CodeArtifact.project_key == project_key)
         if active_version:
             art_q = art_q.where(CodeArtifact.version_id == active_version.id)
+        # ORDEN por created_at: regeneraciones dejan VARIOS artefactos por path;
+        # sin orden+dedup el deploy escribía una versión vieja (imports rotos).
+        art_q = art_q.order_by(CodeArtifact.created_at)
         result = await session.execute(art_q)
         artifacts = result.scalars().all()
         if not artifacts:
@@ -2691,9 +2694,11 @@ async def deploy_project(project_key: str, req: DeployRequest) -> dict:
                 status_code=400,
                 detail="No hay codigo generado. Ejecuta /build primero.",
             )
-        files = [
-            {"path": a.file_path, "content": a.content} for a in artifacts
-        ]
+        # dedup por path: la ÚLTIMA versión (created_at asc -> última gana)
+        _by_path: dict[str, str] = {}
+        for a in artifacts:
+            _by_path[a.file_path] = a.content
+        files = [{"path": p, "content": c} for p, c in _by_path.items()]
 
         # ARQUITECTURA PER-TIER: detectar stack, GATE de build local (sin quemar
         # nube) y desplegar front/back SEPARADOS (Vercel + Render + Neon).
