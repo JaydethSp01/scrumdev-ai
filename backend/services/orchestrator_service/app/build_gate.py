@@ -175,13 +175,20 @@ def _stub_missing_local_imports(files_rel: list[dict], report: list[str]) -> lis
             if base + ext in existing or f"{base}/index{ext}" in existing:
                 return True
         return False
+    import posixpath
     src_files = [f for f in files_rel if (f.get("path") or "").endswith((".tsx", ".ts", ".jsx", ".js"))]
-    # recolectar imports default/named por módulo @/
+    # recolectar imports default/named de módulos locales (@/ y relativos ./ ../)
     need: dict[str, dict] = {}
-    imp_re = re.compile(r"""import\s+(.+?)\s+from\s+['"]@/([^'"]+)['"]""", re.S)
+    imp_re = re.compile(r"""import\s+(.+?)\s+from\s+['"](@/[^'"]+|\.\.?/[^'"]+)['"]""", re.S)
     for f in src_files:
-        for clause, mod in imp_re.findall(f.get("content") or ""):
-            base = mod  # ruta relativa a frontend root
+        fdir = posixpath.dirname((f.get("path") or "").lstrip("/"))
+        for clause, spec in imp_re.findall(f.get("content") or ""):
+            if spec.startswith("@/"):
+                base = spec[2:]                       # relativo al root frontend
+            else:
+                base = posixpath.normpath(posixpath.join(fdir, spec))  # resolver relativo
+            if base.startswith("..") or not base:
+                continue
             if has(base):
                 continue
             info = need.setdefault(base, {"default": False, "named": set()})
