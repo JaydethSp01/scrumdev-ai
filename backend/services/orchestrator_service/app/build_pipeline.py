@@ -92,7 +92,65 @@ async def _save_backlog(project_key: str, stories: list[dict]) -> list[BacklogIt
         for item in items:
             await session.refresh(item)
         break
+    # Sincronizar con Jira (best-effort): crear los issues en el tablero del
+    # cliente. No bloquea el flujo si Jira no esta configurado o falla.
+    try:
+        await _sync_backlog_to_jira(project_key, items)
+    except Exception as exc:
+        logger.warning("jira_sync_skipped", project=project_key, error=str(exc))
     return items
+
+
+async def _sync_backlog_to_jira(project_key: str, items: list) -> None:
+    """Crea los issues del backlog en Jira (config del proyecto o global)."""
+    from shared.db.models import IntegrationConfig
+    import base64 as _b64
+    # resolver credenciales: primero las del proyecto, si no las globales
+    base_url = email = token = jira_pk = None
+    async for session in get_session():
+        cfg = (await session.execute(
+            select(IntegrationConfig).where(
+                IntegrationConfig.project_key == project_key,
+                IntegrationConfig.provider == "jira",
+            )
+        )).scalar_one_or_none()
+        if cfg and cfg.secret_enc:
+            base_url = cfg.config.get("base_url")
+            email = cfg.config.get("email")
+            token = _b64.b64decode(cfg.secret_enc).decode()
+            jira_pk = cfg.config.get("project_key_jira")
+        break
+    if not (base_url and email and token):
+        # global
+        base_url = settings.scrumdev_jira_base_url
+        email = settings.scrumdev_jira_email
+        token = settings.scrumdev_jira_api_token
+        jira_pk = settings.scrumdev_jira_project_key
+    if not (base_url and email and token and jira_pk):
+        logger.info("jira_not_configured_skip", project=project_key)
+        return
+    import httpx as _hx
+    auth = _b64.b64encode(f"{email}:{token}".encode()).decode()
+    headers = {"Authorization": f"Basic {auth}", "Accept": "application/json",
+               "Content-Type": "application/json"}
+    created = 0
+    async with _hx.AsyncClient(timeout=20.0) as c:
+        for it in items[:20]:
+            payload = {"fields": {
+                "project": {"key": jira_pk},
+                "summary": f"[{it.story_key}] {it.title}"[:240],
+                "description": {"type": "doc", "version": 1, "content": [
+                    {"type": "paragraph", "content": [
+                        {"type": "text", "text": (it.description or it.title)[:500]}]}]},
+                "issuetype": {"name": "Task"},
+            }}
+            try:
+                r = await c.post(f"{base_url.rstrip('/')}/rest/api/3/issue", json=payload, headers=headers)
+                if r.status_code < 300:
+                    created += 1
+            except Exception:
+                pass
+    logger.info("jira_backlog_synced", project=project_key, created=created, total=len(items))
 
 
 async def _save_code(project_key: str, story_id: str, files: list[dict]) -> list[CodeArtifact]:
