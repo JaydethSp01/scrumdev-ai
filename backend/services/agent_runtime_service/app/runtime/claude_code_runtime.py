@@ -18,6 +18,36 @@ from shared.observability import get_logger
 logger = get_logger(__name__)
 
 
+async def _run_via_api(
+    prompt: str,
+    system_prompt: Optional[str],
+    image_paths: Optional[list[str]],
+    provider: str,
+) -> str:
+    """Generación vía API (cloud). OpenAI por defecto; Anthropic API si está
+    configurado el provider 'anthropic' con su key. Visión con gpt-4o si hay
+    imágenes."""
+    from services.agent_runtime_service.app.runtime import openai_client
+
+    model_big = settings.openai_model_vision or "gpt-4o"  # gpt-4o: buen codegen
+    # imágenes (bug-fix con screenshot): usar visión sobre la primera
+    if image_paths:
+        for p in image_paths:
+            try:
+                return await openai_client.vision_describe(p, prompt)
+            except Exception:  # noqa: BLE001
+                continue
+    # texto: completion grande (generación de apps/backlog/código)
+    try:
+        return await openai_client.chat_fast(
+            prompt, system=system_prompt, model=model_big, max_tokens=16000,
+            temperature=0.6,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("api_generation_failed", provider=provider)
+        raise RuntimeError(f"API generation error ({provider}): {exc}") from exc
+
+
 def _ensure_bin_in_env() -> None:
     """Si el usuario especifico CLAUDE_CODE_BIN, anade su directorio al PATH."""
     if not settings.claude_code_bin:
@@ -35,12 +65,16 @@ async def run_claude_code(
     max_turns: int = 1,
     image_paths: Optional[list[str]] = None,
 ) -> str:
-    """Invoca Claude Code con un prompt y devuelve el texto del ResultMessage final.
+    """Punto único de generación con LLM.
 
-    Por defecto allowed_tools=[] (solo razona). Cuando se pasan image_paths,
-    habilita la tool `Read` para que Claude pueda abrir las imagenes adjuntas
-    (Claude Code es multimodal y lee imagenes con la tool Read).
+    - provider=claude_code (LOCAL, plan Pro/Max): usa el SDK/CLI de Claude.
+    - cualquier otro provider (cloud): rutea a la API (OpenAI por defecto), ya
+      que el CLI de Claude no corre en un servidor. Así los generadores
+      (app/backlog/code) funcionan igual en la nube sin tocar a sus callers.
     """
+    provider = (settings.scrumdev_ai_provider or "claude_code").lower()
+    if provider != "claude_code":
+        return await _run_via_api(prompt, system_prompt, image_paths, provider)
     try:
         from claude_agent_sdk import (
             AssistantMessage,
