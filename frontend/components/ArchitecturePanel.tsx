@@ -196,20 +196,20 @@ export function ArchitecturePanel({ projectKey }: Props) {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <Layers size={18} className="text-brand" />
-          <h2 className="text-lg font-semibold">Decisiones tecnicas</h2>
+          <h2 className="text-lg font-semibold">Decisiones del proyecto y por qué</h2>
         </div>
         <div className="flex gap-2">
           <button
             onClick={openAdr}
             className="inline-flex items-center gap-1 px-3 py-2 text-sm rounded-lg bg-brand text-white hover:bg-brand-dark"
           >
-            <FilePlus size={14} /> Generar ADR
+            <FilePlus size={14} /> Documentar decisión
           </button>
           <button
             onClick={openPolicy}
             className="inline-flex items-center gap-1 px-3 py-2 text-sm rounded-lg border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900"
           >
-            <ShieldAlert size={14} /> Evaluar policy
+            <ShieldAlert size={14} /> Revisar buenas prácticas
           </button>
         </div>
       </div>
@@ -220,15 +220,15 @@ export function ArchitecturePanel({ projectKey }: Props) {
         </div>
         <div className="space-y-1.5">
           <p className="text-sm font-semibold tracking-tight">
-            Decisiones tecnicas (ADR)
+            ¿Qué es esto? (en simple)
           </p>
           <p className="text-sm text-neutral-700 dark:text-neutral-300 leading-relaxed">
-            Un ADR (Architecture Decision Record) registra POR QUE elegiste una
-            tecnologia o patron. Por ejemplo: &ldquo;Usamos PostgreSQL con
-            pgvector porque necesitamos busqueda semantica.&rdquo; Sirve para
-            que tu equipo (humano o futuro) entienda las decisiones del
-            proyecto sin tener que adivinar. Cada vez que el sistema toma una
-            decision arquitectonica importante, genera un ADR aqui.
+            Aquí queda registrado <b>por qué</b> tu software se construyó de cierta
+            forma. Por ejemplo: &ldquo;guardamos los datos en una base que permite
+            búsquedas inteligentes&rdquo;. Es como el acta de decisiones del
+            proyecto: si mañana entra otro equipo (o tú vuelves en 6 meses),
+            entienden las decisiones sin adivinar. El sistema lo escribe solo.
+            <span className="text-neutral-500"> (técnicamente: ADR — Architecture Decision Record)</span>
           </p>
         </div>
       </div>
@@ -238,8 +238,8 @@ export function ArchitecturePanel({ projectKey }: Props) {
           <h3 className="text-sm font-semibold mb-2">ADRs recientes</h3>
           {adrs.length === 0 ? (
             <EmptyState
-              title="Sin ADRs aun"
-              description="Genera tu primer ADR con el boton de arriba."
+              title="Aún no hay decisiones documentadas"
+              description="Se generan solas al definir la arquitectura, o crea una con el botón de arriba."
               icon={FilePlus}
             />
           ) : (
