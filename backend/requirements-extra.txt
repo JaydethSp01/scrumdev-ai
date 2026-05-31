@@ -14,3 +14,7 @@ requests==2.34.2
 urllib3==2.7.0
 zipp==4.1.0
 aiokafka==0.14.0
+packaging
+regex
+filelock
+fsspec

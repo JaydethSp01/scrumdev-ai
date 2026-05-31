@@ -77,9 +77,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Trae deps Python desde el builder
 COPY --from=builder /install /usr/local
 
-# Salvaguarda definitiva: certifi (dep de httpx) a veces no llega vía el copy del
-# prefix builder. Lo instalamos DIRECTO en el runtime para garantizar el import.
-RUN pip install --no-cache-dir certifi || true
+# Las deps "extra" (que el poetry.lock no incluye o que el copy del prefix omite,
+# p.ej. packaging/certifi) se instalan DIRECTO en el runtime para garantizar que
+# sean importables (el ML necesita packaging->transformers->sentence-transformers).
+COPY backend/requirements-extra.txt /tmp/requirements-extra.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-extra.txt
 
 WORKDIR /app
 
