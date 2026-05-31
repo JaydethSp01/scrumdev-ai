@@ -28,6 +28,7 @@ from shared.clients.http import post_json
 from shared.config.settings import settings
 from shared.db import init_db
 from shared.db.models import (
+    ArchitectureDecision,
     BacklogItem,
     BrandKit,
     BuildRun,
@@ -995,6 +996,39 @@ async def get_pipeline(project_key: str) -> dict:
             {"id": d.id, "decision_type": d.decision_type, "title": d.title}
             for d in pending
         ]
+        # Si estamos en un gate, adjuntar el CONTENIDO a aprobar para que el
+        # usuario vea QUE esta aprobando (no solo un boton vacio).
+        if view.get("is_gate"):
+            gate_n = view.get("gate_n")
+            review: dict = {}
+            if gate_n == 1:  # aprobar arquitectura -> mostrar ADRs + arquitectura
+                adrs = (await session.execute(
+                    select(ArchitectureDecision).where(
+                        ArchitectureDecision.project_key == project_key
+                    ).order_by(ArchitectureDecision.adr_number.asc())
+                )).scalars().all()
+                review["title"] = "Vas a aprobar la arquitectura propuesta"
+                review["summary"] = (
+                    "El Architect Agent propuso la siguiente arquitectura y decisiones "
+                    "técnicas (ADR). Revísalas; si estás de acuerdo, apruébalas para que "
+                    "el sistema empiece a programar."
+                )
+                review["adrs"] = [
+                    {"number": a.adr_number, "title": a.title, "status": a.status,
+                     "context": a.context, "decision": a.decision,
+                     "consequences": a.consequences, "markdown": a.markdown}
+                    for a in adrs
+                ]
+            elif gate_n == 2:  # aprobar evidencia QA
+                review["title"] = "Vas a aprobar la evidencia de calidad (QA)"
+                review["summary"] = "El sistema generó el código y corrió las validaciones. Revisa y acepta o pide cambios."
+            elif gate_n == 3:  # aprobar release a staging
+                review["title"] = "Vas a aprobar la publicación a un ambiente de pruebas"
+                review["summary"] = "El sistema está listo para publicar en un entorno de prueba (staging) antes de producción."
+            elif gate_n == 4:  # aprobar produccion
+                review["title"] = "Vas a aprobar la publicación a PRODUCCIÓN"
+                review["summary"] = "Último paso: publicar el software para tus usuarios reales. Esta decisión es crítica."
+            view["gate_review"] = review
         return view
     from services.orchestrator_service.app.project_pipeline import build_pipeline_view as _bpv
     return _bpv("BACKLOG")
@@ -1102,6 +1136,60 @@ async def advance_pipeline(project_key: str, req: AdvancePhaseRequest) -> dict:
             "pipeline": build_pipeline_view(nxt)}
 
 
+async def _generate_architecture_adrs(project_key: str) -> None:
+    """Genera y persiste los 3 ADRs de la guia (estilo, DB, auth) via Architect
+    Agent. Se dispara automaticamente en la fase de arquitectura."""
+    from shared.db.models import ArchitectureDecision, ProjectVision, NFRCapture
+    # cargar vision + nfr como contexto
+    vision_txt = ""
+    nfr_data: dict = {}
+    async for session in get_session():
+        v = (await session.execute(
+            select(ProjectVision).where(ProjectVision.project_key == project_key)
+        )).scalar_one_or_none()
+        vision_txt = v.vision if v else ""
+        nfr = (await session.execute(
+            select(NFRCapture).where(NFRCapture.project_key == project_key)
+            .order_by(NFRCapture.created_at.desc())
+        )).scalars().first()
+        nfr_data = nfr.nfr_data if nfr else {}
+        # no regenerar si ya hay ADRs
+        existing = (await session.execute(
+            select(ArchitectureDecision).where(ArchitectureDecision.project_key == project_key)
+        )).scalars().all()
+        if existing:
+            return
+        break
+
+    topics = [
+        (1, "Estilo de arquitectura", f"Proyecto: {vision_txt[:400]}. Elige el estilo arquitectonico adecuado."),
+        (2, "Eleccion de base de datos", f"Proyecto: {vision_txt[:400]}. Decide el almacenamiento de datos."),
+        (3, "Estrategia de autenticacion", f"Proyecto: {vision_txt[:400]}. Define como se autentican los usuarios."),
+    ]
+    for num, topic, ctx in topics:
+        try:
+            resp = await post_json(
+                f"{settings.agent_runtime_service_url}/adr/generate",
+                {"project_key": project_key, "adr_number": num, "topic": topic,
+                 "context": ctx, "nfr_data": nfr_data},
+                timeout=120.0,
+            )
+            md = resp.get("markdown") or resp.get("content") or ""
+            async for session in get_session():
+                session.add(ArchitectureDecision(
+                    project_key=project_key, adr_number=num, title=topic,
+                    status="proposed", context=ctx[:1000],
+                    decision=resp.get("decision", "")[:2000] if isinstance(resp.get("decision"), str) else "",
+                    consequences=resp.get("consequences", "")[:2000] if isinstance(resp.get("consequences"), str) else "",
+                    markdown=md,
+                ))
+                await session.commit()
+                break
+        except Exception as exc:
+            logger.warning("adr_gen_failed", project=project_key, adr=num, error=str(exc))
+    logger.info("architecture_adrs_generated", project=project_key)
+
+
 async def _run_phase_action(project_key: str, phase: str, action: str, triggered_by: str) -> None:
     """Ejecuta el trabajo real de cada fase del pipeline (fire-and-forget).
 
@@ -1131,6 +1219,9 @@ async def _run_phase_action(project_key: str, phase: str, action: str, triggered
                     )
             except Exception:
                 pass
+        elif action == "propose_architecture":
+            # Architect Agent: generar los 3 ADRs de la guia y persistirlos
+            await _generate_architecture_adrs(project_key)
         elif action == "generate_code":
             # generar codigo (del sprint activo si hay)
             async for session in get_session():
@@ -1158,6 +1249,65 @@ async def _run_phase_action(project_key: str, phase: str, action: str, triggered
         logger.info("phase_action_done", project=project_key, action=action)
     except Exception as exc:
         logger.warning("phase_action_failed", project=project_key, action=action, error=str(exc))
+
+
+async def _auto_run_until_gate(project_key: str, triggered_by: str, max_steps: int = 14) -> None:
+    """Avanza el pipeline AUTOMATICAMENTE fase por fase hasta toparse con el
+    siguiente gate humano (o RELEASED). Cada fase no-gate dispara su accion real
+    y espera un poco a que progrese. Asi el PO aprueba 1 vez y el sistema corre
+    solo hasta el proximo punto que requiere su decision."""
+    from services.orchestrator_service.app.project_pipeline import (
+        is_human_gate, next_phase,
+    )
+    import asyncio as _aio
+    for _ in range(max_steps):
+        async for session in get_session():
+            proj = (await session.execute(
+                select(_Project).where(_Project.key == project_key)
+            )).scalar_one_or_none()
+            state = proj.workflow_state if proj else None
+            break
+        if not state:
+            return
+        # si la fase actual es un gate -> parar (espera decision humana)
+        if is_human_gate(state):
+            logger.info("auto_run_paused_at_gate", project=project_key, gate=state)
+            return
+        nxt = next_phase(state)
+        if not nxt:
+            return  # RELEASED
+        # avanzar una fase (dispara su accion). reusar advance_pipeline.
+        try:
+            await advance_pipeline(project_key, AdvancePhaseRequest(triggered_by=triggered_by))
+        except Exception as exc:
+            logger.warning("auto_run_step_failed", project=project_key, error=str(exc))
+            return
+        # si la nueva fase es gate, parar; si dispara generacion/QA, dar tiempo
+        async for session in get_session():
+            proj = (await session.execute(
+                select(_Project).where(_Project.key == project_key)
+            )).scalar_one_or_none()
+            new_state = proj.workflow_state if proj else None
+            break
+        if new_state and is_human_gate(new_state):
+            logger.info("auto_run_reached_gate", project=project_key, gate=new_state)
+            return
+        await _aio.sleep(2)
+
+
+@app.post("/projects/{project_key}/pipeline/autorun")
+async def pipeline_autorun(project_key: str, req: AdvancePhaseRequest) -> dict:
+    """Arranca el modo automatico: corre hasta el proximo gate en background."""
+    from services.orchestrator_service.app.project_pipeline import build_pipeline_view
+    asyncio.create_task(_auto_run_until_gate(project_key, req.triggered_by))
+    async for session in get_session():
+        proj = (await session.execute(
+            select(_Project).where(_Project.key == project_key)
+        )).scalar_one_or_none()
+        state = proj.workflow_state if proj else "BACKLOG"
+        break
+    return {"autorun": True, "message": "Corriendo automatico hasta el proximo gate.",
+            "pipeline": build_pipeline_view(state)}
 
 
 @app.post("/projects/{project_key}/pipeline/approve-gate")
@@ -1212,8 +1362,12 @@ async def approve_current_gate(project_key: str, req: AdvancePhaseRequest) -> di
         ))
         break
 
-    # ahora avanzar
-    return await advance_pipeline(project_key, req)
+    # avanzar una fase (sale del gate) y luego correr AUTO hasta el proximo gate
+    result = await advance_pipeline(project_key, req)
+    asyncio.create_task(_auto_run_until_gate(project_key, req.triggered_by))
+    result["autorun"] = True
+    result["message"] = "Gate aprobado. El sistema continua automatico hasta el proximo punto que requiere tu aprobacion."
+    return result
 
 
 # ===== Ciclo de vida: Versiones (Proyecto -> Version -> Sprint -> Tarea) =====
