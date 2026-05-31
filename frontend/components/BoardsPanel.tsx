@@ -50,7 +50,12 @@ export default function BoardsPanel({ projectKey }: { projectKey: string }) {
   const loadBoard = useCallback(async (versionId: string | null) => {
     setLoading(true);
     try {
-      const b = await apiGetSprints(projectKey, versionId || undefined);
+      let b = await apiGetSprints(projectKey, versionId || undefined);
+      // fallback: si la version activa no tiene sprints, mostrar todos (UX)
+      if ((!b.sprints || b.sprints.length === 0) && versionId) {
+        const all = await apiGetSprints(projectKey);
+        if (all.sprints && all.sprints.length > 0) b = all;
+      }
       setBoard(b as unknown as Board);
     } finally {
       setLoading(false);
