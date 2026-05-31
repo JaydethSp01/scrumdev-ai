@@ -6,7 +6,7 @@ import {
   GitBranch, Sparkles, CheckCircle2,
 } from "lucide-react";
 import {
-  listVersions, apiGetSprints, apiPlanSprints,
+  listVersions, apiGetSprints, apiPlanSprints, createSprint,
   createTask, updateTask, deleteTask,
   type VersionInfo,
 } from "@/lib/api";
@@ -50,12 +50,8 @@ export default function BoardsPanel({ projectKey }: { projectKey: string }) {
   const loadBoard = useCallback(async (versionId: string | null) => {
     setLoading(true);
     try {
-      let b = await apiGetSprints(projectKey, versionId || undefined);
-      // fallback: si la version activa no tiene sprints, mostrar todos (UX)
-      if ((!b.sprints || b.sprints.length === 0) && versionId) {
-        const all = await apiGetSprints(projectKey);
-        if (all.sprints && all.sprints.length > 0) b = all;
-      }
+      // mostrar SOLO los sprints/tareas de la version seleccionada (sin mezclar)
+      const b = await apiGetSprints(projectKey, versionId || undefined);
       setBoard(b as unknown as Board);
     } finally {
       setLoading(false);
@@ -82,18 +78,39 @@ export default function BoardsPanel({ projectKey }: { projectKey: string }) {
     const cur = COLS.findIndex((c) => c.match(st.status));
     const next = cur + dir;
     if (next < 0 || next >= COLS.length) return;
-    const newStatus = STATUS_OF[next];
-    // optimista
+    await setStatus(st, STATUS_OF[next]);
+  }
+
+  async function setStatus(st: Story, newStatus: string) {
+    if (st.status === newStatus) return;
     setBoard((b) => b ? patchStory(b, st.id, { status: newStatus }) : b);
     try { await updateTask(projectKey, st.id, { status: newStatus }); }
     catch (e) { toasts.error(String(e)); void loadBoard(activeVersion); }
   }
 
+  // drag & drop: card -> columna
+  async function dropOnColumn(storyId: string, newStatus: string) {
+    let target: Story | undefined;
+    board?.sprints.forEach((sp) => { const f = sp.stories.find((s) => s.id === storyId); if (f) target = f; });
+    if (!target) target = board?.unassigned.find((s) => s.id === storyId);
+    if (target) await setStatus(target, newStatus);
+  }
+
   async function addStory(sprintId: string | null, title: string) {
     if (!title.trim()) return;
     try {
-      await createTask(projectKey, { title: title.trim(), status: "backlog", sprint_id: sprintId });
+      await createTask(projectKey, { title: title.trim(), status: "backlog", sprint_id: sprintId, version_id: activeVersion });
       await loadBoard(activeVersion);
+    } catch (e) { toasts.error(String(e)); }
+  }
+
+  async function addSprint() {
+    const name = prompt("Nombre del nuevo sprint:");
+    if (!name || !name.trim()) return;
+    try {
+      await createSprint(projectKey, { name: name.trim(), version_id: activeVersion });
+      await loadBoard(activeVersion);
+      toasts.success("Sprint creado");
     } catch (e) { toasts.error(String(e)); }
   }
 
@@ -121,19 +138,25 @@ export default function BoardsPanel({ projectKey }: { projectKey: string }) {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* selector de versión */}
-          <div className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-neutral-300 dark:border-neutral-700">
-            <GitBranch size={14} className="text-neutral-400" />
+          {/* selector de versión (estilizado) */}
+          <div className="relative inline-flex items-center gap-2 pl-3 pr-2 py-2 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 shadow-sm hover:border-brand/50 transition">
+            <GitBranch size={15} className="text-brand shrink-0" />
             <select
               value={activeVersion ?? ""}
               onChange={(e) => setActiveVersion(e.target.value)}
-              className="text-sm bg-transparent focus:outline-none"
+              className="text-sm font-medium bg-transparent focus:outline-none appearance-none pr-6 cursor-pointer max-w-[260px]"
             >
               {versions.map((v) => (
-                <option key={v.id} value={v.id}>v{v.number} · {v.name} {v.status === "active" ? "(activa)" : ""}</option>
+                <option key={v.id} value={v.id}>
+                  v{v.number} · {v.name}{v.status === "active" ? "  ●" : ""}
+                </option>
               ))}
             </select>
+            <ChevronRight size={14} className="absolute right-2.5 rotate-90 text-neutral-400 pointer-events-none" />
           </div>
+          <button onClick={() => void addSprint()} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-brand text-white hover:bg-brand-dark">
+            <Plus size={14} /> Sprint
+          </button>
           <button onClick={() => void loadBoard(activeVersion)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
             <RefreshCw size={14} /> Refrescar
           </button>
@@ -157,20 +180,25 @@ export default function BoardsPanel({ projectKey }: { projectKey: string }) {
           <Sparkles className="mx-auto text-brand mb-2" size={28} />
           <p className="font-medium">Esta versión no tiene sprints planificados</p>
           <p className="text-sm text-neutral-500 mt-1 mb-4">El PO Agent puede agrupar las tareas en sprints incrementales.</p>
-          <button onClick={() => void plan()} disabled={planning} className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-brand text-white hover:bg-brand-dark disabled:opacity-60">
-            {planning ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-            Planificar sprints con IA
-          </button>
+          <div className="flex items-center justify-center gap-2">
+            <button onClick={() => void plan()} disabled={planning} className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-brand text-white hover:bg-brand-dark disabled:opacity-60">
+              {planning ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              Planificar con IA
+            </button>
+            <button onClick={() => void addSprint()} className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
+              <Plus size={14} /> Crear sprint manual
+            </button>
+          </div>
         </div>
       ) : (
         <div className="space-y-5">
           {board.sprints.map((sp) => (
-            <SprintLane key={sp.id} sprint={sp} onMove={moveStory} onAdd={addStory} onRemove={removeStory} />
+            <SprintLane key={sp.id} sprint={sp} onMove={moveStory} onAdd={addStory} onRemove={removeStory} onDrop={dropOnColumn} />
           ))}
           {board.unassigned.length > 0 && (
             <SprintLane
               sprint={{ id: "", number: 0, name: "Sin asignar a sprint", stories: board.unassigned }}
-              onMove={moveStory} onAdd={addStory} onRemove={removeStory}
+              onMove={moveStory} onAdd={addStory} onRemove={removeStory} onDrop={dropOnColumn}
             />
           )}
         </div>
@@ -180,12 +208,14 @@ export default function BoardsPanel({ projectKey }: { projectKey: string }) {
   );
 }
 
-function SprintLane({ sprint, onMove, onAdd, onRemove }: {
+function SprintLane({ sprint, onMove, onAdd, onRemove, onDrop }: {
   sprint: Sprint;
   onMove: (s: Story, d: -1 | 1) => void;
   onAdd: (sprintId: string | null, title: string) => void;
   onRemove: (s: Story) => void;
+  onDrop: (storyId: string, newStatus: string) => void;
 }) {
+  const [dragOver, setDragOver] = useState<string | null>(null);
   return (
     <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/40 dark:bg-neutral-900/20 p-4">
       <div className="flex items-center justify-between mb-3">
@@ -202,15 +232,27 @@ function SprintLane({ sprint, onMove, onAdd, onRemove }: {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {COLS.map((col, colIdx) => {
           const cards = sprint.stories.filter((s) => col.match(s.status));
+          const zoneKey = `${sprint.id}:${col.key}`;
           return (
-            <div key={col.key} className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white/60 dark:bg-neutral-950/40 p-2.5">
+            <div
+              key={col.key}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(zoneKey); }}
+              onDragLeave={() => setDragOver((z) => z === zoneKey ? null : z)}
+              onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData("text/plain"); setDragOver(null); if (id) onDrop(id, STATUS_OF[colIdx]); }}
+              className={`rounded-xl border p-2.5 transition ${dragOver === zoneKey ? "border-brand bg-brand/5" : "border-neutral-200 dark:border-neutral-800 bg-white/60 dark:bg-neutral-950/40"}`}
+            >
               <div className="flex items-center justify-between mb-2 px-1">
                 <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500">{col.label}</span>
                 <span className="text-xs text-neutral-400">{cards.length}</span>
               </div>
-              <div className="space-y-2 min-h-[30px]">
+              <div className="space-y-2 min-h-[40px]">
                 {cards.map((st) => (
-                  <div key={st.id} className="group p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950">
+                  <div
+                    key={st.id}
+                    draggable
+                    onDragStart={(e) => e.dataTransfer.setData("text/plain", st.id)}
+                    className="group p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 cursor-grab active:cursor-grabbing hover:border-brand/40"
+                  >
                     <div className="flex items-start gap-2">
                       <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${PRI[(st.priority || "").toLowerCase()] || "bg-neutral-400"}`} />
                       <div className="min-w-0 flex-1">

@@ -889,6 +889,7 @@ class TaskCreateReq(BaseModel):
     story_points: int = 3
     status: str = "backlog"
     sprint_id: str | None = None
+    version_id: str | None = None
     acceptance_criteria: list[str] = []
 
 
@@ -916,7 +917,11 @@ async def create_task(project_key: str, req: TaskCreateReq) -> dict:
     """El PO crea una tarea nueva en el backlog (la asocia a la version activa)."""
     from services.orchestrator_service.app.versions import get_active_version
     async for session in get_session():
-        version = await get_active_version(session, project_key)
+        # version: la indicada explicitamente, o la activa
+        version_id = req.version_id
+        if not version_id:
+            version = await get_active_version(session, project_key)
+            version_id = version.id if version else None
         # story_key incremental
         n = len((await session.execute(
             select(BacklogItem).where(BacklogItem.project_key == project_key)
@@ -926,7 +931,7 @@ async def create_task(project_key: str, req: TaskCreateReq) -> dict:
             description=req.description, acceptance_criteria=req.acceptance_criteria,
             story_points=req.story_points, priority=req.priority, status=req.status,
             order_index=n, sprint_id=req.sprint_id, origin="manual",
-            version_id=version.id if version else None,
+            version_id=version_id,
         )
         session.add(item)
         await session.commit()
@@ -1544,6 +1549,38 @@ async def set_version_status(project_key: str, version_id: str, req: VersionStat
 
 
 # ===== FASE B: Sprint planning (el PO decide) =====
+
+
+class CreateSprintRequest(BaseModel):
+    name: str
+    goal: str = ""
+    version_id: str | None = None
+
+
+@app.post("/projects/{project_key}/sprints")
+async def create_sprint(project_key: str, req: CreateSprintRequest) -> dict:
+    """El PO crea un sprint manualmente (en una version, existente o activa)."""
+    from services.orchestrator_service.app.versions import get_active_version
+    async for session in get_session():
+        version_id = req.version_id
+        if not version_id:
+            av = await get_active_version(session, project_key)
+            version_id = av.id if av else None
+        # numero siguiente dentro de la version
+        existing = (await session.execute(
+            select(Sprint).where(Sprint.project_key == project_key, Sprint.version_id == version_id)
+        )).scalars().all()
+        num = len(existing) + 1
+        sp = Sprint(
+            project_key=project_key, version_id=version_id, number=num,
+            name=req.name, goal=req.goal, order_index=num - 1, status="planned",
+        )
+        session.add(sp)
+        await session.commit()
+        await session.refresh(sp)
+        return {"id": sp.id, "number": sp.number, "name": sp.name, "goal": sp.goal,
+                "status": sp.status, "version_id": sp.version_id}
+    raise HTTPException(status_code=503, detail="db unavailable")
 
 
 @app.post("/projects/{project_key}/sprints/plan")

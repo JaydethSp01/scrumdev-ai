@@ -1078,7 +1078,7 @@ export async function fixBug(
 
 export async function createTask(
   projectKey: string,
-  body: { title: string; description?: string; priority?: string; story_points?: number; status?: string; sprint_id?: string | null; acceptance_criteria?: string[] }
+  body: { title: string; description?: string; priority?: string; story_points?: number; status?: string; sprint_id?: string | null; version_id?: string | null; acceptance_criteria?: string[] }
 ): Promise<BacklogItem> {
   const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/tasks`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -1123,6 +1123,15 @@ export async function setJiraConfig(
   body: { base_url: string; email: string; api_token: string; project_key_jira?: string; board_id?: string }
 ): Promise<{ saved: boolean; connection_ok: boolean; message: string }> {
   const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/integrations/jira`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  return jsonOrThrow(res);
+}
+
+export async function createSprint(
+  projectKey: string, body: { name: string; goal?: string; version_id?: string | null }
+): Promise<{ id: string; number: number; name: string }> {
+  const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/sprints`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
   return jsonOrThrow(res);

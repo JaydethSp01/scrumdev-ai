@@ -752,6 +752,20 @@ async def gw_approve_gate(project_key: str, req: AdvancePayload) -> dict:
 # ===== FASE B: Sprint planning proxies =====
 
 
+class GwCreateSprint(BaseModel):
+    name: str
+    goal: str = ""
+    version_id: str | None = None
+
+
+@app.post("/projects/{project_key}/sprints")
+async def gw_create_sprint(project_key: str, req: GwCreateSprint) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/sprints",
+        req.model_dump(),
+    )
+
+
 @app.post("/projects/{project_key}/sprints/plan")
 async def gw_plan_sprints(project_key: str) -> dict:
     return await _proxy_post(
