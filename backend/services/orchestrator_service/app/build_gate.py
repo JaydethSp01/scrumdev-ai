@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import os
 import py_compile
+import re
 import shutil
 import tempfile
 from typing import Any
@@ -99,6 +100,33 @@ def _fix_next_router(files_rel: list[dict], report: list[str]) -> list[dict]:
     return files_rel
 
 
+_CLIENT_HOOKS = re.compile(
+    r"\buse(State|Effect|Router|Context|Reducer|Ref|Memo|Callback|"
+    r"SearchParams|Pathname|LayoutEffect)\b|on(Click|Change|Submit|Input|KeyDown)="
+)
+
+
+def _ensure_use_client(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """App Router: un archivo que usa hooks/eventos de cliente DEBE empezar con
+    `"use client"`. La IA a veces lo omite -> el build falla. Lo anteponemos."""
+    fixed = 0
+    for f in files_rel:
+        path = (f.get("path") or "")
+        if not path.endswith((".tsx", ".jsx")):
+            continue
+        c = f.get("content") or ""
+        if not _CLIENT_HOOKS.search(c):
+            continue
+        head = c.lstrip()[:40].lower()
+        if head.startswith('"use client"') or head.startswith("'use client'"):
+            continue
+        f["content"] = '"use client";\n\n' + c
+        fixed += 1
+    if fixed:
+        report.append(f'"use client" añadido en {fixed} archivo(s)')
+    return files_rel
+
+
 def _apply_frontend_autofix(files_rel: list[dict]) -> tuple[list[dict], list[str]]:
     """Reusa los fixes genericos del validador (CSS + exports + rutas paralelas)."""
     from services.orchestrator_service.app.deploy_validator import (
@@ -107,6 +135,7 @@ def _apply_frontend_autofix(files_rel: list[dict]) -> tuple[list[dict], list[str
     report: list[str] = []
     files_rel = _dedup_parallel_routes(files_rel, report)
     files_rel = _fix_next_router(files_rel, report)
+    files_rel = _ensure_use_client(files_rel, report)
     files_rel = _autofix_missing_exports(files_rel, report)
     files_rel = _ensure_css_imports(files_rel, report)
     return files_rel, report
@@ -125,7 +154,8 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 2) -> d
     from services.orchestrator_service.app.deploy_validator import _dedup_parallel_routes
     _pre: list[str] = []
     files_rel = _dedup_parallel_routes(files_rel, _pre)
-    files_rel = _fix_next_router(files_rel, _pre)  # App Router: next/router -> next/navigation
+    files_rel = _fix_next_router(files_rel, _pre)   # App Router: next/router -> next/navigation
+    files_rel = _ensure_use_client(files_rel, _pre)  # hooks de cliente -> "use client"
 
     env = _node_env()
     all_fixes: list[str] = list(_pre)
