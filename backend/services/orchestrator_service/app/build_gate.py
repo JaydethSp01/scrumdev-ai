@@ -107,23 +107,42 @@ _CLIENT_HOOKS = re.compile(
 
 
 def _ensure_use_client(files_rel: list[dict], report: list[str]) -> list[dict]:
-    """App Router: un archivo que usa hooks/eventos de cliente DEBE empezar con
-    `"use client"`. La IA a veces lo omite -> el build falla. Lo anteponemos."""
+    """Normaliza el TOP de cada archivo .tsx/.jsx (orden EXACTO que exige Next):
+      1) si usa hooks/eventos de cliente -> `"use client";` como PRIMERA línea.
+      2) si es page/layout -> `export const dynamic = "force-dynamic";` justo
+         después (evita errores de prerender SSG en build).
+    Reescribe limpio (quita directivas previas mal ordenadas/duplicadas)."""
     fixed = 0
     for f in files_rel:
-        path = (f.get("path") or "")
+        path = (f.get("path") or "").lstrip("/")
         if not path.endswith((".tsx", ".jsx")):
             continue
         c = f.get("content") or ""
-        if not _CLIENT_HOOKS.search(c):
-            continue
-        head = c.lstrip()[:40].lower()
-        if head.startswith('"use client"') or head.startswith("'use client'"):
-            continue
-        f["content"] = '"use client";\n\n' + c
-        fixed += 1
+        base = path.split("/")[-1]
+        is_page = base in ("page.tsx", "layout.tsx", "page.jsx", "layout.jsx")
+        had_uc = ('"use client"' in c[:80]) or ("'use client'" in c[:80])
+        needs_client = had_uc or bool(_CLIENT_HOOKS.search(c))
+        # quitar directivas existentes (en cualquier posición cercana) para reordenar
+        kept = []
+        for ln in c.split("\n"):
+            s = ln.strip().rstrip(";").strip().strip('"').strip("'")
+            if s == "use client":
+                continue
+            if ln.strip().startswith("export const dynamic"):
+                continue
+            kept.append(ln)
+        body = "\n".join(kept).lstrip("\n")
+        prefix = ""
+        if needs_client:
+            prefix += '"use client";\n'
+        if is_page:
+            prefix += 'export const dynamic = "force-dynamic";\n'
+        new = prefix + body
+        if new != c:
+            f["content"] = new
+            fixed += 1
     if fixed:
-        report.append(f'"use client" añadido en {fixed} archivo(s)')
+        report.append(f"top normalizado (use client/force-dynamic) en {fixed} archivo(s)")
     return files_rel
 
 
@@ -331,7 +350,6 @@ def _apply_frontend_autofix(files_rel: list[dict], log: str = "") -> tuple[list[
     files_rel = _ensure_npm_deps(files_rel, report)
     files_rel = _stub_missing_local_imports(files_rel, report)
     files_rel = _relax_next_config(files_rel, report)
-    files_rel = _force_dynamic_pages(files_rel, report)
     files_rel = _autofix_missing_exports(files_rel, report)
     files_rel = _ensure_css_imports(files_rel, report)
     if log:
@@ -357,7 +375,6 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4) -> d
     files_rel = _ensure_npm_deps(files_rel, _pre)    # libs importadas -> package.json
     files_rel = _stub_missing_local_imports(files_rel, _pre)  # @/ faltantes -> stub
     files_rel = _relax_next_config(files_rel, _pre)  # ignorar errores TS/lint
-    files_rel = _force_dynamic_pages(files_rel, _pre)  # sin SSG -> sin prerender errors
 
     env = _node_env()
     all_fixes: list[str] = list(_pre)
