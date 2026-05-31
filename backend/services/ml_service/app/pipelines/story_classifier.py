@@ -84,4 +84,12 @@ def classify_story(text: str) -> dict:
             return nn
     except Exception:  # noqa: BLE001  -> nunca romper la clasificación
         pass
-    return _classify_story_zeroshot(text)
+    try:
+        return _classify_story_zeroshot(text)
+    except Exception:  # noqa: BLE001  -> embedder no disponible (ml_disabled)
+        # default seguro sin embeddings: no rompe la generación
+        return {
+            "type": "feature", "type_confidence": 0.0, "type_top3": [],
+            "area": "backend", "area_confidence": 0.0, "area_top3": [],
+            "engine": "unavailable",
+        }

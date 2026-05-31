@@ -75,7 +75,16 @@ def estimate_effort(text: str) -> dict:
             return nn
     except Exception:  # noqa: BLE001
         pass
-    return _estimate_effort_heuristic(text)
+    try:
+        return _estimate_effort_heuristic(text)
+    except Exception:  # noqa: BLE001  -> embedder no disponible: solo keywords
+        kw = _keyword_score(text)
+        pts = 8 if kw["score"] >= 6 else 5 if kw["score"] >= 3 else 3 if kw["score"] >= 1 else 2
+        return {
+            "story_points": pts, "pattern": "keyword_only",
+            "keyword_score": kw["score"], "engine": "keyword_fallback",
+            "estimated_hours_range": [pts * 2, pts * 6], "text_length_chars": len(text),
+        }
 
 
 def _estimate_effort_heuristic(text: str) -> dict:

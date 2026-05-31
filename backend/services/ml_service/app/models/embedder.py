@@ -24,6 +24,11 @@ def _load_model():
     global _model
     if _model is not None:
         return _model
+    # Gate de recursos: en instancias chicas (Render free 512MB) cargar torch +
+    # sentence-transformers hace OOM y tumba el proceso. Con ML_ENABLED=false
+    # fallamos rápido (sin importar torch) y los callers usan sus fallbacks.
+    if not settings.ml_enabled:
+        raise RuntimeError("ml_disabled")
     with _lock:
         if _model is not None:
             return _model
