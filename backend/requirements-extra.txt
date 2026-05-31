@@ -18,4 +18,11 @@ packaging
 regex
 filelock
 fsspec
-claude-agent-sdk>=0.1.8
+claude-agent-sdk==0.1.81
+# Pines del combo que funciona en local (claude-agent-sdk/mcp NO deben subir
+# starlette: rompe FastAPI con "Router.__init__() got on_startup"). Se instala
+# al final -> gana sobre lo que el lock o el sdk hayan puesto.
+fastapi==0.115.14
+starlette==0.46.2
+anyio==4.13.0
+mcp==1.27.1
