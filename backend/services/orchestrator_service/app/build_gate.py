@@ -120,8 +120,11 @@ def _ensure_use_client(files_rel: list[dict], report: list[str]) -> list[dict]:
         c = f.get("content") or ""
         base = path.split("/")[-1]
         is_page = base in ("page.tsx", "layout.tsx", "page.jsx", "layout.jsx")
+        # metadata / generateMetadata SOLO existen en server components -> nunca
+        # "use client" en esos archivos (combo prohibido que rompe el build).
+        has_meta = ("export const metadata" in c) or ("generateMetadata" in c)
         had_uc = ('"use client"' in c[:80]) or ("'use client'" in c[:80])
-        needs_client = had_uc or bool(_CLIENT_HOOKS.search(c))
+        needs_client = (not has_meta) and (had_uc or bool(_CLIENT_HOOKS.search(c)))
         # quitar directivas existentes (en cualquier posición cercana) para reordenar
         kept = []
         for ln in c.split("\n"):
@@ -198,7 +201,9 @@ def _stub_missing_local_imports(files_rel: list[dict], report: list[str]) -> lis
     src_files = [f for f in files_rel if (f.get("path") or "").endswith((".tsx", ".ts", ".jsx", ".js"))]
     # recolectar imports default/named de módulos locales (@/ y relativos ./ ../)
     need: dict[str, dict] = {}
-    imp_re = re.compile(r"""import\s+(.+?)\s+from\s+['"](@/[^'"]+|\.\.?/[^'"]+)['"]""", re.S)
+    # clause SOLO chars válidos de import ({ } , * \w espacios) -> NO cruza ';',
+    # comillas ni otro 'import' (varios imports en una línea rompían el parseo).
+    imp_re = re.compile(r"""import\s+([\w*\s,{}]+?)\s+from\s+['"](@/[^'"]+|\.\.?/[^'"]+)['"]""")
     # también require('./x') / await import('@/x') que la IA mezcla a veces
     req_re = re.compile(r"""(?:require|import)\(\s*['"](@/[^'"]+|\.\.?/[^'"]+)['"]\s*\)""")
     for f in src_files:
