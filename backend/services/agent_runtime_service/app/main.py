@@ -53,29 +53,20 @@ async def health() -> dict[str, str]:
     }
 
 
+_AGENTS_DELFIN = [
+    "po_agent", "scrum_master_agent", "nfr_agent", "architect_agent",
+    "developer_agent", "code_review_agent", "qa_agent", "security_agent",
+    "devops_agent", "release_agent",
+]
+
+
 @app.get("/agents")
 async def list_agents() -> dict[str, list[str] | str]:
+    """Los 10 agentes de la guía Delfín (§8). Lista estática: no carga el
+    registro CrewAI (opcional/pesado) -> funciona en cloud con cualquier
+    provider sin romper."""
     provider = (settings.scrumdev_ai_provider or "claude_code").lower()
-    # 10 agentes de la guia Delfin (§8): roles del ciclo Scrum completo
-    if provider == "claude_code":
-        return {
-            "provider": provider,
-            "agents": [
-                "po_agent",
-                "scrum_master_agent",
-                "nfr_agent",
-                "architect_agent",
-                "developer_agent",
-                "code_review_agent",
-                "qa_agent",
-                "security_agent",
-                "devops_agent",
-                "release_agent",
-            ],
-        }
-    from services.agent_runtime_service.app.runtime.bootstrap import get_registry
-
-    return {"provider": provider, "agents": get_registry().list_agents()}
+    return {"provider": provider, "agents": _AGENTS_DELFIN}
 
 
 @app.get("/crews")

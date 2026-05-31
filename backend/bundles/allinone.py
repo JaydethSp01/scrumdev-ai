@@ -46,6 +46,19 @@ from services.deploy_connector_service.app.main import app as deploy_app  # noqa
 app = FastAPI(title="ScrumDev AI - All in One", version="1.0.0")
 
 
+@app.on_event("startup")
+async def _allinone_startup() -> None:
+    # Los sub-apps montados NO disparan sus propios eventos startup (Starlette),
+    # así que creamos las tablas aquí una vez. Crea TODO el esquema porque los
+    # modelos se registran globalmente al importarse.
+    try:
+        from shared.db.session import init_db
+        await init_db()
+    except Exception as exc:  # noqa: BLE001
+        import logging
+        logging.getLogger("allinone").warning("init_db failed: %s", exc)
+
+
 @app.get("/_allinone/health")
 async def health() -> dict:
     return {"status": "ok", "mode": "allinone",

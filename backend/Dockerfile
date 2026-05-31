@@ -50,9 +50,11 @@ RUN poetry export \
 
 RUN pip install --prefix=/install -r requirements.txt
 
-# Salvaguarda: certifi es dep transitiva de httpx pero `poetry export` la omite
-# en algunos entornos. Lo instalamos explícito para que httpx funcione en runtime.
-RUN pip install --prefix=/install certifi
+# Deps que el poetry.lock NO incluye (se instalaron a mano en dev): pypdf,
+# python-docx (extracción de documentos), requests, lxml, aiokafka, certifi...
+# Se copian a un manifiesto versionado para reproducibilidad.
+COPY backend/requirements-extra.txt ./requirements-extra.txt
+RUN pip install --prefix=/install -r requirements-extra.txt
 
 
 # --------- Stage 2: runtime ---------
