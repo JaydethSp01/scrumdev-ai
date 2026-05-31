@@ -29,8 +29,13 @@ type Adr = {
   number: number; title: string; status?: string;
   context?: string; decision?: string; consequences?: string; markdown?: string;
 };
+type Check = { name: string; ok: boolean; detail?: string };
+type Evidence = {
+  code_files?: number; test_files?: string[]; test_count?: number;
+  build_status?: string; build_summary?: string; checks?: Check[];
+};
 type GateReview = {
-  title?: string; summary?: string; adrs?: Adr[];
+  title?: string; summary?: string; adrs?: Adr[]; evidence?: Evidence;
 };
 type PipelineView = {
   current_state: string;
@@ -174,6 +179,33 @@ export function PipelinePanel({ projectKey }: { projectKey: string }) {
                   <p className="text-sm text-neutral-600 dark:text-neutral-300 mt-1.5">
                     {view.gate_review.summary}
                   </p>
+                )}
+                {/* Evidencia de QA (gate 2) */}
+                {view.gate_review?.evidence && (
+                  <div className="mt-3 space-y-2">
+                    {(view.gate_review.evidence.checks || []).map((c, i) => (
+                      <div key={i} className="flex items-center gap-2 text-sm">
+                        {c.ok
+                          ? <CheckCircle2 size={15} className="text-emerald-500" />
+                          : <Lock size={15} className="text-amber-500" />}
+                        <span className="font-medium">{c.name}</span>
+                        <span className="text-neutral-500">— {c.detail}</span>
+                      </div>
+                    ))}
+                    {view.gate_review.evidence.build_summary && (
+                      <p className="text-xs text-neutral-500 mt-1">{view.gate_review.evidence.build_summary}</p>
+                    )}
+                    {view.gate_review.evidence.test_files && view.gate_review.evidence.test_files.length > 0 && (
+                      <details className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 p-2.5 mt-1">
+                        <summary className="cursor-pointer text-sm font-medium">
+                          Pruebas incluidas ({view.gate_review.evidence.test_count})
+                        </summary>
+                        <ul className="mt-2 text-xs font-mono text-neutral-600 dark:text-neutral-400 space-y-0.5 max-h-40 overflow-y-auto">
+                          {view.gate_review.evidence.test_files.map((t, i) => <li key={i}>{t}</li>)}
+                        </ul>
+                      </details>
+                    )}
+                  </div>
                 )}
                 {/* ADRs a revisar (gate 1) */}
                 {view.gate_review?.adrs && view.gate_review.adrs.length > 0 && (

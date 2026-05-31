@@ -1026,7 +1026,31 @@ async def get_pipeline(project_key: str) -> dict:
                 ]
             elif gate_n == 2:  # aprobar evidencia QA
                 review["title"] = "Vas a aprobar la evidencia de calidad (QA)"
-                review["summary"] = "El sistema generó el código y corrió las validaciones. Revisa y acepta o pide cambios."
+                review["summary"] = "Esto es lo que el sistema verificó. Revisa y acepta o pide cambios."
+                # evidencia REAL: archivos de test + ultimo build + archivos de codigo
+                test_files = (await session.execute(
+                    select(CodeArtifact.file_path).where(
+                        CodeArtifact.project_key == project_key,
+                    )
+                )).scalars().all()
+                tests = [p for p in test_files if p and ("test" in p.lower() or ".spec." in p.lower() or "__tests__" in p.lower())]
+                total_files = len(test_files)
+                last_build = (await session.execute(
+                    select(BuildRun).where(BuildRun.project_key == project_key)
+                    .order_by(BuildRun.started_at.desc())
+                )).scalars().first()
+                review["evidence"] = {
+                    "code_files": total_files,
+                    "test_files": tests[:20],
+                    "test_count": len(tests),
+                    "build_status": last_build.stage if last_build else "—",
+                    "build_summary": (last_build.summary or {}).get("phase_detail") if last_build else None,
+                    "checks": [
+                        {"name": "Código generado", "ok": total_files > 0, "detail": f"{total_files} archivos"},
+                        {"name": "Pruebas incluidas", "ok": len(tests) > 0, "detail": f"{len(tests)} archivos de test"},
+                        {"name": "Build completado", "ok": (last_build.stage == "completed") if last_build else False, "detail": last_build.stage if last_build else "—"},
+                    ],
+                }
             elif gate_n == 3:  # aprobar release a staging
                 review["title"] = "Vas a aprobar la publicación a un ambiente de pruebas"
                 review["summary"] = "El sistema está listo para publicar en un entorno de prueba (staging) antes de producción."
@@ -1386,6 +1410,71 @@ class CreateVersionRequest(BaseModel):
 
 class VersionStatusRequest(BaseModel):
     status: str  # draft | active | released | archived
+
+
+# ===== ADRs persistidos (arquitectura) =====
+
+
+@app.get("/projects/{project_key}/adrs")
+async def list_adrs(project_key: str) -> dict:
+    """Lista los ADRs persistidos del proyecto (para el panel Arquitectura)."""
+    async for session in get_session():
+        rows = (await session.execute(
+            select(ArchitectureDecision).where(ArchitectureDecision.project_key == project_key)
+            .order_by(ArchitectureDecision.adr_number.asc())
+        )).scalars().all()
+        return {"adrs": [
+            {"adr_number": a.adr_number, "title": a.title, "status": a.status,
+             "context": a.context, "decision": a.decision, "consequences": a.consequences,
+             "markdown": a.markdown,
+             "created_at": a.created_at.isoformat() if a.created_at else None}
+            for a in rows
+        ]}
+    return {"adrs": []}
+
+
+class GenAdrRequest(BaseModel):
+    topic: str = ""
+    context: str = ""
+
+
+@app.post("/projects/{project_key}/adrs/generate")
+async def generate_and_save_adr(project_key: str, req: GenAdrRequest) -> dict:
+    """Genera UN ADR via Architect Agent y lo PERSISTE (boton 'Documentar decision')."""
+    async for session in get_session():
+        last = (await session.execute(
+            select(ArchitectureDecision).where(ArchitectureDecision.project_key == project_key)
+            .order_by(ArchitectureDecision.adr_number.desc())
+        )).scalars().first()
+        next_num = (last.adr_number + 1) if last else 1
+        v = (await session.execute(
+            select(ProjectVision).where(ProjectVision.project_key == project_key)
+        )).scalar_one_or_none()
+        vision_txt = v.vision if v else ""
+        break
+    topic = req.topic or f"Decisión técnica {next_num}"
+    ctx = req.context or f"Proyecto: {vision_txt[:400]}"
+    try:
+        resp = await post_json(
+            f"{settings.agent_runtime_service_url}/adr/generate",
+            {"project_key": project_key, "adr_number": next_num, "topic": topic,
+             "context": ctx, "nfr_data": {}},
+            timeout=120.0,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"adr_gen_failed: {exc}")
+    md = resp.get("markdown") or resp.get("content") or ""
+    async for session in get_session():
+        session.add(ArchitectureDecision(
+            project_key=project_key, adr_number=next_num, title=topic, status="proposed",
+            context=ctx[:1000],
+            decision=(resp.get("decision") or "")[:2000] if isinstance(resp.get("decision"), str) else "",
+            consequences=(resp.get("consequences") or "")[:2000] if isinstance(resp.get("consequences"), str) else "",
+            markdown=md,
+        ))
+        await session.commit()
+        break
+    return {"saved": True, "adr_number": next_num, "title": topic, "markdown": md}
 
 
 # ===== Config de integraciones por proyecto (ej. Jira del cliente) =====

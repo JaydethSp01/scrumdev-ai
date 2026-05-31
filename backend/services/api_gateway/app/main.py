@@ -503,6 +503,24 @@ async def project_assistant(project_key: str, req: AssistantPayload) -> dict:
 # ===== Ciclo de vida: versiones, multi-chat, fix de bugs =====
 
 
+@app.get("/projects/{project_key}/adrs")
+async def gw_list_adrs(project_key: str) -> dict:
+    return await _proxy_get(f"{settings.orchestrator_service_url}/projects/{project_key}/adrs")
+
+
+class GwGenAdr(BaseModel):
+    topic: str = ""
+    context: str = ""
+
+
+@app.post("/projects/{project_key}/adrs/generate")
+async def gw_gen_adr(project_key: str, req: GwGenAdr) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/adrs/generate",
+        req.model_dump(), timeout=130.0,
+    )
+
+
 @app.get("/projects/{project_key}/integrations/jira")
 async def gw_get_jira_config(project_key: str) -> dict:
     return await _proxy_get(

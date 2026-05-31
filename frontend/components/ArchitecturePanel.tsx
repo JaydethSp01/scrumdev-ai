@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Layers,
   FilePlus,
@@ -13,8 +13,8 @@ import {
   Info,
 } from "lucide-react";
 import {
+  API,
   apiEvaluatePolicy,
-  apiGenerateAdr,
   type AdrResponse,
   type PolicyEvaluation,
   type PolicyViolation,
@@ -74,10 +74,30 @@ export function ArchitecturePanel({ projectKey }: Props) {
   const [evals, setEvals] = useState<StoredEval[]>([]);
   const [adrs, setAdrs] = useState<StoredAdr[]>([]);
 
+  const loadAdrs = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/projects/${encodeURIComponent(projectKey)}/adrs`);
+      if (res.ok) {
+        const data = await res.json();
+        const list: StoredAdr[] = (data.adrs || []).map((a: { adr_number: number; title?: string; topic?: string; markdown?: string; created_at?: string }) => ({
+          id: `adr_${a.adr_number}`,
+          createdAt: a.created_at || new Date().toISOString(),
+          adr_number: a.adr_number,
+          topic: a.title || a.topic || `ADR ${a.adr_number}`,
+          markdown: a.markdown || "",
+        }));
+        setAdrs(list);
+      }
+    } catch {
+      // fallback a localStorage si el backend no responde
+      setAdrs(readJSON<StoredAdr[]>(STORAGE_KEYS.adrs(projectKey), []));
+    }
+  }, [projectKey]);
+
   useEffect(() => {
     setEvals(readJSON<StoredEval[]>(STORAGE_KEYS.policyEvals(projectKey), []));
-    setAdrs(readJSON<StoredAdr[]>(STORAGE_KEYS.adrs(projectKey), []));
-  }, [projectKey]);
+    void loadAdrs();
+  }, [projectKey, loadAdrs]);
 
   function persistEvals(next: StoredEval[]) {
     setEvals(next);
@@ -108,25 +128,15 @@ export function ArchitecturePanel({ projectKey }: Props) {
     }
     setAdrSubmitting(true);
     try {
-      const res = await apiGenerateAdr({
-        project_key: projectKey,
-        adr_number: adrNumber,
-        topic: adrTopic.trim(),
-        context: adrContext.trim(),
+      // genera Y persiste en DB (visible en el gate de arquitectura tambien)
+      const res = await fetch(`${API}/projects/${encodeURIComponent(projectKey)}/adrs/generate`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: adrTopic.trim(), context: adrContext.trim() }),
       });
-      const md = res.markdown || res.content || "";
-      setAdrResult(res);
-      if (md) {
-        const stored: StoredAdr = {
-          id: `adr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          createdAt: new Date().toISOString(),
-          adr_number: adrNumber,
-          topic: adrTopic.trim(),
-          markdown: md,
-        };
-        persistAdrs([stored, ...adrs].slice(0, 50));
-      }
-      toasts.success("ADR generado.");
+      const data = await res.json();
+      setAdrResult({ markdown: data.markdown, adr_number: data.adr_number } as AdrResponse);
+      await loadAdrs();
+      toasts.success("Decisión documentada y guardada.");
     } catch (e) {
       toasts.error(e instanceof Error ? e.message : String(e));
     } finally {
