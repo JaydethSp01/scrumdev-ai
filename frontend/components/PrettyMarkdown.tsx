@@ -104,19 +104,21 @@ const components: Components = {
   code: ({
     className,
     children,
-    ...rest
   }: ComponentPropsWithoutRef<"code"> & { inline?: boolean }) => {
-    const inline = (rest as { inline?: boolean }).inline;
-    if (inline) {
+    // react-markdown v9 ya no pasa `inline`. Heurística robusta: es inline si no
+    // tiene clase language-* y no contiene saltos de línea. Esto evita renderizar
+    // un <div> (CodeBlock) dentro de un <p> -> HTML inválido + error de hidratación.
+    const match = /language-([\w-]+)/.exec(className || "");
+    const text = extractText(children).replace(/\n$/, "");
+    const isBlock = Boolean(match) || text.includes("\n");
+    if (!isBlock) {
       return (
         <code className="bg-brand/10 text-brand px-1.5 py-0.5 rounded text-[0.85em] font-mono">
           {children}
         </code>
       );
     }
-    const match = /language-([\w-]+)/.exec(className || "");
     const lang = match ? match[1] : "text";
-    const text = extractText(children).replace(/\n$/, "");
     return <CodeBlock language={lang} text={text} />;
   },
   pre: ({ children }) => <>{children}</>,

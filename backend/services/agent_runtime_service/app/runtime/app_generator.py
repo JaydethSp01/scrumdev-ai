@@ -127,16 +127,30 @@ def _manifest_block(blueprint: dict) -> str:
 
 
 def _exemplars_block(exemplars: list[dict]) -> str:
-    """Few-shot: proyectos similares que SI compilaron y desplegaron."""
+    """Few-shot fuerte: el ML recupera el proyecto EXITOSO más parecido y le pasa
+    a la IA su ESTRUCTURA REAL de archivos para que la imite. Esto es el apoyo
+    del ML: la IA no inventa la estructura desde cero, parte de una que funcionó.
+    """
     if not exemplars:
         return ""
-    lines = ["### Referencias de proyectos similares que SI funcionaron (imita su estructura):"]
-    for e in exemplars[:3]:
-        manifest = e.get("manifest", {})
-        tiers_summary = "; ".join(
-            f"{tier}: {len(paths)} archivos" for tier, paths in manifest.items()
-        )
-        lines.append(f"  - \"{(e.get('vision') or '')[:80]}\" -> {tiers_summary}")
+    top = exemplars[0]
+    score = top.get("score")
+    lines = [
+        "### Proyecto similar que SÍ compiló y desplegó (el ML lo recuperó por "
+        f"similitud{f' {score:.0%}' if isinstance(score, (int, float)) else ''} — "
+        "IMITA esta estructura de archivos y adáptala al dominio del cliente):",
+        f'Visión de referencia: "{(top.get("vision") or "")[:120]}"',
+    ]
+    for tier, paths in (top.get("manifest") or {}).items():
+        shown = paths[:24]
+        lines.append(f"\n**{tier}** ({len(paths)} archivos):")
+        lines.extend(f"  - {p}" for p in shown)
+        if len(paths) > len(shown):
+            lines.append(f"  - … (+{len(paths) - len(shown)} más del mismo estilo)")
+    # otras referencias, solo el resumen (diversidad)
+    if len(exemplars) > 1:
+        others = "; ".join(f'"{(e.get("vision") or "")[:50]}"' for e in exemplars[1:3])
+        lines.append(f"\nOtras referencias exitosas similares: {others}")
     return "\n".join(lines) + "\n"
 
 
@@ -272,6 +286,62 @@ def _ensure_manifest_complete(
     return files, filled
 
 
+def _expected_domain_files(classification: dict, stack_id: str) -> list[str]:
+    """Archivos de DOMINIO esperados: 1 página + 1 router por entidad. Estos NO
+    están en el blueprint (son específicos del producto) -> los rellena la IA,
+    no un stub."""
+    entities = [e for e in (classification.get("entities") or []) if isinstance(e, str)]
+    needs_backend = stack_id != "nextjs-static"
+    expected: list[str] = []
+    for e in entities[:8]:
+        slug = re.sub(r"[^a-z0-9]+", "-", e.lower()).strip("-") or "item"
+        expected.append(f"frontend/app/{slug}/page.tsx")
+        if needs_backend:
+            expected.append(f"backend/app/routers/{slug}.py")
+    return expected
+
+
+async def _complete_domain_with_ai(
+    files: list[dict], classification: dict, stack_id: str, vision: str, project_key: str
+) -> tuple[list[dict], list[str]]:
+    """Loop dirigido: si faltan archivos de DOMINIO (por entidad), se le pide a la
+    IA generarlos con CONTENIDO REAL (no stubs). El análisis de cobertura decide
+    qué falta; la IA lo completa. Best-effort: nunca rompe la generación."""
+    expected = _expected_domain_files(classification, stack_id)
+    have = {(f.get("path") or "").lstrip("/") for f in files}
+    missing = [p for p in expected if p not in have]
+    if not missing:
+        return files, []
+    try:
+        ents = ", ".join(classification.get("entities") or [])
+        prompt = (
+            f"Proyecto {project_key} ({classification.get('type')}). Visión: {vision[:300]}\n"
+            f"Entidades del dominio: {ents}\n\n"
+            "Faltan estos archivos de DOMINIO. Genéralos COMPLETOS y EJECUTABLES "
+            "(no placeholders), coherentes con un proyecto Next.js (frontend) + "
+            "FastAPI (backend), con CRUD real por entidad, diseño Tailwind "
+            "profesional en el frontend y endpoints REST en el backend. El "
+            "frontend llama al backend vía process.env.NEXT_PUBLIC_API_URL con "
+            "fallback a lib/mock.ts.\n\nArchivos faltantes:\n"
+            + "\n".join(f"  - {p}" for p in missing)
+            + '\n\nDevuelve SOLO JSON: {"files":[{"path":"...","content":"..."}]}'
+        )
+        raw = await run_claude_code(prompt, system_prompt=APP_GENERATOR_SYSTEM, max_turns=1)
+        data = _extract_json(raw)
+        new_files = data.get("files", []) if isinstance(data, dict) else []
+        added: list[str] = []
+        for nf in new_files:
+            p = (nf.get("path") or "").lstrip("/")
+            if p in missing and p not in have and nf.get("content"):
+                files.append({"path": p, "content": nf["content"]})
+                have.add(p)
+                added.append(p)
+        return files, added
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("domain_completion_failed", project=project_key, error=str(exc))
+        return files, []
+
+
 async def _fetch_blueprint_and_exemplars(classification: dict, vision: str) -> tuple[dict, list[dict], str]:
     """Consulta al Stack Expert (ml_service): elige stack + manifiesto + few-shot.
 
@@ -387,7 +457,15 @@ async def generate_full_app(
     if not isinstance(files, list) or not files:
         raise ValueError("files must be a non-empty list")
 
-    # GATE DE COMPLETITUD: rellenar archivos obligatorios faltantes por tier
+    # LOOP DIRIGIDO POR EL ML: completar archivos de DOMINIO faltantes (por
+    # entidad) pidiéndole a la IA contenido REAL antes del backfill de scaffolding.
+    files, domain_added = await _complete_domain_with_ai(
+        files, classification, stack_id, vision, project_key)
+    if domain_added:
+        logger.info("domain_files_completed_by_ai", project=project_key, added=domain_added)
+
+    # GATE DE COMPLETITUD (scaffolding): rellenar archivos obligatorios del
+    # blueprint que falten, con defaults válidos (configs, package.json, etc.)
     files, fill_report = _ensure_manifest_complete(files, stack_id, project_key)
     if fill_report:
         logger.info("manifest_backfilled", project=project_key, filled=fill_report)

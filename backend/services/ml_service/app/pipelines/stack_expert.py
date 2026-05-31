@@ -92,10 +92,27 @@ def score_completeness(files: list[dict], stack: str) -> dict:
     global_score = total / len(bp.tiers) if bp.tiers else 0.0
     # deploy_ready: todos los entrypoints presentes y score global alto
     all_entrypoints_ok = all(not _entrypoints_missing(buckets, bp) for _ in [0])
+
+    # Red neuronal de completitud (si está entrenada): probabilidad deploy-ready
+    # aprendida de builds reales. Complementa al gate determinista.
+    nn_prob = None
+    try:
+        from services.ml_service.app.nn.inference import nn_score_completeness
+        from services.ml_service.app.nn.features import completeness_features
+        nn_prob = nn_score_completeness(completeness_features(files, stack))
+    except Exception:  # noqa: BLE001
+        nn_prob = None
+
+    deploy_ready = global_score >= 0.85 and all_entrypoints_ok
+    if nn_prob is not None:
+        # exige acuerdo: el gate determinista Y la red deben estar de acuerdo
+        deploy_ready = deploy_ready and nn_prob >= 0.7
+
     return {
         "stack": stack,
         "global_score": round(global_score, 3),
-        "deploy_ready": global_score >= 0.85 and all_entrypoints_ok,
+        "nn_deploy_ready_prob": round(nn_prob, 3) if nn_prob is not None else None,
+        "deploy_ready": deploy_ready,
         "tiers": tiers_report,
     }
 

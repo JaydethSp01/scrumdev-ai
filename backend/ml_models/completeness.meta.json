@@ -1,0 +1,34 @@
+{
+  "kind": "completeness",
+  "in_dim": 10,
+  "blocks": 1,
+  "hidden": 128,
+  "feature_names": [
+    "frontend_score",
+    "frontend_entrypoints",
+    "frontend_files_norm",
+    "backend_score",
+    "backend_entrypoints",
+    "backend_files_norm",
+    "total_files_norm",
+    "tiers_covered",
+    "needs_backend",
+    "global_blueprint_score"
+  ],
+  "samples": {
+    "train": 190,
+    "val": 40,
+    "test": 42
+  },
+  "metrics": {
+    "score": 0.9925,
+    "mae": 0.0075,
+    "decision_accuracy": 1.0
+  },
+  "val_metrics": {
+    "score": 0.9937,
+    "mae": 0.0063,
+    "decision_accuracy": 1.0,
+    "best_epoch": 383.0
+  }
+}

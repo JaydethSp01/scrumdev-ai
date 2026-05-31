@@ -27,6 +27,7 @@ import {
   Building2,
   Bot,
   Gavel,
+  HelpCircle,
 } from "lucide-react";
 import { useAuth } from "@/app/auth/_lib";
 import { getProject, type Project } from "@/lib/projects";
@@ -63,6 +64,67 @@ import BuildProgressToast, {
   fireBuildStarted,
 } from "@/components/BuildProgressToast";
 import { ToastStack, useToasts } from "@/components/Toast";
+import Tour, { type TourStep } from "@/components/Tour";
+
+const TOUR_KEY = "scrumdev.tour.project.v1";
+const PROJECT_TOUR_STEPS: TourStep[] = [
+  {
+    title: "Bienvenido a ScrumDev AI",
+    body: "En 1 minuto te muestro todo lo que puedes hacer aquí: desde describir tu idea hasta publicarla en internet. Usa las flechas ← → o Enter para avanzar.",
+  },
+  {
+    target: '[data-tour="tab-vision"]',
+    title: "1. Define tu visión (o sube un documento)",
+    body: "Empieza aquí: cuéntale a la IA qué quieres construir, o sube tu documento de requisitos (PDF, Word, TXT) y lo analiza por ti.",
+    placement: "right",
+  },
+  {
+    target: '[data-tour="tab-overview"]',
+    title: "2. Overview y generación",
+    body: "El estado de tu proyecto y el botón para que los agentes generen todo el sistema automáticamente.",
+    placement: "right",
+  },
+  {
+    target: '[data-tour="tab-pipeline"]',
+    title: "3. Pipeline de 14 fases",
+    body: "Los agentes avanzan solos por backlog, arquitectura, código, QA y release. Tú solo apruebas en los puntos clave (gates).",
+    placement: "right",
+  },
+  {
+    target: '[data-tour="tab-boards"]',
+    title: "4. Boards: versiones, sprints y tareas",
+    body: "Tu tablero estilo Azure DevOps por Versión › Sprint. Crea historias, añade sprints y arrastra tarjetas entre columnas.",
+    placement: "right",
+  },
+  {
+    target: '[data-tour="tab-architecture"]',
+    title: "5. Arquitectura y decisiones",
+    body: "El plan técnico y las decisiones del proyecto (ADR) explicadas en lenguaje claro: qué se eligió y por qué.",
+    placement: "right",
+  },
+  {
+    target: '[data-tour="tab-code"]',
+    title: "6. Código generado",
+    body: "Explora cada archivo que la IA creó, organizado por frontend y backend.",
+    placement: "right",
+  },
+  {
+    target: '[data-tour="tab-deploy"]',
+    title: "7. Despliegue en un clic",
+    body: "Publica tu aplicación en internet. Verás en vivo y con animación cada paso: preparar, publicar y ¡listo!",
+    placement: "right",
+  },
+  {
+    target: '[data-tour="tab-chat"]',
+    title: "8. Chat IA para cambios",
+    body: "Pide nuevas funciones o reporta bugs en lenguaje natural — incluso adjuntando una captura de pantalla. La IA lo arregla.",
+    placement: "right",
+  },
+  {
+    title: "¡Listo para empezar!",
+    body: "Mi recomendación: ve a Visión, describe tu idea o sube un documento, y deja que la IA construya. Puedes reabrir este tour cuando quieras con el botón “Tour”.",
+  },
+];
 
 type Tab =
   | "overview"
@@ -196,12 +258,29 @@ export default function ProjectDetailPage() {
   );
   const [project, setProject] = useState<Project | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
+  const [tourOpen, setTourOpen] = useState(false);
 
   // permitir abrir un tab directo via ?tab=boards (deep-link)
   useEffect(() => {
     const t = search.get("tab");
     if (t && TABS.some((d) => d.value === t)) setTab(t as Tab);
   }, [search]);
+
+  // auto-iniciar el tour la primera vez (una sola vez por navegador)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!localStorage.getItem(TOUR_KEY)) {
+      const t = setTimeout(() => setTourOpen(true), 700);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  const closeTour = useCallback((_completed: boolean) => {
+    setTourOpen(false);
+    // marcar como visto en cualquier cierre (no insistir en cada recarga).
+    // El botón "Tour" siempre permite reabrirlo manualmente.
+    if (typeof window !== "undefined") localStorage.setItem(TOUR_KEY, "1");
+  }, []);
   const [notFound, setNotFound] = useState(false);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<{
@@ -559,12 +638,21 @@ export default function ProjectDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-6">
         <aside>
           <nav className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 lg:sticky lg:top-20">
+            <button
+              data-tour="tour-button"
+              onClick={() => setTourOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition whitespace-nowrap text-left text-brand hover:bg-brand/10 font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            >
+              <HelpCircle size={16} aria-hidden="true" />
+              Tour guiado
+            </button>
             {TABS.map((t) => {
               const Icon = t.icon;
               const active = tab === t.value;
               return (
                 <button
                   key={t.value}
+                  data-tour={`tab-${t.value}`}
                   onClick={() => setTab(t.value)}
                   className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition whitespace-nowrap text-left ${
                     active
@@ -645,6 +733,8 @@ export default function ProjectDetailPage() {
         onCompleted={onBuildCompleted}
         onGoTo={(t) => setTab(t as Tab)}
       />
+
+      <Tour steps={PROJECT_TOUR_STEPS} open={tourOpen} onClose={closeTour} />
 
       {confirmRegenerate && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm p-4">

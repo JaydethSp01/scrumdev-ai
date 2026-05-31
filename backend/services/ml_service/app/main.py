@@ -73,11 +73,29 @@ async def health() -> dict[str, Any]:
 
 @app.get("/ml/info")
 async def info() -> dict[str, Any]:
+    # estado de las redes neuronales entrenadas (Stack Expert)
+    nn_status: dict[str, Any] = {"trained": False, "models": {}}
+    try:
+        from services.ml_service.app.nn.inference import ModelRegistry
+        reg = ModelRegistry.instance()
+        avail = reg.available()
+        nn_status["models"] = avail
+        nn_status["trained"] = any(avail.values())
+        metrics = {}
+        for kind, ok in avail.items():
+            if ok:
+                metrics[kind] = reg.get(kind).meta.get("metrics", {})
+        nn_status["metrics"] = metrics
+    except Exception as exc:  # noqa: BLE001
+        nn_status["error"] = str(exc)
+
     try:
         dim = embedding_dimension()
     except Exception as exc:
-        return {"model": settings.ml_embedding_model, "loaded": False, "error": str(exc)}
-    return {"model": settings.ml_embedding_model, "loaded": True, "dimension": dim}
+        return {"model": settings.ml_embedding_model, "loaded": False,
+                "error": str(exc), "neural_nets": nn_status}
+    return {"model": settings.ml_embedding_model, "loaded": True, "dimension": dim,
+            "neural_nets": nn_status}
 
 
 @app.post("/ml/embed")
@@ -110,6 +128,16 @@ async def classify(req: TextRequest) -> dict:
 async def estimate(req: TextRequest) -> dict:
     try:
         return estimate_effort(req.text)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/ml/estimate-effort/batch")
+async def estimate_batch(req: BatchTextRequest) -> dict:
+    """Estima esfuerzo (red neuronal) para varias historias de una vez.
+    Lo consume el PO Agent para apoyar/ajustar sus story points con datos."""
+    try:
+        return {"estimates": [estimate_effort(t) for t in req.texts]}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

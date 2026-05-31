@@ -51,7 +51,8 @@ def _topk(query_vec: np.ndarray, keys: list[str], centroids: np.ndarray, k: int 
     return [{"label": keys[i], "score": float(sims[i])} for i in idxs]
 
 
-def classify_story(text: str) -> dict:
+def _classify_story_zeroshot(text: str) -> dict:
+    """Clasificación zero-shot por centroides (fallback sin redes entrenadas)."""
     qv = np.array(embed_one(text))
     type_keys, type_centroids = _type_centroids()
     area_keys, area_centroids = _area_centroids()
@@ -66,4 +67,21 @@ def classify_story(text: str) -> dict:
         "area": area_ranks[0]["label"],
         "area_confidence": area_ranks[0]["score"],
         "area_top3": area_ranks,
+        "engine": "zero_shot_centroids",
     }
+
+
+def classify_story(text: str) -> dict:
+    """Strategy: usa la red neuronal entrenada si existe; si no, zero-shot.
+
+    Las redes (entrenadas con scripts/train_nn.py) superan a los centroides
+    porque aprenden los límites reales entre clases a partir de datos.
+    """
+    try:
+        from services.ml_service.app.nn.inference import nn_classify_story
+        nn = nn_classify_story(text)
+        if nn is not None:
+            return nn
+    except Exception:  # noqa: BLE001  -> nunca romper la clasificación
+        pass
+    return _classify_story_zeroshot(text)

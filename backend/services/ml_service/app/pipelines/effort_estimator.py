@@ -67,6 +67,18 @@ def _keyword_score(text: str) -> dict:
 
 
 def estimate_effort(text: str) -> dict:
+    """Strategy: red ordinal entrenada si existe; si no, heurística por patrones."""
+    try:
+        from services.ml_service.app.nn.inference import nn_estimate_effort
+        nn = nn_estimate_effort(text)
+        if nn is not None:
+            return nn
+    except Exception:  # noqa: BLE001
+        pass
+    return _estimate_effort_heuristic(text)
+
+
+def _estimate_effort_heuristic(text: str) -> dict:
     keys, centroids = _pattern_vecs()
     qv = np.array(embed_one(text))
     sims = centroids @ qv

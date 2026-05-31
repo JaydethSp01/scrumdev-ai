@@ -95,4 +95,7 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Usamos shell-form para expandir las env vars en runtime.
-CMD ["sh", "-c", "exec uvicorn ${SERVICE_MODULE} --host 0.0.0.0 --port ${SERVICE_PORT} --workers ${UVICORN_WORKERS} --log-level ${UVICORN_LOG_LEVEL} --proxy-headers --forwarded-allow-ips='*'"]
+# PORT (lo inyecta Render/Railway/Cloud Run) tiene prioridad sobre SERVICE_PORT
+# para que el contenedor escuche donde el proveedor espera. En local/compose,
+# PORT no se setea y se usa SERVICE_PORT (default 8080). allinone.py lee PORT.
+CMD ["sh", "-c", "export PORT=${PORT:-${SERVICE_PORT}}; exec uvicorn ${SERVICE_MODULE} --host 0.0.0.0 --port ${PORT} --workers ${UVICORN_WORKERS} --log-level ${UVICORN_LOG_LEVEL} --proxy-headers --forwarded-allow-ips='*'"]

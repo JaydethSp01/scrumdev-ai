@@ -1,0 +1,26 @@
+{
+  "kind": "story_type",
+  "in_dim": 384,
+  "n_classes": 6,
+  "blocks": 2,
+  "hidden": 256,
+  "labels": [
+    "feature",
+    "bug",
+    "improvement",
+    "spike",
+    "chore",
+    "documentation"
+  ],
+  "samples": {
+    "train": 4913,
+    "val": 1053,
+    "test": 1054
+  },
+  "metrics": {
+    "accuracy": 0.8359,
+    "macro_f1": 0.8348,
+    "top3_accuracy": 0.9696
+  },
+  "n_members": 5
+}

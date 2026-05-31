@@ -1,0 +1,29 @@
+{
+  "kind": "effort",
+  "in_dim": 392,
+  "n_classes": 7,
+  "input_mode": "emb+effort",
+  "emb_dim": 384,
+  "blocks": 2,
+  "hidden": 256,
+  "fibonacci": [
+    1,
+    2,
+    3,
+    5,
+    8,
+    13,
+    21
+  ],
+  "samples": {
+    "train": 4914,
+    "val": 1053,
+    "test": 1053
+  },
+  "metrics": {
+    "accuracy": 0.471,
+    "within_1": 0.906,
+    "mae_classes": 0.6325
+  },
+  "n_members": 5
+}

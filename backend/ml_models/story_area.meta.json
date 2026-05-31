@@ -1,0 +1,27 @@
+{
+  "kind": "story_area",
+  "in_dim": 384,
+  "n_classes": 7,
+  "blocks": 1,
+  "hidden": 160,
+  "labels": [
+    "frontend",
+    "backend",
+    "data",
+    "devops",
+    "security",
+    "ml_ai",
+    "integration"
+  ],
+  "samples": {
+    "train": 4915,
+    "val": 1054,
+    "test": 1051
+  },
+  "metrics": {
+    "accuracy": 0.7108,
+    "macro_f1": 0.6941,
+    "top3_accuracy": 0.9305
+  },
+  "n_members": 5
+}

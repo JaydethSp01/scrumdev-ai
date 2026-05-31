@@ -36,3 +36,9 @@ logs/
 # Local data
 scrumdev_data/
 chroma_data/
+
+# Cache del embedder (88M, se re-descarga en runtime). NO commitear.
+backend/ml_cache/
+ml_cache/
+# NOTA: backend/ml_models/ (redes entrenadas .npz, ~6M) SÍ se commitea: el
+# ml_service las carga en runtime (también en cloud, sin PyTorch).

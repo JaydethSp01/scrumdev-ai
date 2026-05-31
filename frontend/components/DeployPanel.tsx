@@ -23,6 +23,7 @@ import {
   type DeployStatus,
 } from "@/lib/api";
 import DeployFlowDiagram, { type DeployStage } from "@/components/DeployFlowDiagram";
+import DeployProgress from "@/components/DeployProgress";
 import type { AuthUser } from "@/app/auth/_lib";
 import Spinner from "@/components/Spinner";
 import { ToastStack, useToasts } from "@/components/Toast";
@@ -278,17 +279,27 @@ export function DeployPanel({ projectKey, user }: Props) {
 
       {deploying && (
         <>
-          <DeployFlowDiagram
+          {/* Vista amable para el cliente */}
+          <DeployProgress
             stage={deployStageFromStep(activeStep, lastDeploy, preview)}
-            vercelState={preview?.state || lastDeploy?.vercel_state || undefined}
-            githubReady={activeStep >= 1}
-            postgresConfigured={false}
-            filesCount={lastDeploy?.files_count}
             vercelUrl={preview?.vercel_url || lastDeploy?.vercel_url || undefined}
           />
-          <p className="text-[11px] text-neutral-500 mt-2 text-center">
-            Esto puede tardar hasta 60 segundos. No cierres esta pestana.
-          </p>
+          {/* Detalle técnico (colapsable) para quien quiera ver el pipeline */}
+          <details className="mt-3 group">
+            <summary className="text-xs text-neutral-500 cursor-pointer hover:text-neutral-700 dark:hover:text-neutral-300 select-none">
+              Ver detalle técnico del pipeline
+            </summary>
+            <div className="mt-3">
+              <DeployFlowDiagram
+                stage={deployStageFromStep(activeStep, lastDeploy, preview)}
+                vercelState={preview?.state || lastDeploy?.vercel_state || undefined}
+                githubReady={activeStep >= 1}
+                postgresConfigured={false}
+                filesCount={lastDeploy?.files_count}
+                vercelUrl={preview?.vercel_url || lastDeploy?.vercel_url || undefined}
+              />
+            </div>
+          </details>
         </>
       )}
 
@@ -301,6 +312,10 @@ export function DeployPanel({ projectKey, user }: Props) {
 
       {hasDeploy && (
         <div className="space-y-5">
+          {(previewState === "READY" ||
+            (lastDeploy as { fallback_provider?: string } | null)?.fallback_provider === "render") && (
+            <DeployProgress stage="ready" vercelUrl={vercelUrl || undefined} renderUrl={(lastDeploy as { render_url?: string | null } | null)?.render_url || undefined} />
+          )}
           <DeployFlowDiagram
             stage={
               previewState === "READY"

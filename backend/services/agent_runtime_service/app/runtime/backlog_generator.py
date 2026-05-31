@@ -14,6 +14,49 @@ from shared.personalization import build_style_prefix, remember
 
 logger = get_logger(__name__)
 
+_FIB = [1, 2, 3, 5, 8, 13, 21]
+
+
+async def _reconcile_points_with_ml(stories: list[dict], project_key: str) -> None:
+    """Apoyo del ML al PO Agent: la red de esfuerzo estima puntos y se concilian
+    con los de la IA (promedio redondeado a Fibonacci). Best-effort: si el ML no
+    está, se conservan los puntos de la IA. Deja trazas: story_points_ml y
+    story_points_ai para transparencia."""
+    if not stories:
+        return
+    from shared.config.settings import settings
+    texts = [f"{s.get('title','')}. {s.get('description','')}" for s in stories]
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(
+                f"{settings.ml_service_url}/ml/estimate-effort/batch",
+                json={"texts": texts},
+            )
+            if r.status_code != 200:
+                return
+            estimates = r.json().get("estimates", [])
+    except Exception as exc:  # noqa: BLE001 -> nunca romper el backlog
+        logger.warning("ml_effort_unavailable", error=str(exc))
+        return
+
+    adjusted = 0
+    for s, est in zip(stories, estimates):
+        ml_pts = est.get("story_points")
+        if not isinstance(ml_pts, int):
+            continue
+        ai_pts = s.get("story_points", 3)
+        s["story_points_ai"] = ai_pts
+        s["story_points_ml"] = ml_pts
+        if est.get("engine") == "neural_net":
+            # ambos informan: promedio -> Fibonacci más cercano
+            blended = (ai_pts + ml_pts) / 2.0
+            s["story_points"] = min(_FIB, key=lambda x: abs(x - blended))
+            if s["story_points"] != ai_pts:
+                adjusted += 1
+    logger.info("ml_effort_reconciled", project=project_key,
+                stories=len(stories), adjusted=adjusted)
+
 
 PO_BACKLOG_SYSTEM = (
     "Eres un Product Owner senior. Recibes una vision de producto y la descompones "
@@ -89,6 +132,11 @@ async def generate_backlog(
         s.setdefault("priority", "medium")
         s.setdefault("acceptance_criteria", [])
         s["order_index"] = i
+
+    # APOYO DEL ML (no reemplazo): la red de esfuerzo estima puntos por historia
+    # y se concilian con los del PO Agent (IA). Ambos informan el valor final ->
+    # estimaciones consistentes basadas en datos, no a ojo.
+    await _reconcile_points_with_ml(stories, project_key)
 
     logger.info("backlog_generated", project=project_key, count=len(stories))
 

@@ -1,0 +1,115 @@
+{
+  "story_type": {
+    "kind": "story_type",
+    "in_dim": 384,
+    "n_classes": 6,
+    "blocks": 2,
+    "hidden": 256,
+    "labels": [
+      "feature",
+      "bug",
+      "improvement",
+      "spike",
+      "chore",
+      "documentation"
+    ],
+    "samples": {
+      "train": 4913,
+      "val": 1053,
+      "test": 1054
+    },
+    "metrics": {
+      "accuracy": 0.8359,
+      "macro_f1": 0.8348,
+      "top3_accuracy": 0.9696
+    }
+  },
+  "story_area": {
+    "kind": "story_area",
+    "in_dim": 384,
+    "n_classes": 7,
+    "blocks": 1,
+    "hidden": 160,
+    "labels": [
+      "frontend",
+      "backend",
+      "data",
+      "devops",
+      "security",
+      "ml_ai",
+      "integration"
+    ],
+    "samples": {
+      "train": 4915,
+      "val": 1054,
+      "test": 1051
+    },
+    "metrics": {
+      "accuracy": 0.7108,
+      "macro_f1": 0.6941,
+      "top3_accuracy": 0.9305
+    }
+  },
+  "effort": {
+    "kind": "effort",
+    "in_dim": 392,
+    "n_classes": 7,
+    "input_mode": "emb+effort",
+    "emb_dim": 384,
+    "blocks": 2,
+    "hidden": 256,
+    "fibonacci": [
+      1,
+      2,
+      3,
+      5,
+      8,
+      13,
+      21
+    ],
+    "samples": {
+      "train": 4914,
+      "val": 1053,
+      "test": 1053
+    },
+    "metrics": {
+      "accuracy": 0.471,
+      "within_1": 0.906,
+      "mae_classes": 0.6325
+    }
+  },
+  "completeness": {
+    "kind": "completeness",
+    "in_dim": 10,
+    "blocks": 1,
+    "hidden": 128,
+    "feature_names": [
+      "frontend_score",
+      "frontend_entrypoints",
+      "frontend_files_norm",
+      "backend_score",
+      "backend_entrypoints",
+      "backend_files_norm",
+      "total_files_norm",
+      "tiers_covered",
+      "needs_backend",
+      "global_blueprint_score"
+    ],
+    "samples": {
+      "train": 190,
+      "val": 40,
+      "test": 42
+    },
+    "metrics": {
+      "score": 0.9925,
+      "mae": 0.0075,
+      "decision_accuracy": 1.0
+    },
+    "val_metrics": {
+      "score": 0.9937,
+      "mae": 0.0063,
+      "decision_accuracy": 1.0,
+      "best_epoch": 383.0
+    }
+  }
+}

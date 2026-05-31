@@ -30,6 +30,15 @@ function trackErrors(page: Page): string[] {
 test.describe("Pruebas dentro del aplicativo", () => {
   test.describe.configure({ timeout: 120000 });
 
+  // Evitar que el tour de onboarding (primera visita) tape la UI en los tests.
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem("scrumdev.tour.project.v1", "1");
+      } catch {}
+    });
+  });
+
   test("1. Login y lista de proyectos", async ({ page }) => {
     const errs = trackErrors(page);
     await login(page);
