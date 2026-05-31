@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from typing import Any
@@ -478,6 +478,26 @@ async def _startup() -> None:
         await init_db()
     except Exception as exc:
         logger.warning("db_init_failed", error=str(exc))
+    # WATCHDOG: marcar como fallidos los builds colgados (proceso reiniciado a
+    # mitad de generacion). Evita builds zombie en 'generating_app' para siempre.
+    try:
+        from sqlalchemy import update as _sa_update, and_ as _and
+        async for session in get_session():
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=20)
+            await session.execute(
+                _sa_update(BuildRun)
+                .where(_and(
+                    BuildRun.completed_at.is_(None),
+                    BuildRun.stage.notin_(["completed", "failed"]),
+                    BuildRun.started_at < cutoff,
+                ))
+                .values(stage="failed", error="Build interrumpido (timeout/reinicio). Reintenta.",
+                        completed_at=datetime.now(timezone.utc))
+            )
+            await session.commit()
+            break
+    except Exception as exc:
+        logger.warning("build_watchdog_failed", error=str(exc))
 
 
 @app.get("/health")
