@@ -43,8 +43,11 @@ export default function BoardsPanel({ projectKey }: { projectKey: string }) {
   const loadVersions = useCallback(async () => {
     const { versions } = await listVersions(projectKey);
     setVersions(versions);
-    const active = versions.find((v) => v.status === "active") || versions[0];
-    if (active) setActiveVersion((cur) => cur ?? active.id);
+    // abrir en una version CON sprints (mejor UX); si ninguna tiene, la activa
+    const withSprints = versions.find((v) => (v.sprint_count || 0) > 0);
+    const active = versions.find((v) => v.status === "active");
+    const pick = withSprints || active || versions[0];
+    if (pick) setActiveVersion((cur) => cur ?? pick.id);
   }, [projectKey]);
 
   const loadBoard = useCallback(async (versionId: string | null) => {

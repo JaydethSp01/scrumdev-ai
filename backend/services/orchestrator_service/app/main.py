@@ -937,8 +937,14 @@ async def create_task(project_key: str, req: TaskCreateReq) -> dict:
     """El PO crea una tarea nueva en el backlog (la asocia a la version activa)."""
     from services.orchestrator_service.app.versions import get_active_version
     async for session in get_session():
-        # version: la indicada explicitamente, o la activa
+        # version: la del sprint (si se da), luego la indicada, luego la activa
         version_id = req.version_id
+        if req.sprint_id:
+            sp = (await session.execute(
+                select(Sprint).where(Sprint.id == req.sprint_id)
+            )).scalar_one_or_none()
+            if sp and sp.version_id:
+                version_id = sp.version_id  # heredar version del sprint (coherencia)
         if not version_id:
             version = await get_active_version(session, project_key)
             version_id = version.id if version else None
