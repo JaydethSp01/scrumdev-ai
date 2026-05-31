@@ -25,6 +25,13 @@ type Phase = {
   index: number;
 };
 
+type Adr = {
+  number: number; title: string; status?: string;
+  context?: string; decision?: string; consequences?: string; markdown?: string;
+};
+type GateReview = {
+  title?: string; summary?: string; adrs?: Adr[];
+};
 type PipelineView = {
   current_state: string;
   current_index: number;
@@ -33,6 +40,7 @@ type PipelineView = {
   gate_n?: number;
   phases: Phase[];
   pending_decisions?: { id: string; title: string }[];
+  gate_review?: GateReview;
 };
 
 export function PipelinePanel({ projectKey }: { projectKey: string }) {
@@ -76,7 +84,26 @@ export function PipelinePanel({ projectKey }: { projectKey: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ decided_by: "po", reason: "aprobado" }),
       });
+      // tras aprobar, el sistema corre solo; refrescar varias veces para ver avance
       await load();
+      setTimeout(() => void load(), 3000);
+      setTimeout(() => void load(), 8000);
+    } finally {
+      setBusy(false);
+    }
+  }, [projectKey, load]);
+
+  const autorun = useCallback(async () => {
+    setBusy(true);
+    try {
+      await fetch(`${API}/projects/${projectKey}/pipeline/autorun`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ triggered_by: "po" }),
+      });
+      await load();
+      setTimeout(() => void load(), 3000);
+      setTimeout(() => void load(), 8000);
     } finally {
       setBusy(false);
     }
@@ -105,8 +132,9 @@ export function PipelinePanel({ projectKey }: { projectKey: string }) {
             Ciclo de vida del producto
           </h2>
           <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1 max-w-xl">
-            Las 14 fases de la guia, con 4 aprobaciones humanas obligatorias.
-            Avanza fase a fase; en los gates decides tu.
+            El sistema avanza <b>automáticamente</b> y se detiene solo en los 4
+            puntos donde tú decides (aprobar arquitectura, evidencia, release y
+            producción). No tienes que ir fase por fase.
           </p>
         </div>
         <button
@@ -132,38 +160,72 @@ export function PipelinePanel({ projectKey }: { projectKey: string }) {
           />
         </div>
 
-        {/* Accion: gate o avanzar */}
-        <div className="mt-4 flex items-center gap-3 flex-wrap">
+        {/* Accion: gate (con contenido a aprobar) o iniciar automatico */}
+        <div className="mt-4 flex flex-col gap-3">
           {view.is_gate ? (
             <>
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-200 text-sm flex-1">
-                <Lock size={15} />
-                <span>
-                  <b>Gate #{view.gate_n}</b> — requiere tu aprobacion para continuar.
-                </span>
+              {/* QUE estas aprobando */}
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-200 font-semibold">
+                  <Lock size={16} />
+                  {view.gate_review?.title || `Aprobación requerida (Gate #${view.gate_n})`}
+                </div>
+                {view.gate_review?.summary && (
+                  <p className="text-sm text-neutral-600 dark:text-neutral-300 mt-1.5">
+                    {view.gate_review.summary}
+                  </p>
+                )}
+                {/* ADRs a revisar (gate 1) */}
+                {view.gate_review?.adrs && view.gate_review.adrs.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {view.gate_review.adrs.map((adr) => (
+                      <details key={adr.number} className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 p-3">
+                        <summary className="cursor-pointer text-sm font-medium">
+                          ADR-{String(adr.number).padStart(3, "0")}: {adr.title}
+                        </summary>
+                        <div className="mt-2 text-xs text-neutral-600 dark:text-neutral-400 whitespace-pre-wrap max-h-60 overflow-y-auto">
+                          {adr.markdown || adr.decision || adr.context}
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                )}
               </div>
-              <button
-                onClick={() => void approveGate()}
-                disabled={busy}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-green-600 to-emerald-600 text-white font-medium shadow-lg shadow-green-600/30 hover:opacity-95 disabled:opacity-60"
-              >
-                {busy ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
-                Aprobar y continuar
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => void approveGate()}
+                  disabled={busy}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-green-600 to-emerald-600 text-white font-medium shadow-lg shadow-green-600/30 hover:opacity-95 disabled:opacity-60"
+                >
+                  {busy ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
+                  Apruebo, continuar automático
+                </button>
+                <span className="text-xs text-neutral-500">Tras aprobar, el sistema sigue solo hasta el próximo punto que requiera tu decisión.</span>
+              </div>
             </>
           ) : view.current_state === "RELEASED" ? (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-500/10 border border-green-500/30 text-green-700 dark:text-green-300 text-sm">
               <CheckCircle2 size={15} /> Producto desplegado y disponible.
             </div>
           ) : (
-            <button
-              onClick={() => void advance()}
-              disabled={busy}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-brand to-fuchsia-500 text-white font-medium shadow-lg shadow-brand/30 hover:opacity-95 disabled:opacity-60"
-            >
-              {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />}
-              Avanzar a siguiente fase
-            </button>
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={() => void autorun()}
+                disabled={busy}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-brand to-fuchsia-500 text-white font-medium shadow-lg shadow-brand/30 hover:opacity-95 disabled:opacity-60"
+              >
+                {busy ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />}
+                Iniciar / continuar automático
+              </button>
+              <button
+                onClick={() => void advance()}
+                disabled={busy}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900 disabled:opacity-60"
+              >
+                Avanzar 1 fase (manual)
+              </button>
+              <span className="text-xs text-neutral-500">El automático corre solo hasta el próximo gate.</span>
+            </div>
           )}
         </div>
       </div>
