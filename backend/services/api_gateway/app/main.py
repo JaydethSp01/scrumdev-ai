@@ -503,6 +503,29 @@ async def project_assistant(project_key: str, req: AssistantPayload) -> dict:
 # ===== Ciclo de vida: versiones, multi-chat, fix de bugs =====
 
 
+@app.get("/projects/{project_key}/integrations/jira")
+async def gw_get_jira_config(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/integrations/jira"
+    )
+
+
+class GwJiraConfig(BaseModel):
+    base_url: str
+    email: str
+    api_token: str
+    project_key_jira: str = ""
+    board_id: str = ""
+
+
+@app.post("/projects/{project_key}/integrations/jira")
+async def gw_set_jira_config(project_key: str, req: GwJiraConfig) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/integrations/jira",
+        req.model_dump(), timeout=30.0,
+    )
+
+
 @app.get("/projects/{project_key}/versions")
 async def gw_list_versions(project_key: str) -> dict:
     return await _proxy_get(f"{settings.orchestrator_service_url}/projects/{project_key}/versions")

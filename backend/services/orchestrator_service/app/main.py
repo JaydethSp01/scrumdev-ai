@@ -1383,6 +1383,98 @@ class VersionStatusRequest(BaseModel):
     status: str  # draft | active | released | archived
 
 
+# ===== Config de integraciones por proyecto (ej. Jira del cliente) =====
+
+import base64 as _b64
+
+
+class JiraConfigRequest(BaseModel):
+    base_url: str
+    email: str
+    api_token: str
+    project_key_jira: str = ""
+    board_id: str = ""
+
+
+@app.get("/projects/{project_key}/integrations/jira")
+async def get_jira_config(project_key: str) -> dict:
+    """Devuelve si el proyecto tiene Jira propio configurado. Si no, instrucciones."""
+    from shared.db.models import IntegrationConfig
+    async for session in get_session():
+        cfg = (await session.execute(
+            select(IntegrationConfig).where(
+                IntegrationConfig.project_key == project_key,
+                IntegrationConfig.provider == "jira",
+            )
+        )).scalar_one_or_none()
+        global_set = bool(settings.scrumdev_jira_base_url and settings.scrumdev_jira_api_token)
+        if cfg:
+            return {
+                "configured": True, "source": "project",
+                "base_url": cfg.config.get("base_url"),
+                "email": cfg.config.get("email"),
+                "project_key_jira": cfg.config.get("project_key_jira"),
+                "board_id": cfg.config.get("board_id"),
+                "has_token": bool(cfg.secret_enc),
+            }
+        return {
+            "configured": global_set, "source": "global" if global_set else "none",
+            "help": {
+                "title": "Conecta tu propio Jira",
+                "steps": [
+                    "1. Entra a https://id.atlassian.com/manage-profile/security/api-tokens",
+                    "2. Crea un API token y cópialo.",
+                    "3. Pega aquí la URL de tu Jira (https://tuempresa.atlassian.net), tu email y el token.",
+                    "4. (Opcional) Project Key y Board ID de tu tablero Scrum.",
+                ],
+                "token_url": "https://id.atlassian.com/manage-profile/security/api-tokens",
+            },
+        }
+    raise HTTPException(status_code=503, detail="db unavailable")
+
+
+@app.post("/projects/{project_key}/integrations/jira")
+async def set_jira_config(project_key: str, req: JiraConfigRequest) -> dict:
+    """Guarda la config Jira del proyecto (el cliente conecta su propio Jira)."""
+    from shared.db.models import IntegrationConfig
+    async for session in get_session():
+        cfg = (await session.execute(
+            select(IntegrationConfig).where(
+                IntegrationConfig.project_key == project_key,
+                IntegrationConfig.provider == "jira",
+            )
+        )).scalar_one_or_none()
+        data = {
+            "base_url": req.base_url.rstrip("/"), "email": req.email,
+            "project_key_jira": req.project_key_jira, "board_id": req.board_id,
+        }
+        token_enc = _b64.b64encode(req.api_token.encode()).decode()
+        if cfg:
+            cfg.config = data
+            if req.api_token:
+                cfg.secret_enc = token_enc
+            cfg.enabled = True
+        else:
+            session.add(IntegrationConfig(
+                project_key=project_key, provider="jira",
+                config=data, secret_enc=token_enc, enabled=True,
+            ))
+        await session.commit()
+    # probar conexion con las credenciales nuevas
+    ok = False
+    try:
+        import httpx as _hx
+        auth = _b64.b64encode(f"{req.email}:{req.api_token}".encode()).decode()
+        async with _hx.AsyncClient(timeout=15.0) as c:
+            r = await c.get(f"{req.base_url.rstrip('/')}/rest/api/3/myself",
+                            headers={"Authorization": f"Basic {auth}", "Accept": "application/json"})
+            ok = r.status_code == 200
+    except Exception:
+        ok = False
+    return {"saved": True, "connection_ok": ok,
+            "message": "Jira conectado correctamente." if ok else "Guardado, pero no pude validar la conexión (revisa URL/email/token)."}
+
+
 @app.get("/projects/{project_key}/versions")
 async def list_versions(project_key: str) -> dict:
     from services.orchestrator_service.app.versions import ensure_v1, version_dict

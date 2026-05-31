@@ -384,6 +384,28 @@ class ChatSession(Base):
     )
 
 
+class IntegrationConfig(Base):
+    """Configuracion de integraciones POR PROYECTO (ej. Jira del cliente).
+
+    Permite que cada proyecto conecte su propio Jira/GitHub/etc. Si no existe,
+    el connector usa la config global del .env. El token se guarda ofuscado
+    (base64); en produccion debe ir cifrado o en un secrets manager.
+    """
+
+    __tablename__ = "integration_configs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid4()))
+    project_key: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(32), index=True)  # jira | github | deploy
+    config: Mapped[dict] = mapped_column(JSON, default=dict)  # {base_url, email, board_id, ...}
+    secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)  # token ofuscado
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
 class ChatMessage(Base):
     """Mensaje del Chat IA del proyecto. Atado a project+user para privacidad."""
 
