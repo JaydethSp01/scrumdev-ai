@@ -245,6 +245,7 @@ def _stub_missing_local_imports(files_rel: list[dict], report: list[str]) -> lis
     """La IA importa componentes locales `@/...` que no generó -> 'Module not
     found'. Creamos un stub por cada archivo faltante para que el build resuelva."""
     existing = {(f.get("path") or "").lstrip("/") for f in files_rel}
+    routes = _discover_routes(files_rel)  # para que Sidebar/Navbar stub tenga enlaces reales
     def has(base: str) -> bool:
         for ext in (".tsx", ".ts", ".jsx", ".js"):
             if base + ext in existing or f"{base}/index{ext}" in existing:
@@ -310,7 +311,7 @@ def _stub_missing_local_imports(files_rel: list[dict], report: list[str]) -> lis
             # Componente: funcional real (renderiza children y muestra props básicas),
             # stub CON ESTILO real según el tipo de componente (por nombre) ->
             # si la IA no lo generó, igual se ve profesional, no un div pelado.
-            comp = _styled_stub(base)
+            comp = _styled_stub(base, routes)
             for n in sorted(info["named"]):
                 comp += f"export const {n}: any = Stub;\n"
             files_rel.append({"path": f"{base}.tsx", "content": comp})
@@ -320,12 +321,41 @@ def _stub_missing_local_imports(files_rel: list[dict], report: list[str]) -> lis
     return files_rel
 
 
-def _styled_stub(base: str) -> str:
+def _discover_routes(files_rel: list[dict]) -> list[tuple[str, str]]:
+    """Descubre las rutas reales del App Router escaneando los page.tsx presentes.
+    Devuelve [(href, label)] para que un Sidebar/Navbar stub liste enlaces REALES
+    (no un 'Menú' vacío). Ignora grupos de ruta (parens) y segmentos dinámicos."""
+    import posixpath, re as _re
+    routes: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        m = _re.match(r"(?:frontend/)?app/(.*/)?page\.(t|j)sx?$", p)
+        if not m:
+            continue
+        segs = [s for s in (m.group(1) or "").strip("/").split("/")
+                if s and not (s.startswith("(") or s.startswith("[") or s.startswith("_"))]
+        href = "/" + "/".join(segs) if segs else "/"
+        if href in seen:
+            continue
+        seen.add(href)
+        label = "Inicio" if href == "/" else segs[-1].replace("-", " ").replace("_", " ").title()
+        routes.append((href, label))
+    # Inicio primero, luego alfabético
+    routes.sort(key=lambda r: (r[0] != "/", r[0]))
+    return routes[:12]
+
+
+def _styled_stub(base: str, routes: list[tuple[str, str]] | None = None) -> str:
     """Devuelve un componente stub CON ESTILO Tailwind real según su nombre
     (Card/Table/Sidebar/Navbar/Button/...) para que la UI se vea profesional
-    aunque la IA no haya generado ese componente."""
+    aunque la IA no haya generado ese componente. Para Sidebar/Navbar usa las
+    `routes` reales del proyecto -> enlaces de verdad, no un placeholder vacío."""
     name = base.split("/")[-1].lower()
-    head = '"use client";\nimport React from "react";\n'
+    head = '"use client";\nimport React from "react";\nimport Link from "next/link";\n'
+    _routes = routes or [("/", "Inicio")]
+    _links_js = "[" + ", ".join(
+        '{href:"%s",label:"%s"}' % (h, l) for h, l in _routes) + "]"
     if "card" in name:
         body = (
             "export default function Stub(props: any) {\n"
@@ -361,19 +391,31 @@ def _styled_stub(base: str) -> str:
         )
     elif "sidebar" in name:
         body = (
+            f"const _links = {_links_js};\n"
             "export default function Stub(props: any) {\n"
             "  return (\n"
-            "    <aside className=\"w-60 shrink-0 border-r border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900 min-h-screen\">\n"
-            "      <div className=\"font-bold text-lg mb-6\">Menú</div>\n"
-            "      <nav className=\"space-y-1 text-sm text-neutral-600 dark:text-neutral-300\">{props?.children}</nav>\n"
+            "    <aside className=\"w-64 shrink-0 border-r border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900 min-h-screen\">\n"
+            "      <div className=\"font-bold text-lg mb-6 px-2\">{props?.title ?? 'Panel'}</div>\n"
+            "      <nav className=\"space-y-1 text-sm font-medium text-neutral-600 dark:text-neutral-300\">\n"
+            "        {_links.map((l: any) => (\n"
+            "          <Link key={l.href} href={l.href} className=\"block rounded-lg px-3 py-2 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 transition\">{l.label}</Link>\n"
+            "        ))}\n"
+            "        {props?.children}\n"
+            "      </nav>\n"
             "    </aside>\n  );\n}\n"
         )
     elif "navbar" in name or "header" in name:
         body = (
+            f"const _links = {_links_js};\n"
             "export default function Stub(props: any) {\n"
             "  return (\n"
-            "    <header className=\"flex items-center justify-between border-b border-neutral-200 bg-white px-6 py-3 dark:border-neutral-800 dark:bg-neutral-900\">\n"
+            "    <header className=\"sticky top-0 z-40 flex items-center justify-between border-b border-neutral-200 bg-white/90 backdrop-blur px-6 py-3 dark:border-neutral-800 dark:bg-neutral-900/90\">\n"
             "      <div className=\"font-semibold\">{props?.title ?? 'App'}</div>\n"
+            "      <nav className=\"hidden md:flex items-center gap-1 text-sm font-medium text-neutral-600 dark:text-neutral-300\">\n"
+            "        {_links.map((l: any) => (\n"
+            "          <Link key={l.href} href={l.href} className=\"rounded-lg px-3 py-1.5 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800 transition\">{l.label}</Link>\n"
+            "        ))}\n"
+            "      </nav>\n"
             "      <div className=\"flex items-center gap-3\">{props?.children}</div>\n"
             "    </header>\n  );\n}\n"
         )
@@ -697,8 +739,14 @@ async def _runtime_smoke(tmp: str, npm: str, env: dict) -> dict:
             launch_kw = {"executable_path": chrome} if chrome else {}
             try:
                 br = await pw.chromium.launch(**launch_kw)
-            except Exception:
-                br = await pw.chromium.launch()  # fallback al browser propio de pw
+            except Exception as _le1:
+                logger.warning("chromium_launch_path_failed",
+                               chrome=chrome, err=str(_le1)[:240])
+                try:
+                    br = await pw.chromium.launch()  # fallback al browser propio de pw
+                except Exception as _le2:
+                    logger.warning("chromium_launch_failed_both", err=str(_le2)[:240])
+                    raise
             pg = await br.new_page(viewport={"width": 1280, "height": 800})
             pg.on("pageerror", lambda e: errs.append(str(e)[:160]))
             shot_b64 = None

@@ -74,6 +74,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         nodejs \
         npm \
         git \
+        libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+        libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+        libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 1000 scrumdev \
     && useradd  --system --uid 1000 --gid scrumdev --create-home --home-dir /home/scrumdev scrumdev
