@@ -798,6 +798,18 @@ def _reformat_py(code: str) -> str:
     in_oneline_block = False  # dentro de `class X: a; b; c`
     def is_toplevel(s: str) -> bool:
         return s.startswith(("import ", "from ", "def ", "class ", "@", "async def "))
+    # expandir piezas: separar `@decorator def/async def ...` y `@decorator class`
+    expanded: list[tuple[str, str]] = []
+    for text, sep in pieces:
+        s = text.strip()
+        m = re.match(r"^(@[\w\.]+(?:\([^)]*\))?)\s+((?:async\s+def|def|class)\s.+)$", s)
+        if m:
+            expanded.append((m.group(1), "\n"))
+            expanded.append((m.group(2), sep))
+        else:
+            expanded.append((text, sep))
+    pieces = expanded
+
     for text, sep in pieces:
         s = text.strip()
         if not s:
