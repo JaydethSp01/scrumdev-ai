@@ -1,0 +1,29 @@
+{
+  "id": "ecommerce-fashion",
+  "name": "Moda Store",
+  "sector": "ecommerce",
+  "sector_label": "E-commerce / Tienda",
+  "software_type": "saas_crud",
+  "stack": "nextjs-fastapi-postgres",
+  "description": "Tienda online: catálogo, carrito, pedidos y gestión de productos.",
+  "entities": [
+    "producto",
+    "categoria",
+    "pedido",
+    "cliente"
+  ],
+  "brand_color": "#db2777",
+  "tags": [
+    "ecommerce",
+    "tienda",
+    "carrito",
+    "pedidos",
+    "catalogo",
+    "ropa"
+  ],
+  "accent": "",
+  "has_files": false,
+  "preview_url": "https://raw.githubusercontent.com/JaydethSp01/scrumdev-templates/main/templates/ecommerce-fashion/preview.png",
+  "seeded_at": 1780321223,
+  "deploy_url": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "saas-crm",
+  "name": "CRM Ventas",
+  "sector": "saas",
+  "sector_label": "SaaS / CRM",
+  "software_type": "saas_crud",
+  "stack": "nextjs-fastapi-postgres",
+  "description": "CRM de ventas: leads, oportunidades, contactos y embudo.",
+  "entities": [
+    "lead",
+    "oportunidad",
+    "contacto",
+    "actividad"
+  ],
+  "brand_color": "#7c3aed",
+  "tags": [
+    "crm",
+    "ventas",
+    "leads",
+    "pipeline",
+    "embudo",
+    "clientes"
+  ],
+  "accent": "",
+  "has_files": false,
+  "preview_url": "https://raw.githubusercontent.com/JaydethSp01/scrumdev-templates/main/templates/saas-crm/preview.png",
+  "seeded_at": 1780321569,
+  "deploy_url": null
+}

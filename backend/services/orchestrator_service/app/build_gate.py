@@ -1127,10 +1127,31 @@ def _reformat_py(code: str) -> str:
         # `def f(): x; try: yield; finally: close()` queda con indent inválido.
         m = (re.match(r"^((?:async\s+)?(?:class|def|if|elif|for|while|with|except)\b[^:]*:)\s*(\S.*)$", s)
              or re.match(r"^((?:else|try|finally)\s*:)\s*(\S.*)$", s))
-        if m and not m.group(2).startswith(("#",)):
-            out.append("    " * indent + m.group(1))
+        if m:
+            header, body = m.group(1), m.group(2)
+            if body.startswith("#"):
+                # cuerpo arranca con comentario inline (`if x: # nota return y`):
+                # la IA dejó código DENTRO del comentario. Recuperar la sentencia
+                # embebida (return/raise/yield/pass/break/continue) tras el comentario.
+                km = re.search(r"\b(return|raise|yield|pass|break|continue)\b", body)
+                if km:
+                    comment, body = body[:km.start()].rstrip(), body[km.start():]
+                    out.append("    " * indent + header)
+                    if comment:
+                        out.append("    " * (indent + 1) + comment)
+                    indent += 1
+                    out.append("    " * indent + body)
+                    in_oneline_block = True
+                    continue
+                # comentario sin código recuperable -> cuerpo `pass`
+                out.append("    " * indent + header)
+                out.append("    " * (indent + 1) + "pass  " + body)
+                indent += 1
+                in_oneline_block = True
+                continue
+            out.append("    " * indent + header)
             indent += 1
-            out.append("    " * indent + m.group(2))
+            out.append("    " * indent + body)
             in_oneline_block = True
             continue
         out.append("    " * indent + s)

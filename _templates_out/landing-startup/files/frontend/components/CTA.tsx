@@ -1,0 +1,1 @@
+"use client"; export default function CTA({ text }) { return (<section className='py-20 bg-blue-600 text-white text-center'><div className='max-w-6xl mx-auto px-4'><h2 className='text-4xl font-bold mb-4'>{text}</h2><button className='bg-white text-blue-600 px-6 py-3 rounded'>Get Started</button></div></section>); }

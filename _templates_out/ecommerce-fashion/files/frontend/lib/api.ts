@@ -1,0 +1,1 @@
+const API = process.env.NEXT_PUBLIC_API_URL || ''; export async function fetchFromAPI(endpoint: string) { const response = await fetch(`${API}${endpoint}`); if (!response.ok) { // Fallback to mock data return import('./mock').then((mod) => mod.default[endpoint]); } return response.json(); }

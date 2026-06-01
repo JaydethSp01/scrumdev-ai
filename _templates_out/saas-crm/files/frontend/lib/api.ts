@@ -1,0 +1,1 @@
+export const API = process.env.NEXT_PUBLIC_API_URL || ''; export async function fetchDashboardData() { const res = await fetch(`${API}/dashboard`); if (!res.ok) throw new Error('Failed to fetch dashboard data'); return res.json(); }

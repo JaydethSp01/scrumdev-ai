@@ -191,7 +191,7 @@ CATALOG_BY_ID = {t.id: t for t in CATALOG}
 
 # Plantillas YA seedeadas en el repo (files + preview.png). Marcar aquí al subir
 # una plantilla con scripts/seed_templates.py o manualmente.
-_SEEDED = {"retail-inventory-pro", "salud-citas"}
+_SEEDED = {"retail-inventory-pro", "salud-citas", "saas-crm"}
 for _sid in _SEEDED:
     if _sid in CATALOG_BY_ID:
         CATALOG_BY_ID[_sid].has_files = True

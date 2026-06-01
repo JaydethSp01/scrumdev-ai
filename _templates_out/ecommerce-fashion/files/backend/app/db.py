@@ -1,0 +1,1 @@
+import os; from psycopg import connect; def get_connection(): db_url = os.environ.get("DATABASE_URL"); if not db_url: # Fallback to in-memory connection return connect("dbname=:memory:"); return connect(db_url);

@@ -1,0 +1,1 @@
+import os; import psycopg; from psycopg.rows import dict_row; DATABASE_URL = os.environ.get('DATABASE_URL'); conn = psycopg.connect(DATABASE_URL, row_factory=dict_row) if DATABASE_URL else None

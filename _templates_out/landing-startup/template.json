@@ -1,0 +1,24 @@
+{
+  "id": "landing-startup",
+  "name": "Startup Launch",
+  "sector": "landing",
+  "sector_label": "Landing / Marketing",
+  "software_type": "landing",
+  "stack": "nextjs-static",
+  "description": "Landing de producto: hero, features, testimonios, precios y CTA.",
+  "entities": [],
+  "brand_color": "#4f46e5",
+  "tags": [
+    "landing",
+    "startup",
+    "marketing",
+    "producto",
+    "lanzamiento",
+    "saas"
+  ],
+  "accent": "",
+  "has_files": false,
+  "preview_url": "https://raw.githubusercontent.com/JaydethSp01/scrumdev-templates/main/templates/landing-startup/preview.png",
+  "seeded_at": 1780321888,
+  "deploy_url": null
+}

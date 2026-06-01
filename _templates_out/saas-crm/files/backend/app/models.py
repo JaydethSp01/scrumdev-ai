@@ -1,0 +1,1 @@
+from pydantic import BaseModel, Field; class Lead(BaseModel): id: int = Field(default_factory=int); name: str; email: str; class Config: orm_mode = True

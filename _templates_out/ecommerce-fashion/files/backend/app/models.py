@@ -1,0 +1,1 @@
+from pydantic import BaseModel; class Producto(BaseModel): id: int; nombre: str; precio: float; imagen: str; class Categoria(BaseModel): id: int; nombre: str; class Pedido(BaseModel): id: int; cliente_id: int; total: float; estado: str; class Cliente(BaseModel): id: int; nombre: str; email: str; class Carrito(BaseModel): id: int; cliente_id: int; producto_id: int; cantidad: int;
