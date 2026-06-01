@@ -3,7 +3,7 @@ test.use({ viewport: { width: 1280, height: 800 } });
 test("inventario renderiza con diseño", async ({ page }) => {
   const errs: string[] = [];
   page.on("pageerror", (e) => errs.push(e.message.slice(0,150)));
-  await page.goto("https://inv282697-web.vercel.app", { waitUntil: "domcontentloaded", timeout: 40000 });
+  await page.goto("https://tienda87598-web.vercel.app", { waitUntil: "domcontentloaded", timeout: 40000 });
   await page.waitForTimeout(6000);
   const body = (await page.locator("body").innerText().catch(()=>"")).trim();
   // contar elementos con clases tailwind = señal de diseño
