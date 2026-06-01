@@ -77,7 +77,7 @@ async def run_claude_code(
         return await _run_via_api(prompt, system_prompt, image_paths, provider)
     try:
         return await _run_claude_sdk(prompt, system_prompt, max_turns, image_paths)
-    except Exception as exc:  # noqa: BLE001 -> apoyo OpenAI si Claude Code falla
+    except BaseException as exc:  # noqa: BLE001 -> SIEMPRE caer a OpenAI (incl. ExceptionGroup)
         logger.warning("claude_code_failed_fallback_openai", error=str(exc)[:200])
         return await _run_via_api(prompt, system_prompt, image_paths, "openai")
 
