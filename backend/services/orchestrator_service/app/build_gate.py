@@ -296,6 +296,38 @@ def _relax_next_config(files_rel: list[dict], report: list[str]) -> list[dict]:
     return files_rel
 
 
+def _fix_postcss_config(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """La IA a veces genera postcss.config con plugins como objetos importados
+    (`plugins:[tailwindcss,autoprefixer]`), que rompe el procesamiento de CSS en
+    Next (globals.css falla). Lo normalizamos al formato canónico de PostCSS:
+    `{ plugins: { tailwindcss: {}, autoprefixer: {} } }`."""
+    for f in files_rel:
+        path = (f.get("path") or "").lstrip("/")
+        base = path.split("/")[-1]
+        if base not in ("postcss.config.mjs", "postcss.config.js", "postcss.config.cjs"):
+            continue
+        c = f.get("content") or ""
+        # si ya usa el formato objeto canónico, dejar
+        if re.search(r"plugins\s*:\s*\{", c):
+            continue
+        canonical = (
+            "/** @type {import('postcss-load-config').Config} */\n"
+            "export default {\n"
+            "  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n"
+            "};\n"
+        )
+        if base.endswith(".cjs") or "module.exports" in c:
+            canonical = (
+                "module.exports = {\n"
+                "  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n"
+                "};\n"
+            )
+        if canonical.strip() != c.strip():
+            f["content"] = canonical
+            report.append("postcss.config normalizado (plugins canónicos)")
+    return files_rel
+
+
 def _force_dynamic_pages(files_rel: list[dict], report: list[str]) -> list[dict]:
     """Evita errores de PRERENDER (SSG) en build: Next intenta generar las páginas
     estáticamente y el componente puede lanzar (datos, hooks, stubs). Forzamos
@@ -381,6 +413,7 @@ def _apply_frontend_autofix(files_rel: list[dict], log: str = "") -> tuple[list[
     files_rel = _ensure_npm_deps(files_rel, report)
     files_rel = _stub_missing_local_imports(files_rel, report)
     files_rel = _relax_next_config(files_rel, report)
+    files_rel = _fix_postcss_config(files_rel, report)
     files_rel = _autofix_missing_exports(files_rel, report)
     files_rel = _ensure_css_imports(files_rel, report)
     if log:
@@ -406,6 +439,7 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4) -> d
     files_rel = _ensure_npm_deps(files_rel, _pre)    # libs importadas -> package.json
     files_rel = _stub_missing_local_imports(files_rel, _pre)  # @/ faltantes -> stub
     files_rel = _relax_next_config(files_rel, _pre)  # ignorar errores TS/lint
+    files_rel = _fix_postcss_config(files_rel, _pre)  # postcss plugins canónicos
 
     env = _node_env()
     all_fixes: list[str] = list(_pre)
