@@ -65,6 +65,7 @@ import BuildProgressToast, {
 } from "@/components/BuildProgressToast";
 import { ToastStack, useToasts } from "@/components/Toast";
 import Tour, { type TourStep } from "@/components/Tour";
+import GenerationProgress from "@/components/GenerationProgress";
 
 const TOUR_KEY = "scrumdev.tour.project.v1";
 const PROJECT_TOUR_STEPS: TourStep[] = [
@@ -679,13 +680,19 @@ export default function ProjectDetailPage() {
           </div>
 
           {tab === "overview" && (
-            <ProjectOverview
-              projectKey={project.key}
-              projectName={project.name}
-              onOpenBuild={() => runSmartBuild(false)}
-              onGoTo={(t) => setTab(t as Tab)}
-              refreshKey={refreshKey}
-            />
+            <div className="space-y-5">
+              <GenerationProgress
+                projectKey={project.key}
+                onDone={() => setRefreshKey((k) => k + 1)}
+              />
+              <ProjectOverview
+                projectKey={project.key}
+                projectName={project.name}
+                onOpenBuild={() => runSmartBuild(false)}
+                onGoTo={(t) => setTab(t as Tab)}
+                refreshKey={refreshKey}
+              />
+            </div>
           )}
           {tab === "vision" && (
             <VisionForm projectKey={project.key} user={user} />
