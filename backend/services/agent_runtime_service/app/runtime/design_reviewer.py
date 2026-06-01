@@ -112,7 +112,7 @@ async def review_and_fix_design(
             f"sin explicaciones ni ```.\n\nARCHIVO ACTUAL:\n{original[:4000]}"
         )
         try:
-            new = await run_claude_code(prompt, max_turns=1)
+            new = await run_claude_code(prompt, max_turns=1, kind="ui")
             new = _strip_fences(new)
             # solo aceptar si mejora y conserva los exports clave
             if new and len(new) > len(original) * 0.5 and "export" in new:

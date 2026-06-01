@@ -326,7 +326,7 @@ async def _complete_domain_with_ai(
             + "\n".join(f"  - {p}" for p in missing)
             + '\n\nDevuelve SOLO JSON: {"files":[{"path":"...","content":"..."}]}'
         )
-        raw = await run_claude_code(prompt, system_prompt=APP_GENERATOR_SYSTEM, max_turns=1)
+        raw = await run_claude_code(prompt, system_prompt=APP_GENERATOR_SYSTEM, max_turns=1, kind="ui")
         data = _extract_json(raw)
         new_files = data.get("files", []) if isinstance(data, dict) else []
         added: list[str] = []
@@ -463,7 +463,7 @@ async def generate_full_app(
         "}\n"
     )
 
-    raw = await run_claude_code(prompt, system_prompt=APP_GENERATOR_SYSTEM, max_turns=1)
+    raw = await run_claude_code(prompt, system_prompt=APP_GENERATOR_SYSTEM, max_turns=1, kind="ui")
     data = _extract_json(raw)
     if not isinstance(data, dict) or "files" not in data:
         raise ValueError("app generation parse failed")
@@ -483,6 +483,17 @@ async def generate_full_app(
     files, fill_report = _ensure_manifest_complete(files, stack_id, project_key)
     if fill_report:
         logger.info("manifest_backfilled", project=project_key, filled=fill_report)
+
+    # GATE DE CALIDAD (#1): mide CADA página y REGENERA con Claude las pobres
+    # (las de 634 chars / useState(null) / sin datos que salían en blanco) hasta
+    # que cumplan el umbral. Nada pobre se despliega. Claude es obligatorio (UI).
+    try:
+        from services.agent_runtime_service.app.runtime.quality_gate import enforce_quality
+        files, quality_report = await enforce_quality(files, vision, classification, project_key)
+        if quality_report:
+            logger.info("quality_gate", project=project_key, report=quality_report)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("quality_gate_skipped", project=project_key, error=str(exc)[:160])
 
     # AGENTE DE DISEÑO (#11): audita el frontend contra los 7 principios UX/UI +
     # responsive + accesibilidad y reescribe los archivos con diseño pobre. Sin

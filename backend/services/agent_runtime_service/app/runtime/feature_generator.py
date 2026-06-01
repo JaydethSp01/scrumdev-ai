@@ -96,7 +96,7 @@ async def generate_feature(
         '  "files": [{"path": "frontend/app/facturas/page.tsx", "content": "..."}]\n'
         "}\n"
     )
-    raw = await run_claude_code(prompt, system_prompt=FEATURE_SYSTEM, max_turns=1)
+    raw = await run_claude_code(prompt, system_prompt=FEATURE_SYSTEM, max_turns=1, kind="ui")
     data = _extract_json(raw)
     files = data.get("files", []) if isinstance(data, dict) else []
     logger.info("feature_generated", project=project_key, feature=feature_title,

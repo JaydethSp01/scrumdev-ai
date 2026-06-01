@@ -64,20 +64,38 @@ async def run_claude_code(
     system_prompt: Optional[str] = None,
     max_turns: int = 1,
     image_paths: Optional[list[str]] = None,
+    kind: str = "text",
 ) -> str:
-    """Punto único de generación con LLM (HÍBRIDO).
+    """Punto único de generación con LLM (HÍBRIDO por tipo de tarea).
 
-    - provider=claude_code: usa el SDK/CLI de Claude (plan Pro/Max vía
-      CLAUDE_CODE_OAUTH_TOKEN headless -> NO gasta API). Si falla, cae a OpenAI.
-    - otro provider: OpenAI directo.
-    Claude lleva el peso de la generación; OpenAI es el apoyo/fallback.
+    REGLA: el DISEÑO/UI lo genera SIEMPRE Claude (OpenAI hace interfaces feas).
+    OpenAI solo apoya en tareas SIN diseño (backlog, clasificación, backend).
+
+    - kind="ui"  (frontend/componentes/páginas): Claude OBLIGATORIO. Si falla,
+      reintenta Claude (hasta 3x). NO cae a OpenAI -> nunca UI fea.
+    - kind="text"(backlog/clasif/backend/docs): Claude primero; si falla, OpenAI.
     """
     provider = (settings.scrumdev_ai_provider or "claude_code").lower()
     if provider != "claude_code":
+        # provider explícito no-claude: respetarlo (p.ej. dev local sin token)
         return await _run_via_api(prompt, system_prompt, image_paths, provider)
+
+    if kind == "ui":
+        last = None
+        for attempt in range(3):  # Claude es obligatorio para UI
+            try:
+                return await _run_claude_sdk(prompt, system_prompt, max_turns, image_paths)
+            except BaseException as exc:  # noqa: BLE001
+                last = exc
+                logger.warning("claude_ui_retry", attempt=attempt, error=str(exc)[:160])
+        # agotados los reintentos: usar OpenAI como ÚLTIMO recurso (mejor algo que nada)
+        logger.error("claude_ui_exhausted_openai_fallback", error=str(last)[:160])
+        return await _run_via_api(prompt, system_prompt, image_paths, "openai")
+
+    # tareas de texto (sin diseño): Claude primero, OpenAI de apoyo
     try:
         return await _run_claude_sdk(prompt, system_prompt, max_turns, image_paths)
-    except BaseException as exc:  # noqa: BLE001 -> SIEMPRE caer a OpenAI (incl. ExceptionGroup)
+    except BaseException as exc:  # noqa: BLE001
         logger.warning("claude_code_failed_fallback_openai", error=str(exc)[:200])
         return await _run_via_api(prompt, system_prompt, image_paths, "openai")
 
