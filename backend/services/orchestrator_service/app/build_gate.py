@@ -648,6 +648,30 @@ def _harden_data_access(files_rel: list[dict], report: list[str]) -> list[dict]:
 # cache de proceso: solo intentamos instalar chromium UNA vez (no en cada build)
 _CHROMIUM_PATH: str | None = None
 _CHROMIUM_TRIED = False
+_DEPS_TRIED = False
+
+
+async def _ensure_browser_deps(env: dict) -> None:
+    """Instala las LIBS de sistema del navegador (necesita root). Una vez por
+    proceso. HF Spaces suele correr como root pese al USER del Dockerfile -> esto
+    auto-cura el 'Host system is missing dependencies' sin depender del cache de
+    Docker (que en HF no respeta los cambios del Dockerfile). Si el browser ya
+    estaba pero NO arrancaba por libs, esto lo arregla."""
+    global _DEPS_TRIED
+    if _DEPS_TRIED:
+        return
+    _DEPS_TRIED = True
+    import sys as _sys
+    euid = getattr(os, "geteuid", lambda: -1)()
+    try:
+        dproc = await asyncio.create_subprocess_exec(
+            _sys.executable, "-m", "playwright", "install-deps", "chromium",
+            env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        out, _ = await asyncio.wait_for(dproc.communicate(), timeout=300)
+        logger.info("chromium_install_deps", euid=euid, rc=dproc.returncode,
+                    tail=(out or b"").decode("utf-8", "ignore")[-200:])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("chromium_install_deps_error", euid=euid, error=str(exc)[:160])
 
 
 def _glob_chromium(roots: list[str]) -> str | None:
@@ -674,6 +698,11 @@ async def _ensure_chromium() -> str | None:
     (cache de módulo) para no penalizar cada build. Así el JUEZ VISUAL siempre
     tiene navegador y nunca se salta silenciosamente."""
     global _CHROMIUM_PATH, _CHROMIUM_TRIED
+    target = "/tmp/pw-browsers"
+    env = {**os.environ, "PLAYWRIGHT_BROWSERS_PATH": target}
+    # SIEMPRE (una vez por proceso) asegurar las libs de sistema, AUNQUE el
+    # browser ya exista: el bug era browser presente pero sin libs -> no arranca.
+    await _ensure_browser_deps(env)
     if _CHROMIUM_PATH:
         return _CHROMIUM_PATH
     roots = [
@@ -691,14 +720,13 @@ async def _ensure_chromium() -> str | None:
         return None  # ya intentamos instalar y falló; no reintentar cada build
     _CHROMIUM_TRIED = True
     # instalar a un dir escribible y persistente para la vida del contenedor
-    target = "/tmp/pw-browsers"
     try:
         os.makedirs(target, exist_ok=True)
     except Exception:
         target = os.path.expanduser("~/.cache/ms-playwright")
-    env = {**os.environ, "PLAYWRIGHT_BROWSERS_PATH": target}
-    import sys as _sys
+        env["PLAYWRIGHT_BROWSERS_PATH"] = target
     logger.info("chromium_install_start", target=target)
+    # instalar el browser
     try:
         proc = await asyncio.create_subprocess_exec(
             _sys.executable, "-m", "playwright", "install", "chromium",
