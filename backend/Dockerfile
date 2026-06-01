@@ -96,15 +96,18 @@ RUN npm install -g @anthropic-ai/claude-code || true
 
 # Chromium para el SMOKE + JUEZ VISUAL del build gate. Ruta FIJA y mundo-legible
 # (/opt) para que el proceso (corre como 'scrumdev', no root) lo encuentre.
-# CLAVE: las apt lists se borraron arriba -> hay que `apt-get update` ANTES de
-# `playwright install-deps` (instala las libs del navegador), o el navegador no
-# arranca ("Host system is missing dependencies"). NO enmascarar con `|| true`
-# la instalación de deps: si falta una lib, el juez visual queda muerto.
+# CLAVE: el proceso corre NO-root -> las libs del navegador DEBEN venir de aquí
+# (build-time, root). `playwright install --with-deps` resuelve los nombres de
+# paquete correctos del SO (en trixie llevan sufijo t64) y NO se enmascara: si
+# falla, el build falla y nos enteramos (mejor que un juez visual muerto).
+# PW_BUST: incrementar este número fuerza a HF a reconstruir esta capa (su cache
+# de Docker ignora cambios sutiles; un ARG que cambia sí la invalida).
+ARG PW_BUST=4
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
-RUN mkdir -p /opt/pw-browsers \
+RUN echo "pw-bust=${PW_BUST}" \
+    && mkdir -p /opt/pw-browsers \
     && apt-get update \
-    && python -m playwright install-deps chromium \
-    && python -m playwright install chromium \
+    && python -m playwright install --with-deps chromium \
     && chmod -R a+rx /opt/pw-browsers \
     && rm -rf /var/lib/apt/lists/*
 

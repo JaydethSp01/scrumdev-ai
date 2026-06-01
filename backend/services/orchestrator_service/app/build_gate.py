@@ -663,6 +663,11 @@ async def _ensure_browser_deps(env: dict) -> None:
     _DEPS_TRIED = True
     import sys as _sys
     euid = getattr(os, "geteuid", lambda: -1)()
+    if euid != 0:
+        # no-root: `apt` imposible. Las libs deben venir de la imagen (build-time).
+        # NO intentar install-deps (falla rc=1 y gasta el timeout). Solo log.
+        logger.info("chromium_deps_skip_nonroot", euid=euid)
+        return
     try:
         dproc = await asyncio.create_subprocess_exec(
             _sys.executable, "-m", "playwright", "install-deps", "chromium",
@@ -727,6 +732,7 @@ async def _ensure_chromium() -> str | None:
         env["PLAYWRIGHT_BROWSERS_PATH"] = target
     logger.info("chromium_install_start", target=target)
     # instalar el browser
+    import sys as _sys
     try:
         proc = await asyncio.create_subprocess_exec(
             _sys.executable, "-m", "playwright", "install", "chromium",
