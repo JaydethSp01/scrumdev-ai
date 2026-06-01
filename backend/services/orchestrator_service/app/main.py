@@ -2620,6 +2620,52 @@ async def generate_app(project_key: str, req: GenerateAppRequest) -> dict:
     return {"build_id": build_id, "async": True, "stage": "queued"}
 
 
+@app.get("/projects/{project_key}/templates")
+async def project_templates(project_key: str, top_k: int = 6) -> dict:
+    """Galería de PLANTILLAS 1A recomendadas para este proyecto. Clasifica la
+    visión y rankea el catálogo por sector/tipo/entidades. El front muestra cada
+    una con su imagen de preview; el usuario elige una (rápido) o 'desde cero'.
+
+    Devuelve también una estimación de tiempo para decidir con criterio."""
+    vision_text = ""
+    async for session in get_session():
+        v = (await session.execute(
+            select(ProjectVision).where(ProjectVision.project_key == project_key)
+        )).scalar_one_or_none()
+        vision_text = (v.vision if v else "") or ""
+        break
+    classification: dict = {}
+    try:
+        from services.agent_runtime_service.app.runtime.product_classifier import (
+            classify_product,
+        )
+        classification = await classify_product(vision_text, None)
+    except Exception as exc:  # noqa: BLE001 -> el matching tolera clasificación vacía
+        logger.warning("templates_classify_failed", project=project_key, error=str(exc)[:120])
+
+    from shared.templates.registry import match_templates
+    ranked = match_templates(classification, vision_text, top_k=top_k)
+    items = []
+    for t, score in ranked:
+        pub = t.to_public()
+        pub["match_score"] = round(score, 1)
+        items.append(pub)
+    return {
+        "project_key": project_key,
+        "templates": items,
+        "from_scratch": {
+            "label": "Crear desde cero (a medida)",
+            "description": (
+                "Diseñamos tu app única según tu visión, sin partir de plantilla. "
+                "Tarda más porque la IA crea cada pantalla desde el principio y la "
+                "pule con el sistema de diseño."
+            ),
+            "eta_minutes": "8-15",
+        },
+        "template_eta_minutes": "3-6",
+    }
+
+
 @app.post("/projects/{project_key}/smart-build")
 async def smart_build(project_key: str, req: SmartBuildRequest) -> dict:
     """Decide que generar segun el estado y dispara background."""

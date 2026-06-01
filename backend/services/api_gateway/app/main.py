@@ -417,6 +417,15 @@ async def get_backlog(project_key: str) -> dict:
     )
 
 
+@app.get("/projects/{project_key}/templates")
+async def get_templates(project_key: str, top_k: int = 6) -> dict:
+    # clasifica la visión (LLM) -> timeout amplio
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/templates?top_k={top_k}",
+        timeout=45.0,
+    )
+
+
 # --- Gestion de tareas por el PO (CRUD estilo Azure DevOps) ---
 
 
