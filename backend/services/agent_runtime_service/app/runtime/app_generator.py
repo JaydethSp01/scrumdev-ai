@@ -115,7 +115,24 @@ TODO bajo `frontend/`. Sin backend ni DB.
 # el brief equivocado = layout feo. Por eso es consciente del stack. ──────────
 _DESIGN_BRIEF_APP = (
     "=================== BRIEF DE DISEÑO (calidad agencia, OBLIGATORIO) ===================\n"
-    "Construye una UI de PRODUCTO que compita con Linear/Vercel/Stripe. NUNCA HTML plano.\n"
+    "Construye una UI de PRODUCTO que compita con Linear/Vercel/Stripe. NUNCA HTML plano.\n\n"
+    "**UI-KIT YA DISPONIBLE (úsalo, NO reinventes estos componentes):**\n"
+    "El proyecto YA incluye un design-system pulido en `@/components/ui/*` + `@/lib/cn`.\n"
+    "COMPÓN tus páginas con él (importa y usa, no copies su estilo a mano):\n"
+    "  • `import { AppShell } from '@/components/ui/AppShell'` — envuelve CADA página:\n"
+    "    `<AppShell items={NAV} title=\"Marca\" action={<Button>Nuevo</Button>}>…</AppShell>`\n"
+    "    NAV es `[{href:'/',label:'Inicio'}, {href:'/productos',label:'Productos'}, …]`.\n"
+    "    Trae sidebar fijo con activo resaltado + header + drawer móvil. NO hagas tu propio shell.\n"
+    "  • `import { MetricCard, Card } from '@/components/ui/Card'` — MetricCard: {label,value,hint,delta,icon}.\n"
+    "  • `import { DataTable } from '@/components/ui/DataTable'` — columns:[{key,header,align,render}], rows.\n"
+    "    Usa `render` para badges/moneda: `render:(r)=> <Badge tone={r.ok?'success':'warning'}>{r.estado}</Badge>`.\n"
+    "  • `import { Badge } from '@/components/ui/Badge'` — tone: success|warning|danger|info|brand|neutral. NADA de emojis.\n"
+    "  • `import { Button } from '@/components/ui/Button'` — variant: primary|secondary|ghost|danger.\n"
+    "  • `import { PageHeader } from '@/components/ui/PageHeader'` — {title,subtitle,action}.\n"
+    "  • `import { EmptyState } from '@/components/ui/EmptyState'` — estados vacíos amables.\n"
+    "  • Iconos: `lucide-react`. El color de marca es la clase `brand` (bg-brand, text-brand) — YA en tailwind.\n"
+    "El dashboard (`app/page.tsx`): <AppShell> + <PageHeader> + grid de <MetricCard> + <Card><DataTable/></Card>.\n"
+    "Cada entidad: <AppShell> + <PageHeader action=Nuevo> + <DataTable> con badges. Coherencia TOTAL entre páginas.\n\n"
     "SISTEMA DE DISEÑO (aplícalo idéntico en TODAS las páginas, coherencia total):\n"
     "• LAYOUT: app shell con SIDEBAR fijo (w-64) + área principal. El sidebar lista "
     "TODAS las secciones con su icono lucide; resalta la activa (bg-brand/10 text-brand, "
@@ -305,6 +322,110 @@ def _build_software_block(classification: dict) -> str:
         "ser mock JWT simple). El dashboard asume usuario logueado.\n"
         "6. Cada `<Link>` apunta a una pagina que EXISTE. Cero links rotos.\n"
     )
+
+
+# Paleta por sector: un color de marca con carácter para cada dominio. El UI-kit
+# usa `bg-brand`/`text-brand`, así que tailwind DEBE definir `brand` o sale gris.
+_SECTOR_BRAND = {
+    "retail": "#4f46e5", "inventory": "#4f46e5", "ecommerce": "#db2777",
+    "salud": "#0d9488", "health": "#0d9488", "clinic": "#0d9488",
+    "saas": "#6366f1", "crm": "#7c3aed", "dashboard": "#2563eb",
+    "educacion": "#2563eb", "education": "#2563eb", "lms": "#2563eb",
+    "restaurante": "#ea580c", "food": "#ea580c", "logistica": "#0891b2",
+    "inmobiliaria": "#0f766e", "fintech": "#059669", "finanzas": "#059669",
+    "gimnasio": "#dc2626", "fitness": "#dc2626", "belleza": "#db2777",
+    "eventos": "#7c3aed", "rrhh": "#4338ca", "legal": "#1d4ed8",
+    "turismo": "#0284c7", "hotel": "#0284c7", "agro": "#16a34a",
+    "manufactura": "#475569", "ong": "#16a34a", "landing": "#4f46e5",
+}
+
+
+def _pick_brand_color(classification: dict, vision: str) -> str:
+    """Elige un color de marca coherente con el dominio (sector/tipo/visión)."""
+    hay = " ".join([
+        str(classification.get("type", "")), str(classification.get("sector", "")),
+        " ".join(classification.get("key_features", []) or []), vision.lower(),
+    ]).lower()
+    for key, color in _SECTOR_BRAND.items():
+        if key in hay:
+            return color
+    return "#4f46e5"  # indigo por defecto
+
+
+def _ensure_brand_color(files: list[dict], color: str, report: list[str]) -> list[dict]:
+    """Garantiza que tailwind.config defina `brand` (y un brand-dark) con el color
+    del sector. Si no hay tailwind.config, no hace nada (el manifest lo crea)."""
+    import re as _re
+    for f in files:
+        p = (f.get("path") or "").lstrip("/")
+        if not _re.search(r"tailwind\.config\.(ts|js|mjs|cjs)$", p):
+            continue
+        c = f.get("content") or ""
+        if '"brand"' in c or "brand:" in c or "brand :" in c:
+            return files  # ya definido por la IA/brand_kit
+        # inyectar `brand` SIN duplicar la clave `colors` (en JS el último gana ->
+        # un segundo `colors:{}` borraría brand). Orden: dentro de colors existente
+        # -> dentro de extend -> dentro de theme.
+        dark = _shade(color, -28)
+        brand = f'brand: {{ DEFAULT: "{color}", dark: "{dark}" }},'
+        if _re.search(r"colors:\s*\{", c):
+            c2 = _re.sub(r"colors:\s*\{", "colors: { " + brand, c, count=1)
+        elif "extend:" in c:
+            c2 = _re.sub(r"extend:\s*\{", "extend: { colors: { " + brand + " },", c, count=1)
+        elif _re.search(r"theme:\s*\{", c):
+            c2 = _re.sub(r"theme:\s*\{", "theme: { extend: { colors: { " + brand + " } },", c, count=1)
+        else:
+            c2 = c
+        if c2 != c:
+            f["content"] = c2
+            report.append(f"color de marca {color} inyectado en {p}")
+        return files
+    return files
+
+
+def _shade(hexc: str, pct: int) -> str:
+    """Aclara/oscurece un color hex en pct (-100..100)."""
+    try:
+        h = hexc.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        f = 1 + pct / 100.0
+        r, g, b = [max(0, min(255, int(x * f))) for x in (r, g, b)]
+        return f"#{r:02x}{g:02x}{b:02x}"
+    except Exception:
+        return hexc
+
+
+def _inject_ui_kit(files: list[dict], report: list[str]) -> list[dict]:
+    """Inyecta el UI-kit 1A curado (AppShell/Sidebar/Card/DataTable/Badge/Button/
+    PageHeader/EmptyState + cn) en CADA proyecto, bajo frontend/. Es la palanca de
+    consistencia: Claude COMPONE con estos componentes pulidos en vez de inventar
+    estilos cada vez. Se SOBREESCRIBE siempre (versión canónica garantizada)."""
+    import shared
+    kit_root = os.path.join(os.path.dirname(shared.__file__), "ui_kit", "frontend")
+    if not os.path.isdir(kit_root):
+        return files
+    by_path = {(f.get("path") or "").lstrip("/"): f for f in files}
+    injected = 0
+    for dirpath, _dirs, fnames in os.walk(kit_root):
+        for fn in fnames:
+            if not fn.endswith((".ts", ".tsx")):
+                continue
+            abs_p = os.path.join(dirpath, fn)
+            rel = os.path.relpath(abs_p, kit_root).replace(os.sep, "/")
+            target = f"frontend/{rel}"
+            try:
+                with open(abs_p, "r", encoding="utf-8") as fh:
+                    content = fh.read()
+            except Exception:
+                continue
+            if target in by_path:
+                by_path[target]["content"] = content
+            else:
+                files.append({"path": target, "content": content})
+            injected += 1
+    if injected:
+        report.append(f"UI-kit 1A inyectado ({injected} componentes)")
+    return files
 
 
 def _ensure_manifest_complete(
@@ -529,6 +650,15 @@ async def generate_full_app(
     files, fill_report = _ensure_manifest_complete(files, stack_id, project_key)
     if fill_report:
         logger.info("manifest_backfilled", project=project_key, filled=fill_report)
+
+    # UI-KIT 1A: inyectar componentes curados (Claude los compone, no inventa) +
+    # garantizar el color de marca del sector en tailwind. Palanca de consistencia.
+    kit_report: list[str] = []
+    files = _inject_ui_kit(files, kit_report)
+    brand_color = _pick_brand_color(classification, vision)
+    files = _ensure_brand_color(files, brand_color, kit_report)
+    if kit_report:
+        logger.info("ui_kit_applied", project=project_key, report=kit_report, brand=brand_color)
 
     # GATE DE CALIDAD (#1): mide CADA página y REGENERA con Claude las pobres
     # (las de 634 chars / useState(null) / sin datos que salían en blanco) hasta
