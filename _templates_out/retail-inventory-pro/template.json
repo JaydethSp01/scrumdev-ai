@@ -1,0 +1,30 @@
+{
+  "id": "retail-inventory-pro",
+  "name": "Inventory Pro",
+  "sector": "retail",
+  "sector_label": "Retail / Inventario",
+  "software_type": "saas_crud",
+  "stack": "nextjs-fastapi-postgres",
+  "description": "Control de inventario con stock por talla, proveedores, alertas y dashboard.",
+  "entities": [
+    "producto",
+    "categoria",
+    "proveedor",
+    "stock",
+    "alerta"
+  ],
+  "brand_color": "#4f46e5",
+  "tags": [
+    "inventario",
+    "stock",
+    "almacen",
+    "productos",
+    "pos",
+    "tienda"
+  ],
+  "accent": "",
+  "has_files": false,
+  "preview_url": "https://raw.githubusercontent.com/JaydethSp01/scrumdev-templates/main/templates/retail-inventory-pro/preview.png",
+  "seeded_at": 1780300139,
+  "deploy_url": null
+}

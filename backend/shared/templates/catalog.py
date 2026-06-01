@@ -189,6 +189,13 @@ CATALOG: list[Template] = [
 
 CATALOG_BY_ID = {t.id: t for t in CATALOG}
 
+# Plantillas YA seedeadas en el repo (files + preview.png). Marcar aquí al subir
+# una plantilla con scripts/seed_templates.py o manualmente.
+_SEEDED = {"retail-inventory-pro"}
+for _sid in _SEEDED:
+    if _sid in CATALOG_BY_ID:
+        CATALOG_BY_ID[_sid].has_files = True
+
 
 def all_templates() -> list[Template]:
     return list(CATALOG)
