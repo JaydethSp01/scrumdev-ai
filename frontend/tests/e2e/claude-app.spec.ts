@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-const URL = "https://claude15021-web.vercel.app";
+const URL = "https://cl277503-web.vercel.app";
 test.use({ viewport: { width: 1280, height: 800 } });
 test("app generada con Claude corre sin error ni login Vercel", async ({ page }) => {
   const errs: string[] = [];
