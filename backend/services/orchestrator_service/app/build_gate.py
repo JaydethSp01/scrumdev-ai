@@ -579,6 +579,9 @@ def _harden_data_access(files_rel: list[dict], report: list[str]) -> list[dict]:
     Heurística conservadora: solo agrega optional chaining donde ya hay accesos
     directos a .length/.map sin protección."""
     import re as _re
+    # cadena de acceso completa: identificador + (.prop | ?.prop)*  -> captura
+    # data, data.x, data?.x, data?.x.y, a.b?.c, etc. (no empieza tras . ? o \w)
+    CHAIN = r"(?<![\?\.\w$])([a-zA-Z_$]\w*(?:\??\.\w+)*)"
     fixed = 0
     for f in files_rel:
         path = (f.get("path") or "").lstrip("/")
@@ -586,14 +589,16 @@ def _harden_data_access(files_rel: list[dict], report: list[str]) -> list[dict]:
             continue
         c = f.get("content") or ""
         orig = c
-        # X.length -> X?.length (sin tocar los ya protegidos ni números)
-        c = _re.sub(r"(?<![\?\.\w])(\b[a-zA-Z_]\w*(?:\.\w+)*)\.length\b",
-                    lambda m: m.group(1) + "?.length", c)
-        # corregir dobles ?? que pudieran formarse
-        c = c.replace("??.length", "?.length")
-        # X.map( -> (X ?? []).map(  cuando X es identificador/acceso simple
-        c = _re.sub(r"(?<![\?\.\w])(\b[a-zA-Z_]\w*(?:\.\w+)*)\.map\(",
-                    lambda m: f"({m.group(1)} ?? []).map(", c)
+        # CADENA.length -> CADENA?.length  (cubre data.x.length y data?.x.length)
+        c = _re.sub(CHAIN + r"\.length\b", lambda m: m.group(1) + "?.length", c)
+        # CADENA.map( -> (CADENA ?? []).map(  (cubre data?.metrics.map)
+        c = _re.sub(CHAIN + r"\.map\(", lambda m: f"({m.group(1)} ?? []).map(", c)
+        # CADENA.filter( / .forEach( / .reduce( -> también seguros
+        for meth in ("filter", "forEach", "reduce", "some", "every", "find"):
+            c = _re.sub(CHAIN + r"\." + meth + r"\(",
+                        lambda m, _me=meth: f"({m.group(1)} ?? []).{_me}(", c)
+        # limpiar dobles que pudieran formarse
+        c = c.replace("??.length", "?.length").replace("(( ", "((")
         if c != orig:
             f["content"] = c
             fixed += 1
