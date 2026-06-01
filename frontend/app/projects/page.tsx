@@ -19,8 +19,8 @@ import {
   Loader2,
 } from "lucide-react";
 import { useAuth } from "@/app/auth/_lib";
-import { listProjects, type Project } from "@/lib/projects";
-import { apiGetBacklog, apiGetCode, apiListBuilds, type BuildRecord } from "@/lib/api";
+import { listProjects, createProject, type Project } from "@/lib/projects";
+import { apiGetBacklog, apiGetCode, apiListBuilds, apiSaveVision, type BuildRecord } from "@/lib/api";
 import EmptyState from "@/components/EmptyState";
 import Spinner from "@/components/Spinner";
 import ProjectCreateWizard from "@/components/ProjectCreateWizard";
@@ -222,10 +222,37 @@ export default function ProjectsPage() {
       <CreateModeModal
         open={modeOpen}
         onClose={() => setModeOpen(false)}
-        onReady={(r) => {
-          setPrefill(r);
+        onReady={async (r) => {
+          // Tras la recolección de datos -> crear el proyecto con esa visión y
+          // llevar DIRECTO a la galería de plantillas (just_created=1). El usuario
+          // elige una plantilla acorde a lo que pidió, o "desde cero".
           setModeOpen(false);
-          setWizardOpen(true);
+          if (!user) return;
+          try {
+            const base =
+              (r.name || "Proyecto").replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 12) ||
+              "PROYECTO";
+            const key = base + String(Date.now()).slice(-4);
+            const project = await createProject({
+              key,
+              name: r.name || "Proyecto",
+              description: (r.vision || "").slice(0, 80),
+              ownerId: user.user_id,
+            });
+            await apiSaveVision({
+              project_key: project.key,
+              vision: r.vision || "",
+              target_users: r.targetUsers,
+            }).catch(() => {});
+            setProjects((prev) =>
+              prev.find((x) => x.key === project.key) ? prev : [...prev, project]
+            );
+            router.push(`/projects/${encodeURIComponent(project.key)}?just_created=1`);
+          } catch {
+            // si algo falla, caer al wizard manual con los datos prellenados
+            setPrefill(r);
+            setWizardOpen(true);
+          }
         }}
       />
 
