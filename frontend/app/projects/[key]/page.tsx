@@ -66,6 +66,7 @@ import BuildProgressToast, {
 import { ToastStack, useToasts } from "@/components/Toast";
 import Tour, { type TourStep } from "@/components/Tour";
 import GenerationProgress from "@/components/GenerationProgress";
+import TemplateGallery from "@/components/TemplateGallery";
 
 const TOUR_KEY = "scrumdev.tour.project.v1";
 const PROJECT_TOUR_STEPS: TourStep[] = [
@@ -292,6 +293,7 @@ export default function ProjectDetailPage() {
   }>({ stories: 0, files: 0, builds: 0 });
   const [statsLoading, setStatsLoading] = useState(true);
   const [showJustCreated, setShowJustCreated] = useState(false);
+  const [showGallery, setShowGallery] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [state, setState] = useState<ProjectState | null>(null);
   const [stateLoading, setStateLoading] = useState(true);
@@ -314,6 +316,7 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     if (search.get("just_created") === "1") {
       setShowJustCreated(true);
+      setShowGallery(true);
     }
   }, [search]);
 
@@ -681,6 +684,20 @@ export default function ProjectDetailPage() {
 
           {tab === "overview" && (
             <div className="space-y-5">
+              {showGallery && (
+                <TemplateGallery
+                  projectKey={project.key}
+                  onPick={(t) => {
+                    setShowGallery(false);
+                    toasts.success(`Adaptando la plantilla "${t.name}" a tu proyecto…`);
+                    runSmartBuild(false);
+                  }}
+                  onFromScratch={() => {
+                    setShowGallery(false);
+                    runSmartBuild(false);
+                  }}
+                />
+              )}
               <GenerationProgress
                 projectKey={project.key}
                 onDone={() => setRefreshKey((k) => k + 1)}
