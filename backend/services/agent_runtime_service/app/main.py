@@ -56,7 +56,7 @@ async def health() -> dict[str, str]:
 _AGENTS_DELFIN = [
     "po_agent", "scrum_master_agent", "nfr_agent", "architect_agent",
     "developer_agent", "code_review_agent", "qa_agent", "security_agent",
-    "devops_agent", "release_agent",
+    "devops_agent", "release_agent", "design_agent",
 ]
 
 

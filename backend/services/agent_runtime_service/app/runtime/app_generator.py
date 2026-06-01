@@ -434,9 +434,19 @@ async def generate_full_app(
         "TODOS los `<Link href=>` apuntan a paginas que CREES. Cero rutas rotas.\n"
         "4. El frontend habla con el backend SOLO via `process.env.NEXT_PUBLIC_API_URL`. "
         "Si el backend no responde, fallback a `frontend/lib/mock.ts`. NUNCA hardcodees localhost.\n"
-        "5. Datos demo REALISTAS coherentes con el dominio del cliente. NO Lorem Ipsum.\n"
-        "6. GENERA TODOS los archivos del manifiesto de arriba (son obligatorios) + "
-        "1 pagina/router CRUD por entidad. Cada archivo COMPLETO Y EJECUTABLE, max 300 lineas.\n"
+        "5. Datos demo REALISTAS y COHERENTES entre sí (si el dashboard dice '10 citas' "
+        "y '8 servicios', entonces DEBE haber barberos y clientes con datos, NO en 0). "
+        "Define los datos mock en `frontend/lib/mock.ts` y úsalos en TODAS las vistas. NO Lorem Ipsum.\n"
+        "6. REGLA CRÍTICA DE COMPONENTES: si un archivo IMPORTA un componente "
+        "(`import Card from '../components/Card'`, `@/components/X`, etc.) ENTONCES "
+        "DEBES generar ESE archivo con un componente REAL y con ESTILO Tailwind "
+        "(no lo dejes sin crear). Cada componente importado = un archivo generado, "
+        "bien diseñado (cards con sombra/rounded, tablas con headers, botones con color). "
+        "GENERA TODOS los archivos del manifiesto + 1 pagina/router CRUD por entidad. "
+        "Cada archivo COMPLETO Y EJECUTABLE.\n"
+        "5b. DISEÑO PROFESIONAL OBLIGATORIO en TODAS las páginas (no solo el dashboard): "
+        "layout con sidebar + header, tipografía jerarquizada, espaciado generoso, "
+        "tarjetas, tablas estilizadas, colores de marca. NUNCA HTML plano sin clases.\n"
         "7. NO uses react-router-dom NI react-helmet. App Router: para navegar usa "
         "`next/navigation` (useRouter, usePathname, useSearchParams) y `next/link`. "
         "NUNCA importes `next/router`. TODO archivo que use hooks o eventos "
@@ -473,6 +483,19 @@ async def generate_full_app(
     files, fill_report = _ensure_manifest_complete(files, stack_id, project_key)
     if fill_report:
         logger.info("manifest_backfilled", project=project_key, filled=fill_report)
+
+    # AGENTE DE DISEÑO (#11): audita el frontend contra los 7 principios UX/UI +
+    # responsive + accesibilidad y reescribe los archivos con diseño pobre. Sin
+    # límite de tiempo: la calidad visual manda (best-effort, no rompe el flujo).
+    try:
+        from services.agent_runtime_service.app.runtime.design_reviewer import (
+            review_and_fix_design,
+        )
+        files, design_report = await review_and_fix_design(files, vision, project_key)
+        if design_report:
+            logger.info("design_review", project=project_key, report=design_report)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("design_review_skipped", project=project_key, error=str(exc)[:160])
 
     data["files"] = files
     data["stack"] = stack_id
