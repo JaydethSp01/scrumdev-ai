@@ -1205,8 +1205,10 @@ async def run_build_gate(files: list[dict], stack: str, vision: str = "") -> tup
     for tier in bp.tiers:
         tier_files = buckets.get(tier.name, [])
         if tier.framework in ("nextjs", "static"):
+            # landing = stack estático (sin backend); su tier ES "nextjs" igual,
+            # así que detectamos por el STACK id, no por el framework del tier.
             res = await build_gate_frontend(tier_files, vision=vision,
-                                            is_landing=(tier.framework == "static"))
+                                            is_landing=("static" in (stack or "")))
             report["tiers"]["frontend"] = {
                 "ok": res["ok"], "fixes": res.get("fixes", []),
                 "skipped": res.get("skipped", False),
