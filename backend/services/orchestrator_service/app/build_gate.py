@@ -946,7 +946,7 @@ async def _visual_judge_and_fix(files_rel: list[dict], screenshot_b64: str,
 
 
 async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
-                              vision: str = "") -> dict:
+                              vision: str = "", is_landing: bool = False) -> dict:
     """Compila el frontend; auto-fix + retry + JUEZ VISUAL. Devuelve {ok, files, log, fixes}."""
     npm = _npm_path()
     if not npm:
@@ -959,7 +959,10 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     from services.orchestrator_service.app.deploy_validator import _dedup_parallel_routes
     _pre: list[str] = []
     files_rel = _dedup_parallel_routes(files_rel, _pre)
-    files_rel = _apply_app_shell(files_rel, _pre)  # shell determinista (sidebar+header+marca)
+    # El app-shell (sidebar) es para APPS con datos, NO para landings (que llevan
+    # hero+secciones). En stack estático se omite -> no se importa AppShell.
+    if not is_landing:
+        files_rel = _apply_app_shell(files_rel, _pre)  # shell determinista (sidebar+header+marca)
     files_rel = _fix_root_layout(files_rel, _pre)  # root layout html/body server
     files_rel = _fix_next_router(files_rel, _pre)   # App Router: next/router -> next/navigation
     files_rel = _ensure_use_client(files_rel, _pre)  # hooks de cliente -> "use client"
@@ -1202,7 +1205,8 @@ async def run_build_gate(files: list[dict], stack: str, vision: str = "") -> tup
     for tier in bp.tiers:
         tier_files = buckets.get(tier.name, [])
         if tier.framework in ("nextjs", "static"):
-            res = await build_gate_frontend(tier_files, vision=vision)
+            res = await build_gate_frontend(tier_files, vision=vision,
+                                            is_landing=(tier.framework == "static"))
             report["tiers"]["frontend"] = {
                 "ok": res["ok"], "fixes": res.get("fixes", []),
                 "skipped": res.get("skipped", False),
