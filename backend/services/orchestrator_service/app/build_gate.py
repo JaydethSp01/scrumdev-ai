@@ -778,7 +778,7 @@ async def run_build_gate(files: list[dict], stack: str) -> tuple[list[dict], dic
             report["tiers"]["frontend"] = {
                 "ok": res["ok"], "fixes": res.get("fixes", []),
                 "skipped": res.get("skipped", False),
-                "log": res.get("log", "")[-300:] if not res["ok"] else "",
+                "log": res.get("log", "")[-2500:] if not res["ok"] else "",
             }
             tier_files = res.get("files", tier_files)
         elif tier.framework == "fastapi":
