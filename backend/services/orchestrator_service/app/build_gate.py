@@ -603,30 +603,86 @@ def _harden_data_access(files_rel: list[dict], report: list[str]) -> list[dict]:
     return files_rel
 
 
-async def _runtime_smoke(tmp: str, npm: str, env: dict) -> dict:
-    """Levanta `next start` y abre la home en un navegador headless. Devuelve
-    {ok, reason, log}. Detecta pantalla en blanco / client-side exception que el
-    build NO ve. Si no hay navegador disponible, se salta (ok=True, skipped)."""
-    # buscar el chrome de playwright en las rutas posibles; si PLAYWRIGHT_BROWSERS_PATH
-    # está seteado, playwright lo resuelve solo (chrome=None -> launch() sin path).
-    chrome = None
+# cache de proceso: solo intentamos instalar chromium UNA vez (no en cada build)
+_CHROMIUM_PATH: str | None = None
+_CHROMIUM_TRIED = False
+
+
+def _glob_chromium(roots: list[str]) -> str | None:
+    """Busca el ejecutable de chromium en las rutas dadas. None si no está."""
     import glob
-    roots = [os.environ.get("PLAYWRIGHT_BROWSERS_PATH", ""),
-             os.path.expanduser("~/.cache/ms-playwright")]
     for root in roots:
         if not root:
             continue
         for pat in ("chromium-*/chrome-linux64/chrome", "chromium-*/chrome-linux/chrome",
-                    "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"):
+                    "chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"):
             hits = sorted(glob.glob(os.path.join(root, pat)))
             if hits:
-                chrome = hits[-1]; break
-        if chrome:
-            break
+                return hits[-1]
+    return None
+
+
+async def _ensure_chromium() -> str | None:
+    """Devuelve la ruta a un chromium usable, INSTALÁNDOLO on-demand si falta.
+
+    Robusto frente a los caprichos de la imagen (cache de capas de Docker, HOME
+    que cambia, PLAYWRIGHT_BROWSERS_PATH no heredado): si no encontramos el
+    browser en ninguna ruta conocida, lo instalamos a un dir escribible y
+    fijamos PLAYWRIGHT_BROWSERS_PATH para todo el proceso. Se hace UNA sola vez
+    (cache de módulo) para no penalizar cada build. Así el JUEZ VISUAL siempre
+    tiene navegador y nunca se salta silenciosamente."""
+    global _CHROMIUM_PATH, _CHROMIUM_TRIED
+    if _CHROMIUM_PATH:
+        return _CHROMIUM_PATH
+    roots = [
+        os.environ.get("PLAYWRIGHT_BROWSERS_PATH", ""),
+        "/opt/pw-browsers",
+        os.path.expanduser("~/.cache/ms-playwright"),
+        "/tmp/.cache/ms-playwright",
+        "/tmp/pw-browsers",
+    ]
+    found = _glob_chromium(roots)
+    if found:
+        _CHROMIUM_PATH = found
+        return found
+    if _CHROMIUM_TRIED:
+        return None  # ya intentamos instalar y falló; no reintentar cada build
+    _CHROMIUM_TRIED = True
+    # instalar a un dir escribible y persistente para la vida del contenedor
+    target = "/tmp/pw-browsers"
+    try:
+        os.makedirs(target, exist_ok=True)
+    except Exception:
+        target = os.path.expanduser("~/.cache/ms-playwright")
+    env = {**os.environ, "PLAYWRIGHT_BROWSERS_PATH": target}
+    import sys as _sys
+    logger.info("chromium_install_start", target=target)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            _sys.executable, "-m", "playwright", "install", "chromium",
+            env=env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+        _, err = await asyncio.wait_for(proc.communicate(), timeout=240)
+        if proc.returncode == 0:
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = target  # que pw lo resuelva solo
+            _CHROMIUM_PATH = _glob_chromium([target]) or "default"
+            logger.info("chromium_install_ok", path=_CHROMIUM_PATH)
+            return None if _CHROMIUM_PATH == "default" else _CHROMIUM_PATH
+        logger.warning("chromium_install_failed", err=(err or b"").decode("utf-8", "ignore")[-200:])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("chromium_install_error", error=str(exc)[:160])
+    return None
+
+
+async def _runtime_smoke(tmp: str, npm: str, env: dict) -> dict:
+    """Levanta `next start` y abre la home en un navegador headless. Devuelve
+    {ok, reason, log}. Detecta pantalla en blanco / client-side exception que el
+    build NO ve. Si no hay navegador disponible, lo instala on-demand."""
     try:
         import importlib; importlib.import_module("playwright.async_api")
     except Exception:
         return {"ok": True, "skipped": True, "reason": "playwright no disponible"}
+    # asegurar chromium (instala on-demand si falta) ANTES de lanzar
+    chrome = await _ensure_chromium()
 
     import asyncio as _aio
     port = "47711"
@@ -684,9 +740,17 @@ async def _visual_judge_and_fix(files_rel: list[dict], screenshot_b64: str,
     instr = "; ".join(verdict.get("instrucciones", [])[:6])
     probs = "; ".join(verdict.get("problemas", [])[:6])
     changed = False
+    # El screenshot es SOLO del home. Regenerar todas las páginas a ciegas con el
+    # veredicto del home es lo que rompía otras vistas ("arreglo una y sale peor").
+    # Acotamos al HOME + el layout que NO sea el root (el shell con sidebar). El
+    # nuevo diseño del home establece el sistema visual que las demás imitan.
+    HOME = {"frontend/app/page.tsx", "app/page.tsx"}
+    ROOT_LAYOUT = {"frontend/app/layout.tsx", "app/layout.tsx"}
     for f in files_rel:
         p = (f.get("path") or "").lstrip("/")
-        if not (p.endswith("page.tsx") or p.endswith("layout.tsx")):
+        is_home = p in HOME
+        is_shell_layout = p.endswith("layout.tsx") and p not in ROOT_LAYOUT
+        if not (is_home or is_shell_layout):
             continue
         orig = f.get("content") or ""
         prompt = (

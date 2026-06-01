@@ -15,22 +15,34 @@ from shared.observability import get_logger
 
 logger = get_logger(__name__)
 
-JUDGE_PROMPT = """Eres un director de diseño UX/UI exigente. Mira este screenshot
-de una app web recién generada y evalúala como si fueras a mostrarla a un cliente
-que paga. Califica DUREZA (0-100) contra estos criterios:
+JUDGE_PROMPT = """Eres un director de diseño UX/UI EXIGENTE de una agencia top. Mira
+este screenshot de una app web recién generada y evalúala como si decidieras si
+compite con Linear, Vercel o Stripe. No regales nota: un "está bien" NO basta, debe
+verse PROFESIONAL y TERMINADO. Califica con DUREZA (0-100):
 
-- Legibilidad: ¿el texto se lee bien? (contraste suficiente, NADA de gris sobre
-  negro ilegible, ni texto invisible). Esto es lo más importante.
-- Jerarquía visual: títulos, secciones y datos claramente diferenciados.
-- Layout y espaciado: no amontonado, no vacío; márgenes y padding correctos.
-- Navegación: si hay sidebar/menú, ¿tiene enlaces visibles (no vacío)?
-- Estética: se ve moderno y profesional (tarjetas, colores coherentes), NO un
-  HTML plano sin estilo.
-- Completitud: la pantalla muestra contenido real, no está casi vacía.
+- Legibilidad (eliminatorio): el texto se lee bien, contraste AA, nada de gris sobre
+  negro ni texto invisible. Si falla, score < 40.
+- Identidad de color: ¿hay una PALETA DE MARCA coherente (un color primario con
+  carácter)? Un diseño todo blanco/negro/gris sin ningún color parece un prototipo
+  SIN TERMINAR -> penaliza FUERTE (no más de 65).
+- Iconografía: ¿usa iconos vectoriales coherentes (lucide/SVG)? Si usa EMOJIS (✅⚠️📦)
+  como iconos de UI/estado, se ve amateur -> penaliza.
+- Jerarquía y layout: títulos/secciones/datos diferenciados; espaciado correcto; no
+  amontonado ni con grandes huecos vacíos. Una app de datos debería tener navegación
+  lateral (sidebar) o una barra superior rica, no un menú soso.
+- Estética: tarjetas con sombra/bordes redondeados, badges de estado con color,
+  tablas estilizadas. NO un HTML plano tipo documento.
+- Completitud y coherencia: contenido real, datos que cuadran, sin "© 2023" desfasado
+  ni placeholders.
 
-Responde SOLO JSON: {"score": <0-100>, "aprobado": <true si score>=75 y legible>,
-"problemas": ["..."], "instrucciones": ["cambios concretos de Tailwind/JSX para
-arreglarlo: colores, contraste, sidebar, layout..."]}"""
+Sé estricto: una pantalla legible pero PLANA y GENÉRICA (sin color de marca, con
+emojis, look de plantilla sin terminar) NO aprueba -> score 55-70. Solo aprueba
+(>=75) algo que enseñarías con orgullo a un cliente que paga.
+
+Responde SOLO JSON: {"score": <0-100>, "aprobado": <true si score>=75>,
+"problemas": ["lo que se ve mal, concreto"], "instrucciones": ["cambios concretos de
+Tailwind/JSX: definir paleta de marca, reemplazar emojis por iconos lucide, sidebar,
+badges de color, contraste, layout..."]}"""
 
 
 def _parse_json(raw: str) -> dict:

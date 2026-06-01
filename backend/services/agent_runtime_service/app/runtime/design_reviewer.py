@@ -33,8 +33,17 @@ DESIGN_PRINCIPLES = """PRINCIPIOS DE DISEÑO WEB (obligatorios):
   paleta coherente, tipografía jerarquizada. NUNCA HTML plano sin clases."""
 
 
+# El ROOT layout es estructural (<html><body>{children}</body></html>): NO es una
+# pantalla visual y NO debe tener rounded/shadow. Reescribirlo rompía el html/body
+# o lo dejaba vacío (el loop "lo arreglo y sale peor"). Se excluye del reviewer;
+# el build_gate ya garantiza su corrección con _fix_root_layout.
+_ROOT_LAYOUTS = {"frontend/app/layout.tsx", "app/layout.tsx"}
+
+
 def _is_ui_file(path: str) -> bool:
     p = path.lstrip("/")
+    if p in _ROOT_LAYOUTS:
+        return False
     return (
         p.startswith("frontend/app/") or p.startswith("frontend/components/")
         or p.startswith("app/") or p.startswith("components/")
