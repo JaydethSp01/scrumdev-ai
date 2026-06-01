@@ -106,6 +106,34 @@ _CLIENT_HOOKS = re.compile(
 )
 
 
+def _ensure_tsconfig_alias(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """Garantiza que tsconfig.json tenga el alias `@/* -> ./*` (+ baseUrl). Sin él
+    TODOS los imports `@/...` rompen el build ('Module not found'). El stack
+    estático a veces genera el tsconfig SIN paths -> falla el UI-kit y los propios
+    componentes. Lo añadimos sin pisar lo demás."""
+    import json as _json
+    fixed = 0
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        if not p.endswith("tsconfig.json"):
+            continue
+        try:
+            data = _json.loads(f.get("content") or "{}")
+        except Exception:
+            continue
+        co = data.setdefault("compilerOptions", {})
+        paths = co.get("paths") or {}
+        if co.get("baseUrl") != "." or "@/*" not in paths:
+            co["baseUrl"] = co.get("baseUrl") or "."
+            paths["@/*"] = ["./*"]
+            co["paths"] = paths
+            f["content"] = _json.dumps(data, indent=2)
+            fixed += 1
+    if fixed:
+        report.append("tsconfig: alias @/* -> ./* garantizado")
+    return files_rel
+
+
 def _normalize_css_imports(files_rel: list[dict], report: list[str]) -> list[dict]:
     """En el ROOT layout, `import '@/app/globals.css'` no siempre resuelve (el
     alias @/ puede faltar en el tsconfig del stack estático). Lo normalizamos a
@@ -988,6 +1016,7 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     from services.orchestrator_service.app.deploy_validator import _dedup_parallel_routes
     _pre: list[str] = []
     files_rel = _dedup_parallel_routes(files_rel, _pre)
+    files_rel = _ensure_tsconfig_alias(files_rel, _pre)  # @/* -> ./* (sin esto rompen todos los @/ imports)
     files_rel = _normalize_css_imports(files_rel, _pre)  # @/app/globals.css -> ./globals.css
     # El app-shell (sidebar) es para APPS con datos, NO para landings (que llevan
     # hero+secciones). En stack estático se omite -> no se importa AppShell.
