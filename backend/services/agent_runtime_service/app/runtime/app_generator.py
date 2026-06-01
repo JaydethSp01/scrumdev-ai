@@ -110,6 +110,60 @@ TODO bajo `frontend/`. Sin backend ni DB.
 - Paginas extra (Sobre nosotros/Contacto/Precios) SOLO si el cliente las menciona."""
 
 
+# ── BRIEFS DE DISEÑO (calidad agencia). Se elige según el stack: una app con
+# datos quiere app-shell con sidebar; un landing quiere hero + secciones. Usar
+# el brief equivocado = layout feo. Por eso es consciente del stack. ──────────
+_DESIGN_BRIEF_APP = (
+    "=================== BRIEF DE DISEÑO (calidad agencia, OBLIGATORIO) ===================\n"
+    "Construye una UI de PRODUCTO que compita con Linear/Vercel/Stripe. NUNCA HTML plano.\n"
+    "SISTEMA DE DISEÑO (aplícalo idéntico en TODAS las páginas, coherencia total):\n"
+    "• LAYOUT: app shell con SIDEBAR fijo (w-64) + área principal. El sidebar lista "
+    "TODAS las secciones con su icono lucide; resalta la activa (bg-brand/10 text-brand, "
+    "usePathname). Arriba un HEADER (h-16) con título de sección + acción primaria a la derecha.\n"
+    "• COLOR: define UNA paleta de marca coherente con el dominio (un color primario fuerte "
+    "+ neutrales). Fondo de la app gris muy claro (bg-neutral-50), tarjetas blancas. "
+    "CONTRASTE AA SIEMPRE: texto principal text-neutral-900, secundario text-neutral-500. "
+    "Soporta dark mode con `dark:` (dark:bg-neutral-950, dark:text-neutral-100). "
+    "PROHIBIDO texto gris claro sobre fondo oscuro (ilegible).\n"
+    "• TARJETAS: rounded-2xl, border border-neutral-200, bg-white, shadow-sm, p-5/p-6, "
+    "hover:shadow-md transition. Las métricas: label pequeño text-neutral-500 + número grande "
+    "text-3xl font-bold.\n"
+    "• TABLAS: thead con bg-neutral-50 y th text-left font-semibold text-neutral-500; "
+    "filas con border-t y hover:bg-neutral-50; badges de estado con color (verde/amarillo/rojo).\n"
+    "• TIPOGRAFÍA: títulos text-2xl/3xl font-bold tracking-tight; jerarquía clara; espaciado "
+    "generoso (space-y-6, gap-4/6). Iconos lucide-react en todo (no emojis).\n"
+    "• RESPONSIVE de verdad: grids con grid-cols-1 sm:grid-cols-2 lg:grid-cols-3/4; en móvil "
+    "el sidebar colapsa. Nada de anchos fijos que desborden.\n"
+    "• FEEDBACK: botones con estados hover/active; formularios con labels y validación; "
+    "confirmación antes de borrar; estados vacíos con mensaje amable (no pantallas en blanco).\n"
+    "El DASHBOARD de entrada debe verse impactante: fila de tarjetas-métrica + tabla/lista "
+    "principal con datos. Cada página de entidad: header + tabla CRUD estilizada + botón 'Nuevo'.\n"
+    "====================================================================================="
+)
+
+_DESIGN_BRIEF_LANDING = (
+    "=================== BRIEF DE DISEÑO (landing nivel agencia, OBLIGATORIO) ===================\n"
+    "Construye un SITIO DE MARKETING que compita con Stripe/Linear/Framer. NUNCA HTML plano, "
+    "NUNCA sidebar (eso es de apps, no de landings).\n"
+    "ESTRUCTURA (en este orden, full-width, secciones con py-20/py-24 y max-w-6xl mx-auto):\n"
+    "• NAVBAR sticky (top-0 z-50, backdrop-blur, border-b) con logo a la izquierda, links al "
+    "centro/derecha y un botón CTA primario. Colapsa a menú móvil.\n"
+    "• HERO impactante: titular text-5xl/6xl font-bold tracking-tight, subtítulo text-neutral-500 "
+    "text-lg, 2 botones (CTA primario sólido + secundario outline) y una imagen/mockup o gradiente "
+    "de marca. Centrado o split 2 columnas.\n"
+    "• FEATURES: grid grid-cols-1 md:grid-cols-3 de tarjetas con icono lucide en círculo de color, "
+    "título y descripción. rounded-2xl border shadow-sm hover:shadow-md.\n"
+    "• PRUEBA SOCIAL: testimonios (tarjetas con avatar + cita) y/o logos de clientes.\n"
+    "• PRECIOS (si aplica al dominio): 3 planes, el del medio resaltado (ring-2 ring-brand, badge).\n"
+    "• CTA final de ancho completo (fondo de marca) + FOOTER con columnas de links y redes.\n"
+    "SISTEMA: UNA paleta de marca coherente con el dominio (primario fuerte + neutrales), "
+    "CONTRASTE AA siempre (nada de gris claro sobre claro), tipografía con jerarquía marcada, "
+    "espaciado generoso, micro-interacciones (hover, transition), responsive real (mobile-first). "
+    "Imágenes: usa las del cliente si las hay; si no, Unsplash temáticas del dominio.\n"
+    "====================================================================================="
+)
+
+
 def _manifest_block(blueprint: dict) -> str:
     """Lista EXACTA de archivos obligatorios por tier (del blueprint del Stack Expert)."""
     lines = ["### Archivos OBLIGATORIOS por tier (paths EXACTOS, con su prefijo):"]
@@ -400,7 +454,9 @@ async def generate_full_app(
         entities=classification["entities"],
     )
     software_block = _build_software_block(classification)
-    stack_block = _STACK_STATIC if stack_id == "nextjs-static" else _STACK_FULLSTACK
+    is_landing = stack_id == "nextjs-static"
+    stack_block = _STACK_STATIC if is_landing else _STACK_FULLSTACK
+    design_brief = _DESIGN_BRIEF_LANDING if is_landing else _DESIGN_BRIEF_APP
     manifest_block = _manifest_block(blueprint)
     exemplars_block = _exemplars_block(exemplars)
 
@@ -424,31 +480,7 @@ async def generate_full_app(
         f"{exemplars_block}"
         f"{stack_block}\n\n"
         f"{manifest_block}\n\n"
-        "=================== BRIEF DE DISEÑO (calidad agencia, OBLIGATORIO) ===================\n"
-        "Construye una UI que compita con Linear/Vercel/Stripe. NUNCA HTML plano.\n"
-        "SISTEMA DE DISEÑO (aplícalo idéntico en TODAS las páginas, coherencia total):\n"
-        "• LAYOUT: app shell con SIDEBAR fijo (w-64) + área principal. El sidebar lista "
-        "TODAS las secciones con su icono lucide; resalta la activa (bg-brand/10 text-brand, "
-        "usePathname). Arriba un HEADER (h-16) con título de sección + acción primaria a la derecha.\n"
-        "• COLOR: define UNA paleta de marca coherente con el dominio (un color primario fuerte "
-        "+ neutrales). Fondo de la app gris muy claro (bg-neutral-50), tarjetas blancas. "
-        "CONTRASTE AA SIEMPRE: texto principal text-neutral-900, secundario text-neutral-500. "
-        "Soporta dark mode con `dark:` (dark:bg-neutral-950, dark:text-neutral-100). "
-        "PROHIBIDO texto gris claro sobre fondo oscuro (ilegible).\n"
-        "• TARJETAS: rounded-2xl, border border-neutral-200, bg-white, shadow-sm, p-5/p-6, "
-        "hover:shadow-md transition. Las métricas: label pequeño text-neutral-500 + número grande "
-        "text-3xl font-bold.\n"
-        "• TABLAS: thead con bg-neutral-50 y th text-left font-semibold text-neutral-500; "
-        "filas con border-t y hover:bg-neutral-50; badges de estado con color (verde/amarillo/rojo).\n"
-        "• TIPOGRAFÍA: títulos text-2xl/3xl font-bold tracking-tight; jerarquía clara; espaciado "
-        "generoso (space-y-6, gap-4/6). Iconos lucide-react en todo (no emojis).\n"
-        "• RESPONSIVE de verdad: grids con grid-cols-1 sm:grid-cols-2 lg:grid-cols-3/4; en móvil "
-        "el sidebar colapsa. Nada de anchos fijos que desborden.\n"
-        "• FEEDBACK: botones con estados hover/active; formularios con labels y validación; "
-        "confirmación antes de borrar; estados vacíos con mensaje amable (no pantallas en blanco).\n"
-        "El DASHBOARD de entrada debe verse impactante: fila de tarjetas-métrica + tabla/lista "
-        "principal con datos. Cada página de entidad: header + tabla CRUD estilizada + botón 'Nuevo'.\n"
-        "=====================================================================================\n\n"
+        f"{design_brief}\n\n"
         "**REGLAS TÉCNICAS OBLIGATORIAS (romperlas = build roto):**\n"
         "1. DATOS: cada página arranca CON datos mock inline visibles (useState con array/objeto "
         "REAL de 4-8 registros del dominio). NUNCA useState(null). Define el mock en "
