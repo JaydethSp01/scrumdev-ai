@@ -1122,8 +1122,11 @@ def _reformat_py(code: str) -> str:
         # si veníamos en un bloque-de-una-línea y llega algo top-level, cerrar
         if in_oneline_block and is_toplevel(s):
             indent = max(0, indent - 1); in_oneline_block = False
-        # `class X: campo` -> separar cabecera y primer miembro
-        m = re.match(r"^((?:async\s+)?(?:class|def)\s.+?:)\s*(\S.*)$", s)
+        # `HEADER: cuerpo` en una línea (class/def PERO TAMBIÉN if/for/while/with/
+        # try/except) -> separar cabecera y cuerpo en líneas indentadas. Sin esto,
+        # `def f(): x; try: yield; finally: close()` queda con indent inválido.
+        m = (re.match(r"^((?:async\s+)?(?:class|def|if|elif|for|while|with|except)\b[^:]*:)\s*(\S.*)$", s)
+             or re.match(r"^((?:else|try|finally)\s*:)\s*(\S.*)$", s))
         if m and not m.group(2).startswith(("#",)):
             out.append("    " * indent + m.group(1))
             indent += 1
