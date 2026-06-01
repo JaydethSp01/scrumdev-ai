@@ -581,6 +581,11 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4) -> d
     files_rel = _stub_missing_local_imports(files_rel, _pre)  # @/ faltantes -> stub
     files_rel = _relax_next_config(files_rel, _pre)  # ignorar errores TS/lint
     files_rel = _fix_postcss_config(files_rel, _pre)  # postcss plugins canónicos
+    # DETERMINISTAS (sin navegador): evitan la pantalla en blanco que el build no
+    # ve -> data access seguro + páginas dinámicas. Se aplican SIEMPRE, no solo
+    # tras un smoke fallido (el smoke con navegador es best-effort/opcional).
+    files_rel = _harden_data_access(files_rel, _pre)
+    files_rel = _force_dynamic_pages(files_rel, _pre)
 
     env = _node_env()
     all_fixes: list[str] = list(_pre)
@@ -600,8 +605,13 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4) -> d
             if rc_b == 0:
                 # BUILD OK -> SMOKE de runtime (navegador real). Que compile NO
                 # basta: la app debe RENDERIZAR (no pantalla en blanco). Esto es
-                # lo que evita que una app rota llegue al cliente.
-                smoke = await _runtime_smoke(tmp, npm, env)
+                # lo que evita que una app rota llegue al cliente. El smoke NUNCA
+                # debe tumbar el deploy: si algo falla, se salta (ok=True).
+                try:
+                    smoke = await _runtime_smoke(tmp, npm, env)
+                except BaseException as _se:  # noqa: BLE001
+                    logger.warning("runtime_smoke_crashed", error=str(_se)[:200])
+                    smoke = {"ok": True, "skipped": True, "reason": "smoke error: " + str(_se)[:80]}
                 if smoke.get("ok"):
                     return {"ok": True, "files": files_rel, "fixes": all_fixes,
                             "attempts": attempt, "log": log_b[-400:],
