@@ -399,11 +399,38 @@ def _discover_routes(files_rel: list[dict]) -> list[tuple[str, str]]:
         if href in seen:
             continue
         seen.add(href)
-        label = "Inicio" if href == "/" else segs[-1].replace("-", " ").replace("_", " ").title()
+        label = "Inicio" if href == "/" else _nav_label(segs[-1])
         routes.append((href, label))
     # Inicio primero, luego alfabético
     routes.sort(key=lambda r: (r[0] != "/", r[0]))
-    return routes[:12]
+    return routes[:9]
+
+
+# Etiquetas bonitas para slugs de entidad comunes (acentos + plural) -> el slug
+# pierde acentos al generarse (categoría->categor-a), esto los recupera.
+_NAV_LABELS = {
+    "producto": "Productos", "productos": "Productos",
+    "categor-a": "Categorías", "categoria": "Categorías", "categorias": "Categorías",
+    "proveedor": "Proveedores", "proveedores": "Proveedores",
+    "cliente": "Clientes", "clientes": "Clientes",
+    "pedido": "Pedidos", "pedidos": "Pedidos", "venta": "Ventas", "ventas": "Ventas",
+    "usuario": "Usuarios", "usuarios": "Usuarios", "stock": "Stock",
+    "alerta": "Alertas", "alertas": "Alertas", "talla": "Tallas",
+    "paciente": "Pacientes", "cita": "Citas", "citas": "Citas",
+    "profesional": "Profesionales", "servicio": "Servicios",
+    "lead": "Leads", "oportunidad": "Oportunidades", "contacto": "Contactos",
+    "factura": "Facturas", "pago": "Pagos", "gasto": "Gastos",
+    "empleado": "Empleados", "reserva": "Reservas", "evento": "Eventos",
+    "dashboard": "Dashboard", "reporte": "Reportes", "reportes": "Reportes",
+    "configuracion": "Configuración", "ajustes": "Ajustes",
+}
+
+
+def _nav_label(slug: str) -> str:
+    s = slug.lower()
+    if s in _NAV_LABELS:
+        return _NAV_LABELS[s]
+    return slug.replace("-", " ").replace("_", " ").strip().title()
 
 
 def _styled_stub(base: str, routes: list[tuple[str, str]] | None = None) -> str:
