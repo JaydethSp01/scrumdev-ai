@@ -730,10 +730,103 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4) -> d
             "fixes": all_fixes, "attempts": max_attempts}
 
 
+def _fix_python_oneliners(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """La IA a veces genera Python TODO en una línea con ';' (incluyendo def/
+    class/@decorator/if-else), que es sintaxis INVÁLIDA. Reformatea: separa por
+    ';' a nivel superior y re-indenta los bloques. Solo actúa si el archivo NO
+    compila tal cual (para no romper código ya válido)."""
+    import ast as _ast
+    fixed = 0
+    for f in files_rel:
+        rel = (f.get("path") or "").lstrip("/")
+        if not rel.endswith(".py"):
+            continue
+        c = f.get("content") or ""
+        try:
+            _ast.parse(c)
+            continue  # ya es válido, no tocar
+        except SyntaxError:
+            pass
+        if ";" not in c:
+            continue
+        new = _reformat_py(c)
+        try:
+            _ast.parse(new)
+            f["content"] = new
+            fixed += 1
+            continue
+        except SyntaxError:
+            pass
+    if fixed:
+        report.append(f"python one-liner reformateado en {fixed} archivo(s)")
+    return files_rel
+
+
+def _reformat_py(code: str) -> str:
+    """Separa sentencias unidas por ';' y re-indenta bloques. Maneja el caso de
+    `class X: campo; campo2` (clase de una línea con varios miembros) tratando
+    `:` como apertura de bloque y manteniendo los ';' siguientes indentados
+    hasta una sentencia top-level (import/def/class/asignación a módulo)."""
+    raw = code.replace("\r", "")
+    # tokenizar en piezas separadas por ; y \n a profundidad 0 (respeta strings/paréntesis)
+    pieces: list[tuple[str, str]] = []  # (texto, separador que la siguió)
+    buf, depth, instr, i = "", 0, None, 0
+    while i < len(raw):
+        ch = raw[i]
+        if instr:
+            buf += ch
+            if ch == instr and raw[i-1] != "\\":
+                instr = None
+        elif ch in "\"'":
+            instr = ch; buf += ch
+        elif ch in "([{":
+            depth += 1; buf += ch
+        elif ch in ")]}":
+            depth -= 1; buf += ch
+        elif ch in ";\n" and depth == 0:
+            if buf.strip():
+                pieces.append((buf.strip(), ch))
+            buf = ""
+        else:
+            buf += ch
+        i += 1
+    if buf.strip():
+        pieces.append((buf.strip(), "\n"))
+
+    out: list[str] = []
+    indent = 0
+    in_oneline_block = False  # dentro de `class X: a; b; c`
+    def is_toplevel(s: str) -> bool:
+        return s.startswith(("import ", "from ", "def ", "class ", "@", "async def "))
+    for text, sep in pieces:
+        s = text.strip()
+        if not s:
+            continue
+        if s.startswith(("elif ", "else", "except", "finally")) and indent > 0:
+            indent -= 1; in_oneline_block = False
+        # si veníamos en un bloque-de-una-línea y llega algo top-level, cerrar
+        if in_oneline_block and is_toplevel(s):
+            indent = max(0, indent - 1); in_oneline_block = False
+        # `class X: campo` -> separar cabecera y primer miembro
+        m = re.match(r"^((?:async\s+)?(?:class|def)\s.+?:)\s*(\S.*)$", s)
+        if m and not m.group(2).startswith(("#",)):
+            out.append("    " * indent + m.group(1))
+            indent += 1
+            out.append("    " * indent + m.group(2))
+            in_oneline_block = True
+            continue
+        out.append("    " * indent + s)
+        if s.endswith(":") and not s.startswith("@"):
+            indent += 1; in_oneline_block = False
+    return "\n".join(out) + "\n"
+
+
 def build_gate_backend(files_rel: list[dict]) -> dict:
     """Valida sintaxis de todos los .py + que main.py exponga `app`."""
-    tmp = tempfile.mkdtemp(prefix="scrumdev_be_")
     errors: list[str] = []
+    # auto-fix de Python en una línea ANTES de validar
+    _fix_python_oneliners(files_rel, errors if False else [])
+    tmp = tempfile.mkdtemp(prefix="scrumdev_be_")
     try:
         _write_tree(tmp, files_rel)
         for f in files_rel:
