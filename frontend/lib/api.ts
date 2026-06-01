@@ -634,6 +634,40 @@ export async function apiGetBacklog(projectKey: string): Promise<BacklogItem[]> 
   return data.items || [];
 }
 
+// ===== Galeria de plantillas 1A =====
+export type TemplateCard = {
+  id: string;
+  name: string;
+  sector: string;
+  sector_label: string;
+  software_type: string;
+  stack: string;
+  description: string;
+  entities: string[];
+  brand_color: string;
+  accent?: string;
+  tags: string[];
+  has_files: boolean;
+  preview_url: string;
+  match_score: number;
+};
+export type TemplatesResponse = {
+  project_key: string;
+  templates: TemplateCard[];
+  from_scratch: { label: string; description: string; eta_minutes: string };
+  template_eta_minutes: string;
+};
+
+export async function apiGetTemplates(
+  projectKey: string,
+  topK = 6
+): Promise<TemplatesResponse> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/templates?top_k=${topK}`
+  );
+  return jsonOrThrow<TemplatesResponse>(res);
+}
+
 // ===== Creacion inteligente: industria / intake / doc =====
 export type Industry = { id: string; label: string; icon: string };
 export type IntakeField = {

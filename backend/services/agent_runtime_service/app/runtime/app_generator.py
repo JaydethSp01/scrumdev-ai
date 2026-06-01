@@ -13,6 +13,7 @@ Stack OBLIGATORIO:
 from __future__ import annotations
 
 import json
+import os
 import re
 
 from services.agent_runtime_service.app.runtime.claude_code_runtime import run_claude_code
@@ -653,12 +654,16 @@ async def generate_full_app(
 
     # UI-KIT 1A: inyectar componentes curados (Claude los compone, no inventa) +
     # garantizar el color de marca del sector en tailwind. Palanca de consistencia.
-    kit_report: list[str] = []
-    files = _inject_ui_kit(files, kit_report)
-    brand_color = _pick_brand_color(classification, vision)
-    files = _ensure_brand_color(files, brand_color, kit_report)
-    if kit_report:
-        logger.info("ui_kit_applied", project=project_key, report=kit_report, brand=brand_color)
+    # Best-effort: un fallo aquí NUNCA debe tumbar la generación.
+    try:
+        kit_report: list[str] = []
+        files = _inject_ui_kit(files, kit_report)
+        brand_color = _pick_brand_color(classification, vision)
+        files = _ensure_brand_color(files, brand_color, kit_report)
+        if kit_report:
+            logger.info("ui_kit_applied", project=project_key, report=kit_report, brand=brand_color)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ui_kit_skipped", project=project_key, error=str(exc)[:160])
 
     # GATE DE CALIDAD (#1): mide CADA página y REGENERA con Claude las pobres
     # (las de 634 chars / useState(null) / sin datos que salían en blanco) hasta
