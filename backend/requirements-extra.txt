@@ -18,3 +18,12 @@ packaging
 regex
 filelock
 fsspec
+# Claude Code SDK (combo EXACTO que funciona; el CLI npm @anthropic-ai/claude-code
+# lo spawnea con CLAUDE_CODE_OAUTH_TOKEN headless -> genera con tu plan, sin API).
+# mcp/starlette/fastapi/anyio PINEADOS: el sdk subía starlette y rompía el boot
+# (Router.__init__ got on_startup). Se instala al final -> gana sobre el lock.
+claude-agent-sdk==0.1.81
+mcp==1.27.1
+fastapi==0.115.14
+starlette==0.46.2
+anyio==4.13.0
