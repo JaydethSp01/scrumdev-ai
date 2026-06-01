@@ -607,14 +607,22 @@ async def _runtime_smoke(tmp: str, npm: str, env: dict) -> dict:
     """Levanta `next start` y abre la home en un navegador headless. Devuelve
     {ok, reason, log}. Detecta pantalla en blanco / client-side exception que el
     build NO ve. Si no hay navegador disponible, se salta (ok=True, skipped)."""
-    # buscar el chrome de playwright; si no, dejar que playwright resuelva el suyo
+    # buscar el chrome de playwright en las rutas posibles; si PLAYWRIGHT_BROWSERS_PATH
+    # está seteado, playwright lo resuelve solo (chrome=None -> launch() sin path).
     chrome = None
     import glob
-    for pat in ("chromium-*/chrome-linux64/chrome", "chromium-*/chrome-linux/chrome",
-                "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"):
-        hits = sorted(glob.glob(os.path.expanduser(f"~/.cache/ms-playwright/{pat}")))
-        if hits:
-            chrome = hits[-1]; break
+    roots = [os.environ.get("PLAYWRIGHT_BROWSERS_PATH", ""),
+             os.path.expanduser("~/.cache/ms-playwright")]
+    for root in roots:
+        if not root:
+            continue
+        for pat in ("chromium-*/chrome-linux64/chrome", "chromium-*/chrome-linux/chrome",
+                    "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"):
+            hits = sorted(glob.glob(os.path.join(root, pat)))
+            if hits:
+                chrome = hits[-1]; break
+        if chrome:
+            break
     try:
         import importlib; importlib.import_module("playwright.async_api")
     except Exception:
