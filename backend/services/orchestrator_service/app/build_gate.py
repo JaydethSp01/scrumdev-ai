@@ -336,10 +336,9 @@ def _styled_stub(base: str) -> str:
             "  const title = props?.title ?? props?.label ?? '';\n"
             "  const value = props?.value ?? props?.count;\n"
             "  return (\n"
-            "    <div className=\"rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm \"\n"
-            "      + \"hover:shadow-md transition dark:border-neutral-800 dark:bg-neutral-900\">\n"
-            "      {title && <p className=\"text-sm font-medium text-neutral-500\">{title}</p>}\n"
-            "      {value !== undefined && <p className=\"mt-1 text-3xl font-bold tracking-tight\">{value}</p>}\n"
+            "    <div className=\"rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm hover:shadow-md transition dark:border-neutral-800 dark:bg-neutral-900\">\n"
+            "      {title ? <p className=\"text-sm font-medium text-neutral-500\">{title}</p> : null}\n"
+            "      {value !== undefined ? <p className=\"mt-1 text-3xl font-bold tracking-tight\">{value}</p> : null}\n"
             "      {props?.children}\n"
             "    </div>\n  );\n}\n"
         )
@@ -351,9 +350,9 @@ def _styled_stub(base: str) -> str:
             "  return (\n"
             "    <div className=\"overflow-x-auto rounded-2xl border border-neutral-200 dark:border-neutral-800\">\n"
             "      <table className=\"w-full text-sm\">\n"
-            "        {cols.length > 0 && <thead className=\"bg-neutral-50 dark:bg-neutral-900\"><tr>\n"
-            "          {cols.map((c: any, i: number) => <th key={i} className=\"px-4 py-3 text-left font-semibold text-neutral-600\">{typeof c === 'string' ? c : c?.label ?? c?.header}</th>)}\n"
-            "        </tr></thead>}\n"
+            "        {cols.length > 0 ? <thead className=\"bg-neutral-50 dark:bg-neutral-900\"><tr>\n"
+            "          {cols.map((c: any, i: number) => <th key={i} className=\"px-4 py-3 text-left font-semibold text-neutral-600\">{typeof c === 'string' ? c : (c?.label ?? c?.header)}</th>)}\n"
+            "        </tr></thead> : null}\n"
             "        <tbody>\n"
             "          {data.map((row: any, i: number) => (\n"
             "            <tr key={i} className=\"border-t border-neutral-100 dark:border-neutral-800\">\n"
@@ -368,8 +367,7 @@ def _styled_stub(base: str) -> str:
         body = (
             "export default function Stub(props: any) {\n"
             "  return (\n"
-            "    <aside className=\"w-60 shrink-0 border-r border-neutral-200 bg-white p-4 \"\n"
-            "      + \"dark:border-neutral-800 dark:bg-neutral-900 min-h-screen\">\n"
+            "    <aside className=\"w-60 shrink-0 border-r border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900 min-h-screen\">\n"
             "      <div className=\"font-bold text-lg mb-6\">Menú</div>\n"
             "      <nav className=\"space-y-1 text-sm text-neutral-600 dark:text-neutral-300\">{props?.children}</nav>\n"
             "    </aside>\n  );\n}\n"
@@ -378,8 +376,7 @@ def _styled_stub(base: str) -> str:
         body = (
             "export default function Stub(props: any) {\n"
             "  return (\n"
-            "    <header className=\"flex items-center justify-between border-b border-neutral-200 \"\n"
-            "      + \"bg-white px-6 py-3 dark:border-neutral-800 dark:bg-neutral-900\">\n"
+            "    <header className=\"flex items-center justify-between border-b border-neutral-200 bg-white px-6 py-3 dark:border-neutral-800 dark:bg-neutral-900\">\n"
             "      <div className=\"font-semibold\">{props?.title ?? 'App'}</div>\n"
             "      <div className=\"flex items-center gap-3\">{props?.children}</div>\n"
             "    </header>\n  );\n}\n"
@@ -387,11 +384,34 @@ def _styled_stub(base: str) -> str:
     elif "button" in name:
         body = (
             "export default function Stub(props: any) {\n"
+            "  const cls = props?.className ?? 'inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition';\n"
             "  return (\n"
-            "    <button onClick={props?.onClick} className={props?.className ?? \"inline-flex items-center \"\n"
-            "      + \"gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition\"}>\n"
+            "    <button onClick={props?.onClick} className={cls}>\n"
             "      {props?.children ?? props?.label ?? 'Acción'}\n"
             "    </button>\n  );\n}\n"
+        )
+    elif "form" in name:
+        body = (
+            "export default function Stub(props: any) {\n"
+            "  return (\n"
+            "    <form onSubmit={props?.onSubmit} className=\"space-y-4 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900\">\n"
+            "      {props?.children}\n"
+            "      <p className=\"text-sm text-neutral-500\">Formulario</p>\n"
+            "    </form>\n  );\n}\n"
+        )
+    elif "list" in name:
+        body = (
+            "export default function Stub(props: any) {\n"
+            "  const items = props?.items ?? props?.data ?? [];\n"
+            "  return (\n"
+            "    <div className=\"divide-y divide-neutral-100 rounded-2xl border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800\">\n"
+            "      {items.length === 0 ? <p className=\"p-4 text-sm text-neutral-500\">Sin registros.</p> : null}\n"
+            "      {items.map((it: any, i: number) => (\n"
+            "        <div key={i} className=\"flex items-center justify-between px-4 py-3\">\n"
+            "          <span>{it?.name ?? it?.title ?? it?.nombre ?? JSON.stringify(it).slice(0,60)}</span>\n"
+            "        </div>))}\n"
+            "      {props?.children}\n"
+            "    </div>\n  );\n}\n"
         )
     else:
         body = (
@@ -399,7 +419,7 @@ def _styled_stub(base: str) -> str:
             "  const label = props?.title ?? props?.label ?? null;\n"
             "  return (\n"
             "    <div className=\"rounded-xl border border-neutral-200 p-4 dark:border-neutral-800\">\n"
-            "      {label && <div className=\"font-medium mb-1\">{label}</div>}{props?.children}\n"
+            "      {label ? <div className=\"font-medium mb-1\">{label}</div> : null}{props?.children}\n"
             "    </div>\n  );\n}\n"
         )
     return head + body
