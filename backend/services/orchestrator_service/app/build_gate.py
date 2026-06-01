@@ -106,6 +106,66 @@ _CLIENT_HOOKS = re.compile(
 )
 
 
+def _apply_app_shell(files_rel: list[dict], report: list[str], title: str = "") -> list[dict]:
+    """Si el proyecto trae el UI-kit (AppShell), reescribe el ROOT layout para que
+    envuelva TODA página en <AppShell> con la navegación auto-derivada de las rutas.
+
+    Es la garantía de consistencia: aunque la IA (o el fallback OpenAI) genere
+    páginas planas, TODAS quedan dentro del app-shell (sidebar fijo con enlaces +
+    header + color de marca). 'Inyectar el kit' no basta si las páginas no lo usan;
+    esto lo USA de forma determinista. Solo aplica a apps con datos (no landings)."""
+    paths = {(f.get("path") or "").lstrip("/") for f in files_rel}
+    has_shell = any(p.endswith("components/ui/AppShell.tsx") for p in paths)
+    if not has_shell:
+        return files_rel
+    # localizar root layout (frontend/app/layout.tsx o app/layout.tsx)
+    layout = next((f for f in files_rel
+                   if (f.get("path") or "").lstrip("/") in
+                   ("frontend/app/layout.tsx", "app/layout.tsx")), None)
+    if not layout:
+        return files_rel
+    routes = _discover_routes(files_rel)
+    if not routes:
+        routes = [("/", "Inicio")]
+    nav_js = "[" + ", ".join('{ href: "%s", label: "%s" }' % (h, l) for h, l in routes) + "]"
+    # título: lo dado, o derivado del primer <h1>/title del home, o genérico
+    t = (title or _guess_app_title(files_rel) or "Panel").replace('"', "'")
+    new = (
+        'import "./globals.css";\n'
+        'import { AppShell } from "@/components/ui/AppShell";\n\n'
+        f'const NAV = {nav_js};\n\n'
+        f'export const metadata = {{ title: "{t}", description: "Generado con ScrumDev AI" }};\n\n'
+        "export default function RootLayout({ children }: { children: React.ReactNode }) {\n"
+        "  return (\n"
+        '    <html lang="es">\n'
+        "      <body>\n"
+        f'        <AppShell items={{NAV}} title="{t}">{{children}}</AppShell>\n'
+        "      </body>\n"
+        "    </html>\n"
+        "  );\n}\n"
+    )
+    if layout.get("content") != new:
+        layout["content"] = new
+        report.append(f"app-shell aplicado al layout ({len(routes)} secciones, '{t}')")
+    return files_rel
+
+
+def _guess_app_title(files_rel: list[dict]) -> str:
+    """Adivina un título de app desde el home (metadata.title o primer <h1>)."""
+    home = next((f for f in files_rel if (f.get("path") or "").lstrip("/") in
+                 ("frontend/app/page.tsx", "app/page.tsx")), None)
+    if not home:
+        return ""
+    c = home.get("content") or ""
+    m = re.search(r"title:\s*['\"]([^'\"]{2,40})['\"]", c)
+    if m:
+        return m.group(1).strip()
+    m = re.search(r"<h1[^>]*>\s*([^<{][^<]{1,38})</h1>", c)
+    if m:
+        return m.group(1).strip()
+    return ""
+
+
 def _fix_root_layout(files_rel: list[dict], report: list[str]) -> list[dict]:
     """El root layout (app/layout.tsx) DEBE: (1) ser server component (sin
     'use client'), (2) renderizar <html><body>. Si la IA lo generó como client
@@ -872,6 +932,7 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     from services.orchestrator_service.app.deploy_validator import _dedup_parallel_routes
     _pre: list[str] = []
     files_rel = _dedup_parallel_routes(files_rel, _pre)
+    files_rel = _apply_app_shell(files_rel, _pre)  # shell determinista (sidebar+header+marca)
     files_rel = _fix_root_layout(files_rel, _pre)  # root layout html/body server
     files_rel = _fix_next_router(files_rel, _pre)   # App Router: next/router -> next/navigation
     files_rel = _ensure_use_client(files_rel, _pre)  # hooks de cliente -> "use client"
