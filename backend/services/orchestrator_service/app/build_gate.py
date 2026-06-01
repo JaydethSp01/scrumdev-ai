@@ -635,12 +635,16 @@ async def _runtime_smoke(tmp: str, npm: str, env: dict) -> dict:
                 br = await pw.chromium.launch(**launch_kw)
             except Exception:
                 br = await pw.chromium.launch()  # fallback al browser propio de pw
-            pg = await br.new_page()
+            pg = await br.new_page(viewport={"width": 1280, "height": 800})
             pg.on("pageerror", lambda e: errs.append(str(e)[:160]))
+            shot_b64 = None
             try:
                 await pg.goto(f"http://localhost:{port}/", wait_until="domcontentloaded", timeout=30000)
                 await pg.wait_for_timeout(6000)
                 text = (await pg.locator("body").inner_text()).strip()
+                import base64 as _b64
+                png = await pg.screenshot(full_page=False)
+                shot_b64 = _b64.b64encode(png).decode()
             except Exception as e:
                 text = ""; errs.append("goto:" + str(e)[:120])
             await br.close()
@@ -648,14 +652,61 @@ async def _runtime_smoke(tmp: str, npm: str, env: dict) -> dict:
         ok = (len(text) > 15) and (not app_err)
         return {"ok": ok, "skipped": False,
                 "reason": ("render ok" if ok else "pantalla en blanco / client-side error"),
-                "log": (text[:200] + " || " + " | ".join(errs[:4]))}
+                "log": (text[:200] + " || " + " | ".join(errs[:4])),
+                "screenshot": shot_b64}
     finally:
         try: proc.terminate()
         except Exception: pass
 
 
-async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4) -> dict:
-    """Compila el frontend; auto-fix + retry. Devuelve {ok, files, log, fixes}."""
+async def _visual_judge_and_fix(files_rel: list[dict], screenshot_b64: str,
+                                vision: str, all_fixes: list[str]) -> tuple[list[dict], bool]:
+    """Juez VISUAL: Claude ve el screenshot. Si reprueba, regenera los page.tsx
+    con las instrucciones de diseño. Devuelve (files, cambio_hecho)."""
+    try:
+        from services.orchestrator_service.app.design_judge import judge_screenshot
+        from services.agent_runtime_service.app.runtime.claude_code_runtime import run_claude_code
+    except Exception:
+        return files_rel, False
+    verdict = await judge_screenshot(screenshot_b64, vision)
+    score = verdict.get("score")
+    all_fixes.append(f"juez visual: score={score} aprobado={verdict.get('aprobado')}")
+    if verdict.get("aprobado") or not verdict.get("instrucciones"):
+        return files_rel, False
+    instr = "; ".join(verdict.get("instrucciones", [])[:6])
+    probs = "; ".join(verdict.get("problemas", [])[:6])
+    changed = False
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        if not (p.endswith("page.tsx") or p.endswith("layout.tsx")):
+            continue
+        orig = f.get("content") or ""
+        prompt = (
+            f"Eres diseñador UX/UI senior. Un juez visual reprobó esta pantalla "
+            f"(dominio: {vision[:150]}).\nPROBLEMAS: {probs}\nARREGLA: {instr}\n\n"
+            "Reescribe el archivo mejorando SOLO el diseño (Tailwind): contraste "
+            "legible (texto oscuro sobre claro o claro sobre oscuro, nunca gris "
+            "ilegible), jerarquía, tarjetas con rounded/shadow, sidebar con enlaces "
+            "si aplica, layout responsive. Conserva la lógica (imports/hooks/datos). "
+            f"Devuelve SOLO el código de {p}, sin ``` ni texto.\n\nACTUAL:\n{orig[:3500]}"
+        )
+        try:
+            new = await run_claude_code(prompt, max_turns=1, kind="ui")
+            new = re.sub(r"^```[a-zA-Z]*\n", "", (new or "").strip())
+            new = re.sub(r"\n```$", "", new)
+            if new and "export default" in new and len(new) > 120:
+                f["content"] = new
+                changed = True
+        except Exception:
+            pass
+    if changed:
+        all_fixes.append("UI regenerada por feedback visual")
+    return files_rel, changed
+
+
+async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
+                              vision: str = "") -> dict:
+    """Compila el frontend; auto-fix + retry + JUEZ VISUAL. Devuelve {ok, files, log, fixes}."""
     npm = _npm_path()
     if not npm:
         # sin node disponible: no podemos compilar -> pasar con warning (no bloquear)
@@ -706,9 +757,19 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4) -> d
                     logger.warning("runtime_smoke_crashed", error=str(_se)[:200])
                     smoke = {"ok": True, "skipped": True, "reason": "smoke error: " + str(_se)[:80]}
                 if smoke.get("ok"):
+                    # JUEZ VISUAL: Claude mira el screenshot. Si está feo y quedan
+                    # intentos, regenera la UI con el feedback y vuelve a buildear.
+                    shot = smoke.get("screenshot")
+                    if shot and vision and attempt < max_attempts:
+                        files_rel, changed = await _visual_judge_and_fix(
+                            files_rel, shot, vision, all_fixes)
+                        if changed:
+                            logger.info("visual_judge_regen", attempt=attempt)
+                            continue  # rebuild con la UI mejorada
                     return {"ok": True, "files": files_rel, "fixes": all_fixes,
                             "attempts": attempt, "log": log_b[-400:],
-                            "smoke": smoke.get("reason")}
+                            "smoke": smoke.get("reason"),
+                            "screenshot": shot}
                 # render falló: blindar accesos a datos y reintentar
                 logger.warning("runtime_smoke_failed", attempt=attempt, detail=smoke.get("log"))
                 if attempt < max_attempts:
@@ -860,7 +921,7 @@ def build_gate_backend(files_rel: list[dict]) -> dict:
     return {"ok": not errors, "errors": errors}
 
 
-async def run_build_gate(files: list[dict], stack: str) -> tuple[list[dict], dict]:
+async def run_build_gate(files: list[dict], stack: str, vision: str = "") -> tuple[list[dict], dict]:
     """Corre el gate por tier y devuelve (files_corregidos_full, report).
 
     Los fixes del frontend se re-prefijan y se mergean de vuelta al set completo.
@@ -875,7 +936,7 @@ async def run_build_gate(files: list[dict], stack: str) -> tuple[list[dict], dic
     for tier in bp.tiers:
         tier_files = buckets.get(tier.name, [])
         if tier.framework in ("nextjs", "static"):
-            res = await build_gate_frontend(tier_files)
+            res = await build_gate_frontend(tier_files, vision=vision)
             report["tiers"]["frontend"] = {
                 "ok": res["ok"], "fixes": res.get("fixes", []),
                 "skipped": res.get("skipped", False),

@@ -2720,9 +2720,19 @@ async def deploy_project(project_key: str, req: DeployRequest) -> dict:
         if backfilled:
             logger.info("deploy_manifest_backfilled", project=project_key, filled=backfilled)
 
-        # Build gate local: compila cada tier; auto-fix + retry. Si falla, NO se
-        # despliega (el usuario no quiere deploys fallidos).
-        files, gate_report = await run_build_gate(files, stack)
+        # vision del proyecto (para el juez visual de diseño)
+        _vis = ""
+        try:
+            _vrow = (await session.execute(
+                select(ProjectVision).where(ProjectVision.project_key == project_key)
+            )).scalar_one_or_none()
+            _vis = (_vrow.vision if _vrow else "") or ""
+        except Exception:
+            _vis = ""
+
+        # Build gate local: compila cada tier; auto-fix + retry + JUEZ VISUAL.
+        # Si falla, NO se despliega (el usuario no quiere deploys fallidos).
+        files, gate_report = await run_build_gate(files, stack, vision=_vis)
         logger.info("build_gate", project=project_key, report=gate_report)
         if not gate_report.get("ok"):
             return {
