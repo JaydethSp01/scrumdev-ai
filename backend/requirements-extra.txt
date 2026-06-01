@@ -27,3 +27,4 @@ mcp==1.27.1
 fastapi==0.115.14
 starlette==0.46.2
 anyio==4.13.0
+playwright==1.49.0

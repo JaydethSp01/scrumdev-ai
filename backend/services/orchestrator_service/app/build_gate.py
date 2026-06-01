@@ -106,6 +106,63 @@ _CLIENT_HOOKS = re.compile(
 )
 
 
+def _fix_root_layout(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """El root layout (app/layout.tsx) DEBE: (1) ser server component (sin
+    'use client'), (2) renderizar <html><body>. Si la IA lo generó como client
+    o sin <html>/<body>, la hidratación rompe (#418/#423 "Only one element on
+    document"), y la pantalla queda en blanco. Lo reescribimos preservando el
+    contenido interno (lo que el layout envolvía: Sidebar, nav, etc.)."""
+    for f in files_rel:
+        path = (f.get("path") or "").lstrip("/")
+        if path not in ("app/layout.tsx", "app/layout.jsx"):
+            continue
+        c = f.get("content") or ""
+        has_html = "<html" in c
+        is_client = '"use client"' in c[:60] or "'use client'" in c[:60]
+        if has_html and not is_client:
+            continue  # ya es válido
+        # extraer imports locales/css que valga la pena preservar
+        import re as _re
+        imports = _re.findall(r"^\s*import .+$", c, _re.M)
+        # quitar 'use client' y next/* server-incompatibles
+        keep_imports = [i for i in imports if "use client" not in i]
+        css_import = next((i for i in keep_imports if "globals.css" in i or ".css" in i), None)
+        # extraer lo que el layout renderizaba dentro (heurística: el primer
+        # componente propio importado, ej Sidebar) para no perder el shell
+        comp_imports = [i for i in keep_imports if "/components/" in i or "components/" in i]
+        inner_open, inner_close = "", ""
+        first_comp = None
+        for i in comp_imports:
+            m = _re.search(r"import\s+\{?\s*(\w+)", i)
+            if m:
+                first_comp = m.group(1); break
+        new_imports = []
+        if css_import and "globals.css" not in (css_import or ""):
+            pass
+        new = (
+            "import './globals.css';\n"
+            + ("\n".join(comp_imports) + "\n" if comp_imports else "")
+            + "\nexport const metadata = { title: 'App', description: 'Generado con ScrumDev AI' };\n\n"
+            "export default function RootLayout({ children }: { children: React.ReactNode }) {\n"
+            "  return (\n"
+            "    <html lang=\"es\">\n"
+            "      <body>\n"
+        )
+        if first_comp:
+            new += (
+                "        <div className=\"flex min-h-screen\">\n"
+                f"          <{first_comp} />\n"
+                "          <main className=\"flex-1 p-6\">{children}</main>\n"
+                "        </div>\n"
+            )
+        else:
+            new += "        {children}\n"
+        new += "      </body>\n    </html>\n  );\n}\n"
+        f["content"] = new
+        report.append("root layout reescrito (html/body server component)")
+    return files_rel
+
+
 def _ensure_use_client(files_rel: list[dict], report: list[str]) -> list[dict]:
     """Normaliza el TOP de cada archivo .tsx/.jsx (orden EXACTO que exige Next):
       1) si usa hooks/eventos de cliente -> `"use client";` como PRIMERA línea.
@@ -408,6 +465,7 @@ def _apply_frontend_autofix(files_rel: list[dict], log: str = "") -> tuple[list[
     )
     report: list[str] = []
     files_rel = _dedup_parallel_routes(files_rel, report)
+    files_rel = _fix_root_layout(files_rel, report)
     files_rel = _fix_next_router(files_rel, report)
     files_rel = _ensure_use_client(files_rel, report)
     files_rel = _ensure_npm_deps(files_rel, report)
@@ -419,6 +477,88 @@ def _apply_frontend_autofix(files_rel: list[dict], log: str = "") -> tuple[list[
     if log:
         files_rel = _fix_from_build_log(files_rel, log, report)
     return files_rel, report
+
+
+def _harden_data_access(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """Blinda el código generado contra crashes de runtime por datos vacíos
+    (el #1 que deja la pantalla en blanco: `data.x.length` cuando el fetch falla):
+      - `useState({...})` -> el estado inicial se respeta, pero los accesos
+        `.length` / `.map(` sobre props/estado se hacen seguros con `?.` y `?? []`.
+    Heurística conservadora: solo agrega optional chaining donde ya hay accesos
+    directos a .length/.map sin protección."""
+    import re as _re
+    fixed = 0
+    for f in files_rel:
+        path = (f.get("path") or "").lstrip("/")
+        if not path.endswith((".tsx", ".jsx")):
+            continue
+        c = f.get("content") or ""
+        orig = c
+        # X.length -> X?.length (sin tocar los ya protegidos ni números)
+        c = _re.sub(r"(?<![\?\.\w])(\b[a-zA-Z_]\w*(?:\.\w+)*)\.length\b",
+                    lambda m: m.group(1) + "?.length", c)
+        # corregir dobles ?? que pudieran formarse
+        c = c.replace("??.length", "?.length")
+        # X.map( -> (X ?? []).map(  cuando X es identificador/acceso simple
+        c = _re.sub(r"(?<![\?\.\w])(\b[a-zA-Z_]\w*(?:\.\w+)*)\.map\(",
+                    lambda m: f"({m.group(1)} ?? []).map(", c)
+        if c != orig:
+            f["content"] = c
+            fixed += 1
+    if fixed:
+        report.append(f"acceso a datos blindado (?./?? []) en {fixed} archivo(s)")
+    return files_rel
+
+
+async def _runtime_smoke(tmp: str, npm: str, env: dict) -> dict:
+    """Levanta `next start` y abre la home en un navegador headless. Devuelve
+    {ok, reason, log}. Detecta pantalla en blanco / client-side exception que el
+    build NO ve. Si no hay navegador disponible, se salta (ok=True, skipped)."""
+    # buscar el chrome de playwright; si no, dejar que playwright resuelva el suyo
+    chrome = None
+    import glob
+    for pat in ("chromium-*/chrome-linux64/chrome", "chromium-*/chrome-linux/chrome",
+                "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"):
+        hits = sorted(glob.glob(os.path.expanduser(f"~/.cache/ms-playwright/{pat}")))
+        if hits:
+            chrome = hits[-1]; break
+    try:
+        import importlib; importlib.import_module("playwright.async_api")
+    except Exception:
+        return {"ok": True, "skipped": True, "reason": "playwright no disponible"}
+
+    import asyncio as _aio
+    port = "47711"
+    proc = await _aio.create_subprocess_exec(
+        npm, "run", "start", "--", "-p", port, cwd=tmp, env=env,
+        stdout=_aio.subprocess.DEVNULL, stderr=_aio.subprocess.DEVNULL)
+    try:
+        await _aio.sleep(9)
+        from playwright.async_api import async_playwright
+        errs: list[str] = []
+        async with async_playwright() as pw:
+            launch_kw = {"executable_path": chrome} if chrome else {}
+            try:
+                br = await pw.chromium.launch(**launch_kw)
+            except Exception:
+                br = await pw.chromium.launch()  # fallback al browser propio de pw
+            pg = await br.new_page()
+            pg.on("pageerror", lambda e: errs.append(str(e)[:160]))
+            try:
+                await pg.goto(f"http://localhost:{port}/", wait_until="domcontentloaded", timeout=30000)
+                await pg.wait_for_timeout(6000)
+                text = (await pg.locator("body").inner_text()).strip()
+            except Exception as e:
+                text = ""; errs.append("goto:" + str(e)[:120])
+            await br.close()
+        app_err = ("Application error" in text) or ("client-side exception" in text)
+        ok = (len(text) > 15) and (not app_err)
+        return {"ok": ok, "skipped": False,
+                "reason": ("render ok" if ok else "pantalla en blanco / client-side error"),
+                "log": (text[:200] + " || " + " | ".join(errs[:4]))}
+    finally:
+        try: proc.terminate()
+        except Exception: pass
 
 
 async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4) -> dict:
@@ -434,6 +574,7 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4) -> d
     from services.orchestrator_service.app.deploy_validator import _dedup_parallel_routes
     _pre: list[str] = []
     files_rel = _dedup_parallel_routes(files_rel, _pre)
+    files_rel = _fix_root_layout(files_rel, _pre)  # root layout html/body server
     files_rel = _fix_next_router(files_rel, _pre)   # App Router: next/router -> next/navigation
     files_rel = _ensure_use_client(files_rel, _pre)  # hooks de cliente -> "use client"
     files_rel = _ensure_npm_deps(files_rel, _pre)    # libs importadas -> package.json
@@ -457,8 +598,24 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4) -> d
                         "log": log_tail, "fixes": all_fixes, "attempts": attempt}
             rc_b, log_b = await _run([npm, "run", "build"], tmp, env, timeout=300)
             if rc_b == 0:
-                return {"ok": True, "files": files_rel, "fixes": all_fixes,
-                        "attempts": attempt, "log": log_b[-400:]}
+                # BUILD OK -> SMOKE de runtime (navegador real). Que compile NO
+                # basta: la app debe RENDERIZAR (no pantalla en blanco). Esto es
+                # lo que evita que una app rota llegue al cliente.
+                smoke = await _runtime_smoke(tmp, npm, env)
+                if smoke.get("ok"):
+                    return {"ok": True, "files": files_rel, "fixes": all_fixes,
+                            "attempts": attempt, "log": log_b[-400:],
+                            "smoke": smoke.get("reason")}
+                # render falló: blindar accesos a datos y reintentar
+                logger.warning("runtime_smoke_failed", attempt=attempt, detail=smoke.get("log"))
+                if attempt < max_attempts:
+                    files_rel = _harden_data_access(files_rel, all_fixes)
+                    files_rel = _force_dynamic_pages(files_rel, all_fixes)
+                    continue
+                # último intento agotado: NO desplegar app rota
+                return {"ok": False, "stage": "runtime", "files": files_rel,
+                        "log": "SMOKE: " + (smoke.get("log") or smoke.get("reason") or ""),
+                        "fixes": all_fixes, "attempts": attempt}
             log_tail = log_b[-3000:]
             # build fallo: auto-fix (incl. fixer dirigido por el log) y reintentar
             files_rel, fixes = _apply_frontend_autofix(files_rel, log_tail)

@@ -91,6 +91,11 @@ RUN pip install --no-cache-dir -r /tmp/requirements-extra.txt
 # vía plan Pro/Max (CLAUDE_CODE_OAUTH_TOKEN headless, sin gastar API).
 RUN npm install -g @anthropic-ai/claude-code || true
 
+# Chromium para el SMOKE de runtime del build gate (abrir la app generada en un
+# navegador real y verificar que RENDERIZA, no solo que compila). Si falla la
+# instalación, el smoke se auto-salta (no bloquea el deploy).
+RUN python -m playwright install --with-deps chromium || python -m playwright install chromium || true
+
 WORKDIR /app
 
 # Sólo el código backend (no node_modules ni .next del frontend, ignorado por .dockerignore)
