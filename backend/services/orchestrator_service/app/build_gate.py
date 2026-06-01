@@ -182,16 +182,12 @@ def _ensure_use_client(files_rel: list[dict], report: list[str]) -> list[dict]:
         has_meta = ("export const metadata" in c) or ("generateMetadata" in c)
         had_uc = ('"use client"' in c[:80]) or ("'use client'" in c[:80])
         needs_client = (not has_meta) and (had_uc or bool(_CLIENT_HOOKS.search(c)))
-        # quitar directivas existentes (en cualquier posición cercana) para reordenar
-        kept = []
-        for ln in c.split("\n"):
-            s = ln.strip().rstrip(";").strip().strip('"').strip("'")
-            if s == "use client":
-                continue
-            if ln.strip().startswith("export const dynamic"):
-                continue
-            kept.append(ln)
-        body = "\n".join(kept).lstrip("\n")
+        # quitar TODAS las directivas existentes, INCLUSO inline (el código suele
+        # venir en una sola línea: `"use client"; import...`). Regex global.
+        body = c
+        body = re.sub(r"""(['"])use client\1\s*;?\s*""", "", body)
+        body = re.sub(r"""export const dynamic\s*=\s*(['"])[^'"]*\1\s*;?\s*""", "", body)
+        body = body.lstrip("\n ")
         prefix = ""
         if needs_client:
             prefix += '"use client";\n'
