@@ -106,6 +106,35 @@ _CLIENT_HOOKS = re.compile(
 )
 
 
+def _normalize_css_imports(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """En el ROOT layout, `import '@/app/globals.css'` no siempre resuelve (el
+    alias @/ puede faltar en el tsconfig del stack estático). Lo normalizamos a
+    `./globals.css` (relativo, SIEMPRE resuelve) y garantizamos que el archivo
+    exista junto al layout con las directivas de Tailwind."""
+    changed = 0
+    layout_dirs: set[str] = set()
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        if p not in ("frontend/app/layout.tsx", "app/layout.tsx"):
+            continue
+        c = f.get("content") or ""
+        nc = re.sub(r"""(['"])@/(?:app|src/app|styles)/globals\.css\1""", r"\1./globals.css\1", c)
+        if nc != c:
+            f["content"] = nc; changed += 1
+        layout_dirs.add(p.rsplit("/", 1)[0])  # ej frontend/app
+    # garantizar globals.css junto a CADA layout que lo importe relativo
+    existing = {(f.get("path") or "").lstrip("/") for f in files_rel}
+    for d in layout_dirs:
+        gpath = f"{d}/globals.css"
+        if gpath not in existing:
+            files_rel.append({"path": gpath,
+                              "content": "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n"})
+            changed += 1
+    if changed:
+        report.append("import de globals.css normalizado (relativo) + archivo garantizado")
+    return files_rel
+
+
 def _apply_app_shell(files_rel: list[dict], report: list[str], title: str = "") -> list[dict]:
     """Si el proyecto trae el UI-kit (AppShell), reescribe el ROOT layout para que
     envuelva TODA página en <AppShell> con la navegación auto-derivada de las rutas.
@@ -959,6 +988,7 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     from services.orchestrator_service.app.deploy_validator import _dedup_parallel_routes
     _pre: list[str] = []
     files_rel = _dedup_parallel_routes(files_rel, _pre)
+    files_rel = _normalize_css_imports(files_rel, _pre)  # @/app/globals.css -> ./globals.css
     # El app-shell (sidebar) es para APPS con datos, NO para landings (que llevan
     # hero+secciones). En stack estático se omite -> no se importa AppShell.
     if not is_landing:
