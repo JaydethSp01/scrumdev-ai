@@ -1,4 +1,4 @@
-import '@/app/globals.css';
+import './globals.css';
 
 export const metadata = {
   title: 'Startup B2B Landing',
