@@ -668,6 +668,17 @@ export async function apiGetTemplates(
   return jsonOrThrow<TemplatesResponse>(res);
 }
 
+export async function apiUseTemplate(
+  projectKey: string,
+  templateId: string
+): Promise<{ ok: boolean; template: string; files: number; stack: string }> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/use-template`,
+    { method: "POST", body: JSON.stringify({ template_id: templateId }) }
+  );
+  return jsonOrThrow(res);
+}
+
 // ===== Creacion inteligente: industria / intake / doc =====
 export type Industry = { id: string; label: string; icon: string };
 export type IntakeField = {

@@ -426,6 +426,14 @@ async def get_templates(project_key: str, top_k: int = 6) -> dict:
     )
 
 
+@app.post("/projects/{project_key}/use-template")
+async def use_template_gw(project_key: str, req: dict) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/use-template",
+        req, timeout=120.0,
+    )
+
+
 # --- Gestion de tareas por el PO (CRUD estilo Azure DevOps) ---
 
 

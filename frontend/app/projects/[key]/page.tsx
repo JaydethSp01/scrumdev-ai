@@ -37,6 +37,7 @@ import {
   apiGetProjectState,
   apiListBuilds,
   apiSmartBuild,
+  apiUseTemplate,
   apiGetBrandKit,
   apiListAssets,
   type BuildRecord,
@@ -687,10 +688,25 @@ export default function ProjectDetailPage() {
               {showGallery && (
                 <TemplateGallery
                   projectKey={project.key}
-                  onPick={(t) => {
+                  onPick={async (t) => {
                     setShowGallery(false);
-                    toasts.success(`Adaptando la plantilla "${t.name}" a tu proyecto…`);
-                    runSmartBuild(false);
+                    if (t.has_files) {
+                      // plantilla 1A con archivos -> usarla (rápido, calidad garantizada)
+                      toasts.success(`Aplicando la plantilla "${t.name}"…`);
+                      try {
+                        const r = await apiUseTemplate(project.key, t.id);
+                        toasts.success(`Plantilla aplicada (${r.files} archivos). Lista para desplegar.`);
+                        setRefreshKey((k) => k + 1);
+                        setTab("code");
+                      } catch (e) {
+                        toasts.error(e instanceof Error ? e.message : String(e));
+                        runSmartBuild(false);
+                      }
+                    } else {
+                      // sin archivos aún -> generar a medida desde la visión
+                      toasts.success(`Generando tu app basada en "${t.name}"…`);
+                      runSmartBuild(false);
+                    }
                   }}
                   onFromScratch={() => {
                     setShowGallery(false);

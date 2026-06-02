@@ -2666,6 +2666,77 @@ async def project_templates(project_key: str, top_k: int = 6) -> dict:
     }
 
 
+async def _load_template_files(template_id: str) -> list[dict]:
+    """Trae los archivos de una plantilla del repo scrumdev-templates (público).
+    Devuelve [{path, content}] con el prefijo `templates/<id>/files/` quitado."""
+    from shared.templates.catalog import TEMPLATES_REPO, TEMPLATES_BRANCH
+    prefix = f"templates/{template_id}/files/"
+    tree_url = (f"https://api.github.com/repos/{TEMPLATES_REPO}/git/trees/"
+                f"{TEMPLATES_BRANCH}?recursive=1")
+    raw_base = f"https://raw.githubusercontent.com/{TEMPLATES_REPO}/{TEMPLATES_BRANCH}/"
+    headers = {"User-Agent": "scrumdev"}
+    tok = os.environ.get("SCRUMDEV_GIT_TOKEN")
+    if tok:
+        headers["Authorization"] = f"Bearer {tok}"
+    files: list[dict] = []
+    async with httpx.AsyncClient(timeout=60.0, headers=headers) as client:
+        r = await client.get(tree_url)
+        r.raise_for_status()
+        paths = [n["path"] for n in r.json().get("tree", [])
+                 if n.get("type") == "blob" and n["path"].startswith(prefix)]
+        for full in paths:
+            rel = full[len(prefix):]
+            try:
+                cr = await client.get(raw_base + full)
+                if cr.status_code == 200:
+                    files.append({"path": rel, "content": cr.text})
+            except Exception:  # noqa: BLE001
+                continue
+    return files
+
+
+@app.post("/projects/{project_key}/use-template")
+async def use_template(project_key: str, req: dict) -> dict:
+    """Parte de una PLANTILLA 1A: extrae sus archivos del repo y los guarda como
+    código del proyecto (app profesional lista para desplegar). Mucho más rápido
+    que generar desde cero y con calidad garantizada."""
+    template_id = (req or {}).get("template_id")
+    if not template_id:
+        raise HTTPException(status_code=400, detail="template_id requerido")
+    from shared.templates.catalog import get_template
+    tpl = get_template(template_id)
+    if not tpl or not tpl.has_files:
+        raise HTTPException(status_code=404, detail="plantilla no disponible (sin archivos)")
+    files = await _load_template_files(template_id)
+    if not files:
+        raise HTTPException(status_code=502, detail="no se pudieron leer los archivos de la plantilla")
+    # persistir en la versión activa (mismo patrón que generate-app)
+    from services.orchestrator_service.app.versions import ensure_v1, get_active_version
+    async for session in get_session():
+        version = await get_active_version(session, project_key) or await ensure_v1(session, project_key)
+        existing = (await session.execute(
+            select(CodeArtifact).where(
+                CodeArtifact.project_key == project_key,
+                CodeArtifact.version_id == version.id,
+            )
+        )).scalars().all()
+        by_path = {a.file_path: a for a in existing}
+        for f in files:
+            path = f["path"]; content = f.get("content", "")
+            if path in by_path:
+                by_path[path].content = content
+            else:
+                session.add(CodeArtifact(
+                    project_key=project_key, version_id=version.id,
+                    story_id=None, file_path=path, language="text", content=content,
+                ))
+        await session.commit()
+        break
+    logger.info("template_applied", project=project_key, template=template_id, files=len(files))
+    return {"ok": True, "template": template_id, "files": len(files),
+            "stack": tpl.stack, "next": "deploy"}
+
+
 @app.post("/projects/{project_key}/smart-build")
 async def smart_build(project_key: str, req: SmartBuildRequest) -> dict:
     """Decide que generar segun el estado y dispara background."""
