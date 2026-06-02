@@ -1,0 +1,1 @@
+import '@/app/globals.css'; import { AppShell } from '@/components/ui/AppShell'; export default function Layout({ children }) { return <AppShell items={[{ href: '/', label: 'Inicio' }, { href: '/propiedades', label: 'Propiedades' }, { href: '/agentes', label: 'Agentes' }, { href: '/clientes', label: 'Clientes' }, { href: '/visitas', label: 'Visitas' }]}>{children}</AppShell>; }

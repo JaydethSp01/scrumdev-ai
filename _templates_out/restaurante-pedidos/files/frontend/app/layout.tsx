@@ -1,0 +1,1 @@
+import { AppShell } from '@/components/ui/AppShell'; import Sidebar from '@/components/Sidebar'; export default function Layout({ children }) { return (<html><body><AppShell items={[]}><Sidebar />{children}</AppShell></body></html>); }

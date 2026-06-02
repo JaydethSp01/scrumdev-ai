@@ -1,0 +1,1 @@
+export async function fetchData(endpoint: string) { const API = process.env.NEXT_PUBLIC_API_URL || ''; const response = await fetch(`${API}${endpoint}`); return response.ok ? response.json() : null; }

@@ -1,0 +1,1 @@
+from pydantic import BaseModel; class Factura(BaseModel): id: int; cliente_id: int; total: float; estado: str; class Cliente(BaseModel): id: int; nombre: str; email: str; class Pago(BaseModel): id: int; factura_id: int; monto: float; class Impuesto(BaseModel): id: int; nombre: str; porcentaje: float

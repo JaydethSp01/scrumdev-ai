@@ -1,0 +1,28 @@
+{
+  "id": "logistica-flota",
+  "name": "Flota Envíos",
+  "sector": "logistica",
+  "sector_label": "Logística / Flota",
+  "software_type": "saas_crud",
+  "stack": "nextjs-fastapi-postgres",
+  "description": "Gestión de envíos y flota: rutas, vehículos, conductores y tracking.",
+  "entities": [
+    "envio",
+    "vehiculo",
+    "conductor",
+    "ruta"
+  ],
+  "brand_color": "#0891b2",
+  "tags": [
+    "logistica",
+    "envios",
+    "flota",
+    "tracking",
+    "rutas",
+    "transporte"
+  ],
+  "accent": "",
+  "has_files": false,
+  "preview_url": "https://raw.githubusercontent.com/JaydethSp01/scrumdev-templates/main/templates/logistica-flota/preview.png",
+  "seeded_at": "2026-06-02"
+}

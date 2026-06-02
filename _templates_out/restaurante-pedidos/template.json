@@ -1,0 +1,28 @@
+{
+  "id": "restaurante-pedidos",
+  "name": "Resto Pedidos",
+  "sector": "restaurante",
+  "sector_label": "Restaurante / Pedidos",
+  "software_type": "saas_crud",
+  "stack": "nextjs-fastapi-postgres",
+  "description": "Gestión de restaurante: menú, mesas, pedidos y cocina.",
+  "entities": [
+    "plato",
+    "mesa",
+    "pedido",
+    "categoria"
+  ],
+  "brand_color": "#ea580c",
+  "tags": [
+    "restaurante",
+    "menu",
+    "pedidos",
+    "mesas",
+    "cocina",
+    "food"
+  ],
+  "accent": "",
+  "has_files": false,
+  "preview_url": "https://raw.githubusercontent.com/JaydethSp01/scrumdev-templates/main/templates/restaurante-pedidos/preview.png",
+  "seeded_at": "2026-06-02"
+}

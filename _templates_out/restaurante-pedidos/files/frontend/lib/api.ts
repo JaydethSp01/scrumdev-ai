@@ -1,0 +1,1 @@
+export const API = process.env.NEXT_PUBLIC_API_URL || ''; export async function fetchResource(resource) { const response = await fetch(`${API}/${resource}`); if (!response.ok) { return []; } return response.json(); }

@@ -1,0 +1,28 @@
+{
+  "id": "educacion-lms",
+  "name": "LMS Cursos",
+  "sector": "educacion",
+  "sector_label": "Educación / LMS",
+  "software_type": "saas_crud",
+  "stack": "nextjs-fastapi-postgres",
+  "description": "Plataforma de cursos: lecciones, estudiantes, progreso y certificados.",
+  "entities": [
+    "curso",
+    "leccion",
+    "estudiante",
+    "matricula"
+  ],
+  "brand_color": "#2563eb",
+  "tags": [
+    "lms",
+    "cursos",
+    "educacion",
+    "estudiantes",
+    "elearning"
+  ],
+  "accent": "",
+  "has_files": false,
+  "preview_url": "https://raw.githubusercontent.com/JaydethSp01/scrumdev-templates/main/templates/educacion-lms/preview.png",
+  "seeded_at": 1780433035,
+  "deploy_url": null
+}

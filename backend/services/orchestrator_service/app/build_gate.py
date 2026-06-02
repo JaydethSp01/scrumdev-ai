@@ -536,6 +536,13 @@ _NAV_LABELS = {
     "metrica": "Métricas", "metricas": "Métricas", "m-tricas": "Métricas",
     "socio": "Socios", "socios": "Socios", "membresia": "Membresías",
     "clase": "Clases", "clases": "Clases", "asistencia": "Asistencia",
+    "menu": "Menú", "men": "Menú", "mesa": "Mesas", "mesas": "Mesas",
+    "cocina": "Cocina", "plato": "Platos", "vehiculo": "Vehículos",
+    "veh-culo": "Vehículos", "conductor": "Conductores", "envio": "Envíos",
+    "ruta": "Rutas", "rutas": "Rutas", "tracking": "Tracking",
+    "factura": "Facturas", "facturas": "Facturas", "impuesto": "Impuestos",
+    "propiedad": "Propiedades", "agente": "Agentes", "visita": "Visitas",
+    "curso": "Cursos", "leccion": "Lecciones", "estudiante": "Estudiantes",
     "configuracion": "Configuración", "ajustes": "Ajustes",
 }
 

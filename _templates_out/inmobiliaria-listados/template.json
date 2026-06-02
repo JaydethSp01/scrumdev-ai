@@ -1,0 +1,28 @@
+{
+  "id": "inmobiliaria-listados",
+  "name": "Inmo Listados",
+  "sector": "inmobiliaria",
+  "sector_label": "Inmobiliaria",
+  "software_type": "saas_crud",
+  "stack": "nextjs-fastapi-postgres",
+  "description": "Portal inmobiliario: propiedades, agentes, visitas y clientes.",
+  "entities": [
+    "propiedad",
+    "agente",
+    "visita",
+    "cliente"
+  ],
+  "brand_color": "#0f766e",
+  "tags": [
+    "inmobiliaria",
+    "propiedades",
+    "bienes raices",
+    "alquiler",
+    "venta"
+  ],
+  "accent": "",
+  "has_files": false,
+  "preview_url": "https://raw.githubusercontent.com/JaydethSp01/scrumdev-templates/main/templates/inmobiliaria-listados/preview.png",
+  "seeded_at": 1780432582,
+  "deploy_url": null
+}

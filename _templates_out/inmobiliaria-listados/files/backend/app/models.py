@@ -1,0 +1,1 @@
+from pydantic import BaseModel; class Propiedad(BaseModel): id: int; nombre: str; direccion: str; precio: float; disponible: bool; class Agente(BaseModel): id: int; nombre: str; email: str; class Cliente(BaseModel): id: int; nombre: str; email: str; telefono: str; class Visita(BaseModel): id: int; propiedad_id: int; cliente_id: int; fecha: str;

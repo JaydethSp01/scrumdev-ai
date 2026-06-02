@@ -1,0 +1,1 @@
+import os; import psycopg; from fastapi import HTTPException; DATABASE_URL = os.environ.get("DATABASE_URL"); conn = None; try: conn = psycopg.connect(DATABASE_URL) except Exception as e: print("Failed to connect to database, using mock.", e); conn = None; def get_db_conn(): if conn is not None: return conn raise HTTPException(status_code=500, detail="Database connection failed")

@@ -1,0 +1,28 @@
+{
+  "id": "fintech-facturacion",
+  "name": "Facturación",
+  "sector": "fintech",
+  "sector_label": "Fintech / Facturación",
+  "software_type": "saas_crud",
+  "stack": "nextjs-fastapi-postgres",
+  "description": "Facturación y gastos: facturas, clientes, pagos e impuestos.",
+  "entities": [
+    "factura",
+    "cliente",
+    "pago",
+    "gasto"
+  ],
+  "brand_color": "#059669",
+  "tags": [
+    "fintech",
+    "facturacion",
+    "facturas",
+    "gastos",
+    "pagos",
+    "contabilidad"
+  ],
+  "accent": "",
+  "has_files": false,
+  "preview_url": "https://raw.githubusercontent.com/JaydethSp01/scrumdev-templates/main/templates/fintech-facturacion/preview.png",
+  "seeded_at": "2026-06-02"
+}
