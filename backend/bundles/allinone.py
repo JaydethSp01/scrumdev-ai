@@ -46,8 +46,57 @@ from services.deploy_connector_service.app.main import app as deploy_app  # noqa
 app = FastAPI(title="ScrumDev AI - All in One", version="1.0.0")
 
 
+def _start_brokers() -> None:
+    """Arranca Redis + Redpanda (Kafka) DENTRO del contenedor de prod (HF Space),
+    para que la arquitectura event-driven esté VIVA en prod, no solo en local.
+    Totalmente NO-fatal: si un binario falta o falla, el bus cae a logging
+    in-process y la app arranca igual (nunca tumba el demo)."""
+    import logging, os, shutil, subprocess, socket
+    log = logging.getLogger("allinone.brokers")
+
+    def _up(host: str, port: int) -> bool:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                return True
+        except Exception:
+            return False
+
+    # Redis (cache / colas ligeras)
+    try:
+        if shutil.which("redis-server") and not _up("127.0.0.1", 6379):
+            subprocess.Popen(["redis-server", "--daemonize", "no", "--save", "",
+                              "--appendonly", "no", "--maxmemory", "256mb"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            log.info("redis-server lanzado")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("redis no arrancó: %s", exc)
+
+    # Redpanda (Kafka-compatible, single binary, sin Zookeeper/JVM). Corre como
+    # usuario no-root -> data-dir en /tmp (escribible). Se lanza vía rpk.
+    try:
+        rpk = shutil.which("rpk")
+        if rpk and not _up("127.0.0.1", 9092):
+            os.makedirs("/tmp/redpanda", exist_ok=True)
+            subprocess.Popen([
+                rpk, "redpanda", "start", "--smp=1", "--memory=512M",
+                "--reserve-memory=0M", "--overprovisioned", "--node-id=0", "--check=false",
+                "--kafka-addr=PLAINTEXT://0.0.0.0:9092",
+                "--advertise-kafka-addr=PLAINTEXT://localhost:9092",
+                "--set=redpanda.data_directory=/tmp/redpanda",
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            log.info("redpanda (kafka) lanzado")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("redpanda no arrancó: %s", exc)
+
+
 @app.on_event("startup")
 async def _allinone_startup() -> None:
+    # Arrancar brokers (Redis + Kafka) en background ANTES de todo -> event-driven
+    # vivo en prod. No-fatal.
+    try:
+        _start_brokers()
+    except Exception:  # noqa: BLE001
+        pass
     # Los sub-apps montados NO disparan sus propios eventos startup (Starlette),
     # así que creamos las tablas aquí una vez. Crea TODO el esquema porque los
     # modelos se registran globalmente al importarse.

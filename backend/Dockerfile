@@ -74,6 +74,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         nodejs \
         npm \
         git \
+        redis-server \
         libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
         libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
         libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 fonts-liberation \
@@ -110,6 +111,21 @@ RUN echo "pw-bust=${PW_BUST}" \
     && python -m playwright install --with-deps chromium \
     && chmod -R a+rx /opt/pw-browsers \
     && rm -rf /var/lib/apt/lists/*
+
+# Redpanda (Kafka-compatible, single-binary) para que la arquitectura
+# event-driven esté VIVA en prod (allinone lo arranca en background). Resiliente:
+# si el repo/instalación falla, el build NO se rompe (el bus cae a logging).
+ARG KAFKA_BUST=1
+RUN echo "kafka-bust=${KAFKA_BUST}" \
+    && (curl -1sLf 'https://dl.redpanda.com/nzc4ZYQK3WRGd9sy/redpanda/cfg/setup/bash.deb.sh' | bash \
+        && apt-get install -y redpanda \
+        && rm -rf /var/lib/apt/lists/*) || echo "redpanda install skipped (no rompe el build)"
+
+# Event-driven ACTIVO en prod: el HybridEventBus publica DomainEvents a Kafka
+# (localhost:9092, arrancado por allinone) en cada paso del flujo.
+ENV KAFKA_ENABLED=true \
+    KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
+    REDIS_URL=redis://localhost:6379/0
 
 WORKDIR /app
 
