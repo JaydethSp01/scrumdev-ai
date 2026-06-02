@@ -2674,10 +2674,8 @@ async def _load_template_files(template_id: str) -> list[dict]:
     tree_url = (f"https://api.github.com/repos/{TEMPLATES_REPO}/git/trees/"
                 f"{TEMPLATES_BRANCH}?recursive=1")
     raw_base = f"https://raw.githubusercontent.com/{TEMPLATES_REPO}/{TEMPLATES_BRANCH}/"
+    # repo PÚBLICO -> no requiere token (raw + tree API funcionan sin auth)
     headers = {"User-Agent": "scrumdev"}
-    tok = os.environ.get("SCRUMDEV_GIT_TOKEN")
-    if tok:
-        headers["Authorization"] = f"Bearer {tok}"
     files: list[dict] = []
     async with httpx.AsyncClient(timeout=60.0, headers=headers) as client:
         r = await client.get(tree_url)
