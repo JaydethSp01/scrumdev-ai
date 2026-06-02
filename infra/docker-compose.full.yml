@@ -25,6 +25,27 @@ services:
       - "5672:5672"
       - "15672:15672"
 
+  # Broker Kafka (Redpanda: API Kafka-compatible, single-binary, sin Zookeeper).
+  # Los servicios publican DomainEvents aquí cuando KAFKA_ENABLED=true
+  # (topics: scrumdev.workflow / .agent / .deploy / .events). Validado E2E.
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: scrumdev-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://localhost:9092
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+
   temporal:
     image: temporalio/auto-setup:latest
     container_name: scrumdev-temporal

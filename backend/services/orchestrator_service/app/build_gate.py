@@ -106,6 +106,58 @@ _CLIENT_HOOKS = re.compile(
 )
 
 
+def _seed_initial_state(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """Red de seguridad: si una página arranca con estado VACÍO (`useState([])` /
+    `useState(null)`) y luego hace fetch, se ve vacía hasta que responda el backend
+    (mala primera impresión). La sembramos con datos mock inline derivados de las
+    columnas que la propia página declara -> el dashboard SIEMPRE muestra datos."""
+    import re as _re
+
+    def _mock_value(key: str, i: int):
+        k = key.lower()
+        if any(w in k for w in ("precio", "price", "total", "monto", "importe", "valor",
+                                "amount", "stock", "cantidad", "qty", "count", "edad")):
+            return [120, 49, 89, 35, 210, 75][i % 6]
+        if any(w in k for w in ("estado", "status")):
+            return ["Activo", "Pendiente", "Completado", "En proceso"][i % 4]
+        if any(w in k for w in ("fecha", "date")):
+            return ["2026-01-12", "2026-02-03", "2026-02-20", "2026-03-05"][i % 4]
+        if "email" in k or "correo" in k:
+            return f"cliente{i+1}@empresa.com"
+        if k in ("id", "codigo", "code", "#"):
+            return i + 1
+        return f"Ejemplo {i + 1}"
+
+    fixed = 0
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        if not (p.endswith("page.tsx") or p.endswith("page.jsx")):
+            continue
+        c = f.get("content") or ""
+        if not _re.search(r"useState\s*(<[^>]*>)?\s*\(\s*(\[\s*\]|null)\s*\)", c):
+            continue
+        # claves de columna declaradas en la página (DataTable columns / accesos)
+        keys = list(dict.fromkeys(_re.findall(r"key:\s*['\"]([a-zA-Z_][\w]*)['\"]", c)))
+        if not keys:
+            keys = list(dict.fromkeys(_re.findall(r"\.(\w+)\}", c)))[:4]
+        if not keys:
+            keys = ["id", "nombre", "estado"]
+        rows = []
+        for i in range(4):
+            obj = ", ".join(f"{k}: {_mock_value(k, i) if isinstance(_mock_value(k,i),int) else repr(_mock_value(k,i)).replace(chr(39),chr(34))}"
+                            for k in keys[:6])
+            rows.append("{ " + obj + " }")
+        mock = "[" + ", ".join(rows) + "]"
+        new = _re.sub(r"useState\s*(<[^>]*>)?\s*\(\s*(\[\s*\]|null)\s*\)",
+                      lambda m: f"useState({mock})", c, count=1)
+        if new != c:
+            f["content"] = new
+            fixed += 1
+    if fixed:
+        report.append(f"estado inicial sembrado con datos mock en {fixed} página(s)")
+    return files_rel
+
+
 def _ensure_tsconfig_alias(files_rel: list[dict], report: list[str]) -> list[dict]:
     """Garantiza que tsconfig.json tenga el alias `@/* -> ./*` (+ baseUrl). Sin él
     TODOS los imports `@/...` rompen el build ('Module not found'). El stack
@@ -1032,6 +1084,7 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     # DETERMINISTAS (sin navegador): evitan la pantalla en blanco que el build no
     # ve -> data access seguro + páginas dinámicas. Se aplican SIEMPRE, no solo
     # tras un smoke fallido (el smoke con navegador es best-effort/opcional).
+    files_rel = _seed_initial_state(files_rel, _pre)  # nunca arrancar vacío
     files_rel = _harden_data_access(files_rel, _pre)
     files_rel = _force_dynamic_pages(files_rel, _pre)
 
