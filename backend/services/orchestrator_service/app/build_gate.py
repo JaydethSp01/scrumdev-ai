@@ -148,8 +148,10 @@ def _seed_initial_state(files_rel: list[dict], report: list[str]) -> list[dict]:
                             for k in keys[:6])
             rows.append("{ " + obj + " }")
         mock = "[" + ", ".join(rows) + "]"
+        # sembrar TODOS los estados vacíos (un dashboard tiene varios: una métrica
+        # por entidad + la tabla); con count=1 las MetricCard quedaban en 0.
         new = _re.sub(r"useState\s*(<[^>]*>)?\s*\(\s*(\[\s*\]|null)\s*\)",
-                      lambda m: f"useState({mock})", c, count=1)
+                      lambda m: f"useState({mock})", c)
         if new != c:
             f["content"] = new
             fixed += 1
@@ -531,6 +533,9 @@ _NAV_LABELS = {
     "factura": "Facturas", "pago": "Pagos", "gasto": "Gastos",
     "empleado": "Empleados", "reserva": "Reservas", "evento": "Eventos",
     "dashboard": "Dashboard", "reporte": "Reportes", "reportes": "Reportes",
+    "metrica": "Métricas", "metricas": "Métricas", "m-tricas": "Métricas",
+    "socio": "Socios", "socios": "Socios", "membresia": "Membresías",
+    "clase": "Clases", "clases": "Clases", "asistencia": "Asistencia",
     "configuracion": "Configuración", "ajustes": "Ajustes",
 }
 
