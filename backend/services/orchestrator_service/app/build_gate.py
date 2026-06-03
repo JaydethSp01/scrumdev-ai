@@ -1131,15 +1131,20 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
                     logger.warning("runtime_smoke_crashed", error=str(_se)[:200])
                     smoke = {"ok": True, "skipped": True, "reason": "smoke error: " + str(_se)[:80]}
                 if smoke.get("ok"):
-                    # JUEZ VISUAL: Claude mira el screenshot. Si está feo y quedan
-                    # intentos, regenera la UI con el feedback y vuelve a buildear.
+                    # El build COMPILA y RENDERIZA -> se despliega tal cual.
+                    # JUEZ VISUAL REGEN DESACTIVADO: regeneraba la UI vía Claude
+                    # (intermitente)->OpenAI y a veces devolvía código roto, que en
+                    # el re-build TUMBABA un deploy que YA funcionaba. La calidad 1A
+                    # ya la garantizan el UI-kit + app-shell + plantillas curadas.
+                    # Reactivable con VISUAL_JUDGE_REGEN=true si algún día se quiere.
                     shot = smoke.get("screenshot")
-                    if shot and vision and attempt < max_attempts:
+                    if os.environ.get("VISUAL_JUDGE_REGEN", "false").lower() == "true" \
+                            and shot and vision and attempt < max_attempts:
                         files_rel, changed = await _visual_judge_and_fix(
                             files_rel, shot, vision, all_fixes)
                         if changed:
                             logger.info("visual_judge_regen", attempt=attempt)
-                            continue  # rebuild con la UI mejorada
+                            continue
                     return {"ok": True, "files": files_rel, "fixes": all_fixes,
                             "attempts": attempt, "log": log_b[-400:],
                             "smoke": smoke.get("reason"),
