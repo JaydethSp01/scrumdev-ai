@@ -148,26 +148,32 @@ async def kafka_test() -> dict:
                      correlation_id="PROD-VERIFY", project_key="DEMO",
                      payload={"hello": "prod", "ok": True})
     topic = _topic_for(ev.event_type)
+    # PUBLICAR primero (auto-crea el topic + escribe el mensaje), luego consumir
+    # desde el inicio. Así no falla por topic inexistente.
     try:
-        consumer = AIOKafkaConsumer(
-            topic, bootstrap_servers="localhost:9092", auto_offset_reset="latest",
-            value_deserializer=lambda v: _json.loads(v.decode()))
-        await consumer.start()
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "stage": "consumer_start", "topic": topic, "error": str(exc)[:200]}
-    try:
-        await asyncio.sleep(1)
         await HybridEventBus().publish(ev)
+        await HybridEventBus().publish(ev)  # 2da: asegura topic creado + mensaje
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "stage": "publish", "error": str(exc)[:200]}
+    consumer = None
+    try:
+        await asyncio.sleep(2)  # dar tiempo a la creación del topic
+        consumer = AIOKafkaConsumer(
+            topic, bootstrap_servers="localhost:9092", auto_offset_reset="earliest",
+            value_deserializer=lambda v: _json.loads(v.decode()),
+            consumer_timeout_ms=15000)
+        await consumer.start()
         msg = await asyncio.wait_for(consumer.getone(), timeout=15)
         return {"ok": True, "topic": msg.topic, "key": msg.key.decode() if msg.key else None,
                 "payload": msg.value}
     except asyncio.TimeoutError:
         return {"ok": False, "stage": "consume_timeout", "topic": topic}
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "stage": "publish_consume", "error": str(exc)[:200]}
+        return {"ok": False, "stage": "consume", "topic": topic, "error": str(exc)[:200]}
     finally:
         try:
-            await consumer.stop()
+            if consumer:
+                await consumer.stop()
             from shared.events.kafka_bus import get_kafka_bus
             await get_kafka_bus().close()
         except Exception:
