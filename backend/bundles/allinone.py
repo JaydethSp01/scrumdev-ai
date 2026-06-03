@@ -77,13 +77,15 @@ def _start_brokers() -> None:
         rpk = shutil.which("rpk")
         if rpk and not _up("127.0.0.1", 9092):
             os.makedirs("/tmp/redpanda", exist_ok=True)
+            lf = open("/tmp/redpanda_start.log", "wb")
             subprocess.Popen([
-                rpk, "redpanda", "start", "--smp=1", "--memory=512M",
+                rpk, "redpanda", "start", "--smp=1", "--memory=1G",
                 "--reserve-memory=0M", "--overprovisioned", "--node-id=0", "--check=false",
+                "--unsafe-bypass-fsync=true",
                 "--kafka-addr=PLAINTEXT://0.0.0.0:9092",
                 "--advertise-kafka-addr=PLAINTEXT://localhost:9092",
                 "--set=redpanda.data_directory=/tmp/redpanda",
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            ], stdout=lf, stderr=lf)
             log.info("redpanda (kafka) lanzado")
     except Exception as exc:  # noqa: BLE001
         log.warning("redpanda no arrancó: %s", exc)
@@ -126,12 +128,19 @@ async def brokers_status() -> dict:
         except Exception:
             return False
 
+    rp_log = ""
+    try:
+        with open("/tmp/redpanda_start.log", "r", errors="ignore") as fh:
+            rp_log = fh.read()[-600:]
+    except Exception:
+        rp_log = "(sin log)"
     return {
         "kafka_enabled_env": os.environ.get("KAFKA_ENABLED"),
         "rpk_binary": bool(shutil.which("rpk")),
         "redis_binary": bool(shutil.which("redis-server")),
         "redis_up_6379": _port("127.0.0.1", 6379),
         "kafka_up_9092": _port("127.0.0.1", 9092),
+        "redpanda_log_tail": rp_log,
     }
 
 # servicios internos bajo /_svc/* (el gateway los llama ahi por HTTP)
