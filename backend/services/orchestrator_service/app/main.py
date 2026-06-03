@@ -2788,8 +2788,58 @@ class DeployRequest(BaseModel):
     framework: str = "nextjs"
 
 
+# Estado en memoria del último deploy por proyecto (para polling del front). El
+# deploy real corre en background -> el endpoint responde al instante (evita el
+# 502 del proxy del Space a los ~300s) y el front polea /deploy/preview + esto.
+_DEPLOY_STATUS: dict[str, dict] = {}
+
+
 @app.post("/projects/{project_key}/deploy")
 async def deploy_project(project_key: str, req: DeployRequest) -> dict:
+    """Dispara el despliegue en BACKGROUND y responde al instante. El deploy
+    completo (build gate + GitHub + Vercel + Render + Neon) tarda >300s y el proxy
+    del Space corta a 300s con 502; por eso es async. El front polea el estado."""
+    # validación rápida: que haya código
+    async for session in get_session():
+        from services.orchestrator_service.app.versions import get_active_version as _gav
+        av = await _gav(session, project_key)
+        q = select(CodeArtifact.id).where(CodeArtifact.project_key == project_key)
+        if av:
+            q = q.where(CodeArtifact.version_id == av.id)
+        has_code = (await session.execute(q.limit(1))).first() is not None
+        break
+    if not has_code:
+        raise HTTPException(status_code=400, detail="No hay codigo generado. Ejecuta /build primero.")
+    _DEPLOY_STATUS[project_key] = {"state": "building", "deployed": None, "error": None,
+                                   "vercel_url": None, "git_url": None, "render_url": None,
+                                   "gate_ok": None}
+    asyncio.create_task(_run_deploy_bg(project_key, req.triggered_by))
+    return {"async": True, "building": True, "state": "building",
+            "message": "Despliegue en curso (build + GitHub + Vercel + Render). "
+                       "El estado se actualiza en unos minutos."}
+
+
+async def _run_deploy_bg(project_key: str, triggered_by: str) -> None:
+    """Hace el deploy completo en background y guarda el resultado en _DEPLOY_STATUS."""
+    try:
+        res = await _deploy_project_impl(project_key, triggered_by)
+        st = _DEPLOY_STATUS.setdefault(project_key, {})
+        if res.get("build_gate_failed"):
+            st.update({"state": "gate_failed", "deployed": False, "gate_ok": False,
+                       "error": res.get("message")})
+        else:
+            st.update({"state": "done" if res.get("deployed") else "error",
+                       "deployed": res.get("deployed"), "gate_ok": True,
+                       "vercel_url": res.get("vercel_url"), "git_url": res.get("git_url"),
+                       "render_url": res.get("render_url")})
+        logger.info("deploy_bg_done", project=project_key, state=st.get("state"))
+    except Exception as exc:  # noqa: BLE001
+        _DEPLOY_STATUS.setdefault(project_key, {}).update(
+            {"state": "error", "deployed": False, "error": str(exc)[:300]})
+        logger.exception("deploy_bg_failed", project=project_key)
+
+
+async def _deploy_project_impl(project_key: str, triggered_by: str) -> dict:
     """Publica todos los CodeArtifact al repo GitHub del usuario y opcionalmente
     crea un proyecto Vercel apuntado al repo (Vercel hace auto-deploy en cada push)."""
     async for session in get_session():
@@ -2876,7 +2926,7 @@ async def deploy_project(project_key: str, req: DeployRequest) -> dict:
                 correlation_id=str(uuid4()),
                 project_key=project_key,
                 payload={
-                    "triggered_by": req.triggered_by,
+                    "triggered_by": triggered_by,
                     "stack": stack,
                     "frontend_url": vercel_url,
                     "backend_url": render_url,
@@ -2962,13 +3012,18 @@ async def deploy_preview(project_key: str) -> dict:
     except Exception:
         pass
 
+    bg = _DEPLOY_STATUS.get(project_key) or {}
     return {
-        "vercel_url": vercel_url,
+        "vercel_url": vercel_url or bg.get("vercel_url"),
         "state": state,
-        "github_url": repo_url if repo_exists else None,
+        "github_url": repo_url if repo_exists else bg.get("git_url"),
         "github_owner": owner,
         "expected_repo_slug": repo_slug,
-        "deployed": bool(repo_exists or vercel_url),
+        "deployed": bool(repo_exists or vercel_url or bg.get("deployed")),
+        # estado del deploy async en curso (building/done/gate_failed/error)
+        "deploy_state": bg.get("state"),
+        "deploy_error": bg.get("error"),
+        "gate_ok": bg.get("gate_ok"),
     }
 
 

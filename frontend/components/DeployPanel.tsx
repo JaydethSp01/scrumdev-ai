@@ -115,7 +115,14 @@ export function DeployPanel({ projectKey, user }: Props) {
     pollRef.current = setInterval(async () => {
       const p = await refreshPreview();
       const s = (p?.state || "").toUpperCase();
+      const ds = (p as { deploy_state?: string } | null)?.deploy_state;
       if (s === "READY" || s === "ERROR" || s === "FAILED") {
+        stopPoll();
+      } else if (ds === "gate_failed" || ds === "error") {
+        stopPoll();
+        const de = (p as { deploy_error?: string } | null)?.deploy_error;
+        toasts.error(`Deploy falló: ${de || "revisa el build gate"}`);
+      } else if (ds === "done" && p?.vercel_url) {
         stopPoll();
       }
     }, 8000);
@@ -168,15 +175,21 @@ export function DeployPanel({ projectKey, user }: Props) {
         framework: "nextjs",
       });
       setLastDeploy(result);
-      setPreview({
-        vercel_url: result.vercel_url,
-        state: result.vercel_state,
-        github_url: result.git_url,
-      });
-      toasts.success("Despliegue iniciado. Vercel terminara de construir en breve.");
-      const s = (result.vercel_state || "").toUpperCase();
-      if (s && s !== "READY" && s !== "ERROR" && s !== "FAILED") {
+      // El deploy corre en BACKGROUND (async) -> no esperamos la URL aquí; el
+      // estado real (GitHub + Vercel) se obtiene poleando /deploy/preview.
+      if (result.async || result.building) {
+        toasts.success("Despliegue en curso (build + GitHub + Vercel)… se actualiza solo.");
         startPolling();
+      } else {
+        // compat con respuesta síncrona antigua
+        setPreview({
+          vercel_url: result.vercel_url,
+          state: result.vercel_state,
+          github_url: result.git_url,
+        });
+        toasts.success("Despliegue iniciado. Vercel terminara de construir en breve.");
+        const s = (result.vercel_state || "").toUpperCase();
+        if (s && s !== "READY" && s !== "ERROR" && s !== "FAILED") startPolling();
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
