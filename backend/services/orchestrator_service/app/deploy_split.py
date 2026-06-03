@@ -183,10 +183,16 @@ async def _deploy_frontend(
                     json={
                         "name": web_repo, "git_owner": owner, "git_repo": web_repo,
                         "branch": "main", "runtime": "node",
-                        "build_command": "npm install && npm run build",
+                        # --include=dev: Render pone NODE_ENV=production y npm
+                        # OMITE devDependencies (tailwindcss/postcss/autoprefixer)
+                        # -> sin ellas el CSS NO se procesa y la app sale SIN ESTILO.
+                        "build_command": "npm install --include=dev && npm run build",
                         "start_command": "npx next start -p $PORT",
                         "env_vars": ([{"key": "NEXT_PUBLIC_API_URL", "value": api_url}]
-                                     if api_url else []) + [{"key": "NODE_VERSION", "value": "20"}],
+                                     if api_url else []) + [
+                            {"key": "NODE_VERSION", "value": "20"},
+                            {"key": "NPM_CONFIG_PRODUCTION", "value": "false"},
+                        ],
                     },
                 )
                 rdata = rr.json() if rr.status_code < 500 else {"error": rr.text}
