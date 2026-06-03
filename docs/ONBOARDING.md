@@ -136,8 +136,16 @@ open http://localhost:3000                         # frontend
 | Frontend | Vercel (auto-deploy en cada push a `main`) | https://scrumdevai.vercel.app |
 | Backend (allinone) | Hugging Face Space (Docker, 16GB) | https://jaydethsp01-scrumdevai-api.hf.space |
 | DB | Neon (Postgres serverless) | — |
-| Kafka + Redis | Dentro del contenedor del Space (Redpanda + Redis) | — |
+| Redis | Dentro del contenedor del Space | — |
 | Plantillas 1A | Repo GitHub público | https://github.com/JaydethSp01/scrumdev-templates |
+
+> **Event bus / Kafka (decisión de arquitectura):** el `HybridEventBus` publica
+> `DomainEvent` en cada paso. En el **demo gratis del HF Space** (1 contenedor) va
+> en modo **in-process** (`KAFKA_ENABLED=false`) → estable, sin cargar el contenedor.
+> En el **stack real** (`docker-compose.full.yml`, VPS) `KAFKA_ENABLED=true` y
+> **Redpanda corre como contenedor propio** → Kafka real (validado E2E). El productor
+> es no-bloqueante (timeout 6s): si el broker no responde, degrada a in-process sin
+> colgar la app. Así un broker no desestabiliza el demo y la arquitectura sigue 100%.
 
 **Login demo:** `kelly@scrumdev.ai` / `Scrumdev2026!` · `adam@scrumdev.ai` / `adam-demo-2026`
 

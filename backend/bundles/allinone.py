@@ -71,13 +71,14 @@ def _start_brokers() -> None:
     except Exception as exc:  # noqa: BLE001
         log.warning("redis no arrancó: %s", exc)
 
-    # Redpanda (Kafka-compatible, single binary, sin Zookeeper/JVM). Corre como
-    # usuario no-root -> escribimos un redpanda.yaml (data_directory en /tmp,
-    # kafka_api 9092, developer_mode) y lanzamos el BINARIO directo (evita la CLI
-    # cambiante de rpk). single-node: empty_seed_starts_cluster + bypass fsync.
+    # Redpanda (Kafka). SOLO se arranca si KAFKA_ENABLED=true. En el demo gratis
+    # (1 contenedor) se deja en false -> el bus cae a in-process (estable). En el
+    # stack real (docker-compose.full) KAFKA_ENABLED=true -> Kafka como contenedor
+    # propio con recursos dedicados. Un broker no va dentro del demo de 1 contenedor.
     try:
         rpbin = shutil.which("redpanda") or "/usr/bin/redpanda"
-        if os.path.exists(rpbin) and not _up("127.0.0.1", 9092):
+        kafka_on = os.environ.get("KAFKA_ENABLED", "false").lower() == "true"
+        if kafka_on and os.path.exists(rpbin) and not _up("127.0.0.1", 9092):
             os.makedirs("/tmp/redpanda", exist_ok=True)
             cfg = """redpanda:
   data_directory: /tmp/redpanda

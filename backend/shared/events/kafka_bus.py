@@ -42,6 +42,8 @@ class KafkaEventBus:
     async def _ensure_producer(self):
         if self._producer is not None:
             return self._producer
+        if getattr(self, "_failed", False):
+            return None  # ya falló al conectar -> no reintentar y bloquear cada publish
         async with self._lock:
             if self._producer is not None:
                 return self._producer
@@ -49,19 +51,24 @@ class KafkaEventBus:
                 from aiokafka import AIOKafkaProducer
             except ImportError:
                 logger.warning("aiokafka_missing")
+                self._failed = True
                 return None
             try:
                 producer = AIOKafkaProducer(
                     bootstrap_servers=settings.kafka_bootstrap_servers,
                     value_serializer=lambda v: json.dumps(v).encode(),
                     enable_idempotence=True,
+                    request_timeout_ms=5000,
                 )
-                await producer.start()
+                # NO bloquear el flujo: si el broker no responde en 6s, degradamos
+                # a bus in-process (el evento igual se logueó). Nunca cuelga la app.
+                await asyncio.wait_for(producer.start(), timeout=6.0)
                 self._producer = producer
                 logger.info("kafka_producer_started", servers=settings.kafka_bootstrap_servers)
                 return producer
             except Exception as exc:
-                logger.warning("kafka_connect_failed", error=str(exc))
+                logger.warning("kafka_connect_failed", error=str(exc)[:160])
+                self._failed = True
                 return None
 
     async def publish(self, event: DomainEvent) -> None:
@@ -78,11 +85,13 @@ class KafkaEventBus:
             "payload": event.payload,
         }
         try:
-            # key por correlation_id para ordering por workflow
+            # key por correlation_id para ordering por workflow. Timeout para que
+            # un broker lento NUNCA bloquee el flujo de la app (best-effort).
             key = (event.correlation_id or "na").encode()
-            await producer.send_and_wait(topic, value=payload, key=key)
+            await asyncio.wait_for(
+                producer.send_and_wait(topic, value=payload, key=key), timeout=6.0)
         except Exception as exc:
-            logger.warning("kafka_publish_failed", topic=topic, error=str(exc))
+            logger.warning("kafka_publish_failed", topic=topic, error=str(exc)[:160])
 
     async def close(self) -> None:
         if self._producer is not None:
