@@ -132,6 +132,48 @@ async def health() -> dict:
             "services": ["gateway", "core(8)", "brain(2)", "connectors(3)"]}
 
 
+@app.get("/_allinone/kafka-test")
+async def kafka_test() -> dict:
+    """Prueba E2E de Kafka EN PROD: publica un DomainEvent por el bus real y lo
+    consume del topic. Si vuelve, Kafka está vivo y funcional en producción."""
+    import asyncio, json as _json
+    try:
+        from shared.events.domain_events import DomainEvent
+        from shared.events.event_bus import HybridEventBus
+        from shared.events.kafka_bus import _topic_for
+        from aiokafka import AIOKafkaConsumer
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "stage": "import", "error": str(exc)[:200]}
+    ev = DomainEvent(event_type="deploy.completed", source_service="kafka-test",
+                     correlation_id="PROD-VERIFY", project_key="DEMO",
+                     payload={"hello": "prod", "ok": True})
+    topic = _topic_for(ev.event_type)
+    try:
+        consumer = AIOKafkaConsumer(
+            topic, bootstrap_servers="localhost:9092", auto_offset_reset="latest",
+            value_deserializer=lambda v: _json.loads(v.decode()))
+        await consumer.start()
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "stage": "consumer_start", "topic": topic, "error": str(exc)[:200]}
+    try:
+        await asyncio.sleep(1)
+        await HybridEventBus().publish(ev)
+        msg = await asyncio.wait_for(consumer.getone(), timeout=15)
+        return {"ok": True, "topic": msg.topic, "key": msg.key.decode() if msg.key else None,
+                "payload": msg.value}
+    except asyncio.TimeoutError:
+        return {"ok": False, "stage": "consume_timeout", "topic": topic}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "stage": "publish_consume", "error": str(exc)[:200]}
+    finally:
+        try:
+            await consumer.stop()
+            from shared.events.kafka_bus import get_kafka_bus
+            await get_kafka_bus().close()
+        except Exception:
+            pass
+
+
 @app.get("/_allinone/brokers")
 async def brokers_status() -> dict:
     """Diagnóstico de los brokers event-driven en prod (Redis + Kafka/Redpanda)."""
