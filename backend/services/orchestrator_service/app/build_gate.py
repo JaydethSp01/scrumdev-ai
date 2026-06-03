@@ -704,24 +704,32 @@ def _fix_postcss_config(files_rel: list[dict], report: list[str]) -> list[dict]:
         if base not in ("postcss.config.mjs", "postcss.config.js", "postcss.config.cjs"):
             continue
         c = f.get("content") or ""
-        # si ya usa el formato objeto canónico, dejar
-        if re.search(r"plugins\s*:\s*\{", c):
+        is_mjs = base.endswith(".mjs")
+        is_cjs = base.endswith(".cjs")
+        has_obj = bool(re.search(r"plugins\s*:\s*\{", c))
+        uses_cjs = "module.exports" in c
+        # BUG que rompía CSS: `.mjs` con `module.exports` es ESM-INVÁLIDO
+        # ('module is not defined'). Un .mjs DEBE usar `export default`. Solo se
+        # salta si YA es canónico (objeto) Y el export coincide con la extensión.
+        export_ok = (is_cjs and uses_cjs) or ((not is_cjs) and not uses_cjs)
+        if has_obj and export_ok:
             continue
-        canonical = (
-            "/** @type {import('postcss-load-config').Config} */\n"
-            "export default {\n"
-            "  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n"
-            "};\n"
-        )
-        if base.endswith(".cjs") or "module.exports" in c:
+        if is_cjs:
             canonical = (
                 "module.exports = {\n"
                 "  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n"
                 "};\n"
             )
+        else:  # .mjs y .js -> ESM (export default). Lo más seguro para Next 14.
+            canonical = (
+                "/** @type {import('postcss-load-config').Config} */\n"
+                "export default {\n"
+                "  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n"
+                "};\n"
+            )
         if canonical.strip() != c.strip():
             f["content"] = canonical
-            report.append("postcss.config normalizado (plugins canónicos)")
+            report.append("postcss.config normalizado (ESM/canónico)")
     return files_rel
 
 

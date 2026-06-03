@@ -2708,6 +2708,19 @@ async def use_template(project_key: str, req: dict) -> dict:
     files = await _load_template_files(template_id)
     if not files:
         raise HTTPException(status_code=502, detail="no se pudieron leer los archivos de la plantilla")
+    # Inyectar el UI-kit (AppShell/Card/DataTable/...) + color de marca, igual que
+    # la generación. Las páginas de la plantilla IMPORTAN @/components/ui/*; sin
+    # esto faltan los componentes y el build del gate falla ("Can't resolve").
+    try:
+        from services.agent_runtime_service.app.runtime.app_generator import (
+            _inject_ui_kit, _ensure_brand_color,
+        )
+        _rep: list[str] = []
+        files = _inject_ui_kit(files, _rep)
+        files = _ensure_brand_color(files, getattr(tpl, "brand_color", "#4f46e5"), _rep)
+        logger.info("template_ui_kit_injected", project=project_key, report=_rep)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("template_ui_kit_skip", project=project_key, error=str(exc)[:160])
     # persistir en la versión activa (mismo patrón que generate-app)
     from services.orchestrator_service.app.versions import ensure_v1, get_active_version
     async for session in get_session():
