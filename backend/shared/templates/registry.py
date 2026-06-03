@@ -69,9 +69,33 @@ def match_templates(
     # filtrar negativos fuertes (landing vs app cruzados) pero asegurar >= top_k
     positive = [s for s in scored if s[1] > 0]
     result = positive[:top_k] if len(positive) >= 3 else scored[:top_k]
-    return result
+    # FALLBACK: si no hay match decente (todo <=0), garantizar una por DEFECTO
+    # (un dashboard CRUD seedeado y genérico) para que el usuario SIEMPRE tenga
+    # una plantilla 1A que elegir, aunque no detectemos el sector.
+    if not result or (result and result[0][1] <= 0):
+        dft = default_template(only_seeded=only_seeded)
+        if dft and dft.id not in {t.id for t, _ in result}:
+            result = [(dft, 0.0)] + result
+    return result[:top_k]
+
+
+# Plantilla por DEFECTO cuando el matching no detecta sector. Genérica y seedeada.
+DEFAULT_TEMPLATE_ID = "saas-dashboard"
+DEFAULT_SEEDED_FALLBACK = "retail-inventory-pro"  # seedeada, siempre desplegable
+
+
+def default_template(only_seeded: bool = False):
+    """Devuelve la plantilla por defecto. Prioriza una seedeada (con archivos
+    reales, desplegable al instante) si se pide only_seeded o si la default no
+    está seedeada todavía."""
+    from shared.templates.catalog import get_template
+    dft = get_template(DEFAULT_TEMPLATE_ID)
+    if dft and (dft.has_files or not only_seeded):
+        return dft
+    # caer a una seedeada garantizada
+    return get_template(DEFAULT_SEEDED_FALLBACK) or dft
 
 
 def best_template(classification: dict, vision: str) -> Template | None:
     ranked = match_templates(classification, vision, top_k=1)
-    return ranked[0][0] if ranked else None
+    return ranked[0][0] if ranked else default_template()
