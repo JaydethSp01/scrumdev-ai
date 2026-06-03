@@ -113,6 +113,27 @@ async def health() -> dict:
     return {"status": "ok", "mode": "allinone",
             "services": ["gateway", "core(8)", "brain(2)", "connectors(3)"]}
 
+
+@app.get("/_allinone/brokers")
+async def brokers_status() -> dict:
+    """Diagnóstico de los brokers event-driven en prod (Redis + Kafka/Redpanda)."""
+    import shutil, socket, os
+
+    def _port(host: str, port: int) -> bool:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                return True
+        except Exception:
+            return False
+
+    return {
+        "kafka_enabled_env": os.environ.get("KAFKA_ENABLED"),
+        "rpk_binary": bool(shutil.which("rpk")),
+        "redis_binary": bool(shutil.which("redis-server")),
+        "redis_up_6379": _port("127.0.0.1", 6379),
+        "kafka_up_9092": _port("127.0.0.1", 9092),
+    }
+
 # servicios internos bajo /_svc/* (el gateway los llama ahi por HTTP)
 _svc = FastAPI(title="ScrumDev AI - internal services")
 _svc.mount("/auth", auth_app)
