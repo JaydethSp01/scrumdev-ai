@@ -219,14 +219,18 @@ def _normalize_css_imports(files_rel: list[dict], report: list[str]) -> list[dic
     return files_rel
 
 
-def _apply_app_shell(files_rel: list[dict], report: list[str], title: str = "") -> list[dict]:
+def _apply_app_shell(files_rel: list[dict], report: list[str], title: str = "",
+                     with_auth: bool = True) -> list[dict]:
     """Si el proyecto trae el UI-kit (AppShell), reescribe el ROOT layout para que
     envuelva TODA página en <AppShell> con la navegación auto-derivada de las rutas.
 
     Es la garantía de consistencia: aunque la IA (o el fallback OpenAI) genere
     páginas planas, TODAS quedan dentro del app-shell (sidebar fijo con enlaces +
     header + color de marca). 'Inyectar el kit' no basta si las páginas no lo usan;
-    esto lo USA de forma determinista. Solo aplica a apps con datos (no landings)."""
+    esto lo USA de forma determinista. Solo aplica a apps con datos (no landings).
+
+    Si `with_auth`, envuelve en <ProtectedShell> (login + roles) en vez de
+    <AppShell> y garantiza las páginas /login y /usuarios + ítem de nav."""
     paths = {(f.get("path") or "").lstrip("/") for f in files_rel}
     has_shell = any(p.endswith("components/ui/AppShell.tsx") for p in paths)
     if not has_shell:
@@ -237,45 +241,187 @@ def _apply_app_shell(files_rel: list[dict], report: list[str], title: str = "") 
                    ("frontend/app/layout.tsx", "app/layout.tsx")), None)
     if not layout:
         return files_rel
+    # prefijo de rutas (frontend/app o app)
+    app_prefix = "frontend/app" if any(
+        (f.get("path") or "").lstrip("/").startswith("frontend/app/") for f in files_rel
+    ) else "app"
     routes = _discover_routes(files_rel)
     if not routes:
         routes = [("/", "Inicio")]
+    if with_auth:
+        files_rel = _ensure_auth_pages(files_rel, app_prefix, title or _guess_app_title(files_rel) or "Panel", report)
+        # excluir /login del nav y agregar Usuarios al final (si no está)
+        routes = [(h, l) for (h, l) in routes if h != "/login"]
+        if not any(h == "/usuarios" for h, _ in routes):
+            routes.append(("/usuarios", "Usuarios"))
     nav_js = "[" + ", ".join('{ href: "%s", label: "%s" }' % (h, l) for h, l in routes) + "]"
     # título: lo dado, o derivado del primer <h1>/title del home, o genérico
     t = (title or _guess_app_title(files_rel) or "Panel").replace('"', "'")
+    shell_import = (
+        'import { ProtectedShell } from "@/components/ui/ProtectedShell";'
+        if with_auth else 'import { AppShell } from "@/components/ui/AppShell";'
+    )
+    shell_open, shell_close = (
+        (f'<ProtectedShell items={{NAV}} title="{t}">', "</ProtectedShell>")
+        if with_auth else (f'<AppShell items={{NAV}} title="{t}">', "</AppShell>")
+    )
     new = (
         'import "./globals.css";\n'
-        'import { AppShell } from "@/components/ui/AppShell";\n\n'
+        f'{shell_import}\n\n'
         f'const NAV = {nav_js};\n\n'
         f'export const metadata = {{ title: "{t}", description: "Generado con ScrumDev AI" }};\n\n'
         "export default function RootLayout({ children }: { children: React.ReactNode }) {\n"
         "  return (\n"
         '    <html lang="es">\n'
         "      <body>\n"
-        f'        <AppShell items={{NAV}} title="{t}">{{children}}</AppShell>\n'
+        f'        {shell_open}{{children}}{shell_close}\n'
         "      </body>\n"
         "    </html>\n"
         "  );\n}\n"
     )
     if layout.get("content") != new:
         layout["content"] = new
-        report.append(f"app-shell aplicado al layout ({len(routes)} secciones, '{t}')")
+        report.append(
+            f"app-shell{'+auth' if with_auth else ''} aplicado al layout "
+            f"({len(routes)} secciones, '{t}')"
+        )
+    return files_rel
+
+
+def _ensure_auth_pages(files_rel: list[dict], app_prefix: str, title: str,
+                       report: list[str]) -> list[dict]:
+    """Garantiza las páginas /login (LoginForm) y /usuarios (UsersManager) del
+    UI-kit. Determinista: toda app-dashboard tiene login + gestión de roles con
+    un superadmin sembrado, sin depender de lo que genere la IA."""
+    by_path = {(f.get("path") or "").lstrip("/"): f for f in files_rel}
+    t = (title or "Panel").replace('"', "'")
+    login_path = f"{app_prefix}/login/page.tsx"
+    users_path = f"{app_prefix}/usuarios/page.tsx"
+    login_src = (
+        '"use client";\n'
+        'import { LoginForm } from "@/components/ui/LoginForm";\n\n'
+        "export default function LoginPage() {\n"
+        f'  return <LoginForm appName="{t}" />;\n'
+        "}\n"
+    )
+    users_src = (
+        '"use client";\n'
+        'import { UsersManager } from "@/components/ui/UsersManager";\n'
+        'import { PageHeader } from "@/components/ui/PageHeader";\n\n'
+        "export default function UsuariosPage() {\n"
+        "  return (\n"
+        "    <div className=\"space-y-6\">\n"
+        '      <PageHeader title="Usuarios y roles" subtitle="Gestiona accesos, crea usuarios y define roles." />\n'
+        "      <UsersManager />\n"
+        "    </div>\n"
+        "  );\n}\n"
+    )
+    if login_path in by_path:
+        by_path[login_path]["content"] = login_src
+    else:
+        files_rel.append({"path": login_path, "content": login_src})
+    if users_path in by_path:
+        by_path[users_path]["content"] = users_src
+    else:
+        files_rel.append({"path": users_path, "content": users_src})
+    report.append("auth: páginas /login y /usuarios garantizadas (superadmin sembrado)")
+    return files_rel
+
+
+# Bloque de tema canónico: tipografía profesional + MODO CLARO forzado. El
+# "todo en negro" venía de @media (prefers-color-scheme: dark) en el globals
+# generado, que con SO en oscuro pintaba fondo negro. Lo neutralizamos.
+
+
+def _theme_blocks(vision: str) -> tuple[str, str]:
+    """Devuelve (font_import, theme_base) para el SECTOR de la visión, usando el
+    par tipográfico curado del skill ui-ux-pro-max. Cada sector se ve distinto."""
+    try:
+        from shared.design.sector_themes import pick_theme, fonts_import_url
+        th = pick_theme(vision)
+        head, body = th["heading"], th["body"]
+        url = fonts_import_url(th)
+    except Exception:
+        head, body = "Plus Jakarta Sans", "Inter"
+        url = ("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800"
+               "&family=Inter:wght@400;500;600;700&display=swap")
+    font_import = f"@import url('{url}');\n"
+    theme_base = (
+        "\n:root { color-scheme: light; }\n"
+        "html, body {\n"
+        "  background-color: #f8fafc;\n  color: #0f172a;\n"
+        f"  font-family: '{body}', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;\n"
+        "  -webkit-font-smoothing: antialiased;\n}\n"
+        f"h1, h2, h3, h4 {{ font-family: '{head}', '{body}', sans-serif; letter-spacing: -0.02em; }}\n"
+        "* { border-color: #e2e8f0; }\n"
+    )
+    return font_import, theme_base
+
+
+def _apply_theme_css(files_rel: list[dict], report: list[str], vision: str = "") -> list[dict]:
+    """Inyecta tipografía del SECTOR + modo claro forzado en globals.css y elimina
+    las media-queries dark (causa del 'todo en negro'). Determinista en toda app."""
+    import re as _re
+    _FONT_IMPORT, _THEME_BASE = _theme_blocks(vision)
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        if not p.endswith("globals.css"):
+            continue
+        c = f.get("content") or ""
+        # 1) quitar bloques @media (prefers-color-scheme: dark) { ... }
+        c = _re.sub(
+            r"@media\s*\(\s*prefers-color-scheme\s*:\s*dark\s*\)\s*\{(?:[^{}]|\{[^{}]*\})*\}",
+            "", c, flags=_re.I,
+        )
+        # 2) quitar variables :root que fijaban fondo/texto oscuro genérico
+        c = _re.sub(r"--background\s*:\s*[^;]+;", "", c)
+        c = _re.sub(r"--foreground\s*:\s*[^;]+;", "", c)
+        # 3) asegurar directivas tailwind
+        if "@tailwind" not in c:
+            c = "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n" + c
+        # 4) font import al TOP (antes de @tailwind; PostCSS exige @import primero)
+        if "fonts.googleapis.com" not in c:
+            c = _FONT_IMPORT + c
+        # 5) base de tema (una sola vez)
+        if "color-scheme: light" not in c:
+            c = c + "\n" + _THEME_BASE
+        if c != (f.get("content") or ""):
+            f["content"] = c
+            report.append("tema aplicado a globals.css (tipografía + modo claro forzado)")
+        return files_rel
+    # no había globals.css: crear uno canónico junto al layout
+    app_prefix = "frontend/app" if any(
+        (x.get("path") or "").lstrip("/").startswith("frontend/app/") for x in files_rel
+    ) else "app"
+    files_rel.append({
+        "path": f"{app_prefix}/globals.css",
+        "content": _FONT_IMPORT + "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n" + _THEME_BASE,
+    })
+    report.append("globals.css canónico creado (tipografía + modo claro)")
     return files_rel
 
 
 def _guess_app_title(files_rel: list[dict]) -> str:
-    """Adivina un título de app desde el home (metadata.title o primer <h1>)."""
+    """Adivina el nombre real de la app: metadata.title del layout/home original,
+    o primer <h1> del home. Evita el genérico 'Panel' cuando hay un nombre."""
+    bad = {"app", "panel", "dashboard", "home", "inicio", "next.js", "create next app"}
+    # 1) metadata title del layout o el home (antes de reescribir)
+    for name in ("frontend/app/layout.tsx", "app/layout.tsx",
+                 "frontend/app/page.tsx", "app/page.tsx"):
+        f = next((x for x in files_rel if (x.get("path") or "").lstrip("/") == name), None)
+        if not f:
+            continue
+        c = f.get("content") or ""
+        m = re.search(r"title:\s*['\"]([^'\"]{2,40})['\"]", c)
+        if m and m.group(1).strip().lower() not in bad:
+            return m.group(1).strip()
+    # 2) primer <h1> del home
     home = next((f for f in files_rel if (f.get("path") or "").lstrip("/") in
                  ("frontend/app/page.tsx", "app/page.tsx")), None)
-    if not home:
-        return ""
-    c = home.get("content") or ""
-    m = re.search(r"title:\s*['\"]([^'\"]{2,40})['\"]", c)
-    if m:
-        return m.group(1).strip()
-    m = re.search(r"<h1[^>]*>\s*([^<{][^<]{1,38})</h1>", c)
-    if m:
-        return m.group(1).strip()
+    if home:
+        m = re.search(r"<h1[^>]*>\s*([^<{][^<]{1,38})</h1>", home.get("content") or "")
+        if m and m.group(1).strip().lower() not in bad:
+            return m.group(1).strip()
     return ""
 
 
@@ -1077,7 +1223,8 @@ async def _visual_judge_and_fix(files_rel: list[dict], screenshot_b64: str,
 
 
 async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
-                              vision: str = "", is_landing: bool = False) -> dict:
+                              vision: str = "", is_landing: bool = False,
+                              with_auth: bool | None = None) -> dict:
     """Compila el frontend; auto-fix + retry + JUEZ VISUAL. Devuelve {ok, files, log, fixes}."""
     npm = _npm_path()
     if not npm:
@@ -1095,7 +1242,11 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     # El app-shell (sidebar) es para APPS con datos, NO para landings (que llevan
     # hero+secciones). En stack estático se omite -> no se importa AppShell.
     if not is_landing:
-        files_rel = _apply_app_shell(files_rel, _pre)  # shell determinista (sidebar+header+marca)
+        # auth ON por defecto en apps-dashboard (login + roles + superadmin
+        # sembrado). El caller puede desactivarlo (with_auth=False).
+        _auth = True if with_auth is None else with_auth
+        files_rel = _apply_app_shell(files_rel, _pre, with_auth=_auth)  # shell determinista (sidebar+header+marca[+auth])
+    files_rel = _apply_theme_css(files_rel, _pre, vision=vision)  # fuentes del SECTOR + modo claro (mata "todo en negro")
     files_rel = _fix_root_layout(files_rel, _pre)  # root layout html/body server
     files_rel = _fix_next_router(files_rel, _pre)   # App Router: next/router -> next/navigation
     files_rel = _ensure_use_client(files_rel, _pre)  # hooks de cliente -> "use client"

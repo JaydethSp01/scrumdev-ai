@@ -42,3 +42,4 @@ backend/ml_cache/
 ml_cache/
 # NOTA: backend/ml_models/ (redes entrenadas .npz, ~6M) SÍ se commitea: el
 # ml_service las carga en runtime (también en cloud, sin PyTorch).
+.claude/

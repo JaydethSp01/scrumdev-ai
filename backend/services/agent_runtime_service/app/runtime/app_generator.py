@@ -353,6 +353,33 @@ def _pick_brand_color(classification: dict, vision: str) -> str:
     return "#4f46e5"  # indigo por defecto
 
 
+def _sector_design_note(classification: dict, vision: str) -> str:
+    """Brief de diseño por sector (paleta + tipografía del skill ui-ux-pro-max +
+    reglas pro de UX). Da identidad visual coherente al contenido que genera la IA;
+    el tema/tipografía YA se inyecta determinista, esto alinea el resto."""
+    hay = " ".join([
+        str(classification.get("type", "")), str(classification.get("sector", "")),
+        " ".join(classification.get("key_features", []) or []), (vision or "").lower(),
+    ])
+    try:
+        from shared.design.sector_themes import pick_theme
+        th = pick_theme(hay)
+    except Exception:
+        th = {"primary": "#4f46e5", "accent": "#06b6d4", "heading": "Plus Jakarta Sans",
+              "body": "Inter", "sector": "default"}
+    return (
+        "### DISEÑO DEL SECTOR (coherencia visual 1A):\n"
+        f"- Sector: **{th['sector']}**. Color de marca (clase `brand`): {th['primary']}; "
+        f"acento: {th['accent']}. Tipografía: títulos **{th['heading']}**, cuerpo **{th['body']}** "
+        "(ya cargadas vía globals.css — NO las re-importes).\n"
+        "- Usa `bg-brand`/`text-brand`/`border-brand` para acciones y realces; badges de estado con "
+        "tonos semánticos (success/warning/danger). Tarjetas `rounded-2xl border shadow-sm`.\n"
+        "- REGLAS PRO (skill ui-ux-pro-max): NADA de emojis como iconos (usa lucide-react); "
+        "`cursor-pointer` en todo clickeable; transiciones 150-300ms; contraste de texto AA "
+        "(slate-900 títulos, slate-600 secundario); foco visible. NO uses modo oscuro.\n"
+    )
+
+
 def _ensure_brand_color(files: list[dict], color: str, report: list[str]) -> list[dict]:
     """Garantiza que tailwind.config defina `brand` (y un brand-dark) con el color
     del sector. Si no hay tailwind.config, no hace nada (el manifest lo crea)."""
@@ -363,6 +390,16 @@ def _ensure_brand_color(files: list[dict], color: str, report: list[str]) -> lis
             continue
         c = f.get("content") or ""
         if '"brand"' in c or "brand:" in c or "brand :" in c:
+            # brand ya definido. Si es PLANO (brand: "#xxx") lo convertimos a
+            # objeto {DEFAULT, dark} para que `brand-dark` (gradiente del
+            # sidebar) exista. Si ya es objeto, lo dejamos.
+            m = _re.search(r'brand\s*:\s*["\']([#0-9a-fA-F]{4,9})["\']', c)
+            if m:
+                base = m.group(1)
+                obj = f'brand: {{ DEFAULT: "{base}", dark: "{_shade(base, -28)}" }}'
+                c2 = c[:m.start()] + obj + c[m.end():]
+                f["content"] = c2
+                report.append(f"brand normalizado a objeto con dark en {p}")
             return files  # ya definido por la IA/brand_kit
         # inyectar `brand` SIN duplicar la clave `colors` (en JS el último gana ->
         # un segundo `colors:{}` borraría brand). Orden: dentro de colors existente
@@ -603,6 +640,7 @@ async def generate_full_app(
         f"{stack_block}\n\n"
         f"{manifest_block}\n\n"
         f"{design_brief}\n\n"
+        f"{_sector_design_note(classification, vision)}\n"
         "**REGLAS TÉCNICAS OBLIGATORIAS (romperlas = build roto):**\n"
         "1. DATOS (CRÍTICO - la pantalla NUNCA debe verse vacía): el estado inicial DEBE SER "
         "el array de datos, NO vacío. `useState(MOCK)` donde MOCK es un array inline de 4-8 "

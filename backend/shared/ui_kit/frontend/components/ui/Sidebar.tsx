@@ -5,7 +5,9 @@ import { cn } from "@/lib/cn";
 
 export type NavItem = { href: string; label: string; icon?: React.ReactNode };
 
-/** Sidebar fijo del app-shell. Resalta la ruta activa con el color de marca. */
+/** Sidebar branded: fondo con gradiente del color de marca del sector (no
+ *  blanco/negro genérico), texto claro, ítem activo en pastilla. Da identidad
+ *  visual inmediata por sector y elimina el look "todo gris/negro". */
 export function Sidebar({
   items,
   title = "Panel",
@@ -17,11 +19,14 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   return (
-    <aside className="hidden md:flex w-64 shrink-0 flex-col border-r border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-950">
-      <div className="flex h-16 items-center px-6 text-lg font-bold tracking-tight text-neutral-900 dark:text-neutral-100">
-        {title}
+    <aside className="hidden md:flex w-64 shrink-0 flex-col bg-brand bg-gradient-to-b from-brand-dark to-brand text-white">
+      <div className="flex h-16 items-center gap-2.5 px-5 text-lg font-bold tracking-tight">
+        <span className="grid h-9 w-9 place-items-center rounded-xl bg-white/15 text-sm font-black">
+          {(title || "P").trim().charAt(0).toUpperCase()}
+        </span>
+        <span className="truncate">{title}</span>
       </div>
-      <nav className="flex-1 space-y-1 px-3 py-2">
+      <nav className="flex-1 space-y-1 px-3 py-3">
         {items.map((it) => {
           const active = pathname === it.href || (it.href !== "/" && pathname?.startsWith(it.href));
           return (
@@ -29,10 +34,10 @@ export function Sidebar({
               key={it.href}
               href={it.href}
               className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition",
+                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors duration-200",
                 active
-                  ? "bg-brand/10 text-brand"
-                  : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-900 dark:hover:text-neutral-100"
+                  ? "bg-white/20 text-white shadow-sm"
+                  : "text-white/75 hover:bg-white/10 hover:text-white"
               )}
             >
               {it.icon}
@@ -41,7 +46,9 @@ export function Sidebar({
           );
         })}
       </nav>
-      {footer ? <div className="border-t border-neutral-200 p-4 dark:border-neutral-800">{footer}</div> : null}
+      <div className="border-t border-white/15 p-4 text-xs text-white/70">
+        {footer ?? "ScrumDev AI"}
+      </div>
     </aside>
   );
 }
