@@ -78,13 +78,13 @@ def _start_brokers() -> None:
         if rpk and not _up("127.0.0.1", 9092):
             os.makedirs("/tmp/redpanda", exist_ok=True)
             lf = open("/tmp/redpanda_start.log", "wb")
+            # rpk moderno: --mode dev-container (single-node, bypass fsync, mem baja)
+            # + -X para overrides de config. data_directory en /tmp (no-root).
             subprocess.Popen([
-                rpk, "redpanda", "start", "--smp=1", "--memory=1G",
-                "--reserve-memory=0M", "--overprovisioned", "--node-id=0", "--check=false",
-                "--unsafe-bypass-fsync=true",
-                "--kafka-addr=PLAINTEXT://0.0.0.0:9092",
-                "--advertise-kafka-addr=PLAINTEXT://localhost:9092",
-                "--set=redpanda.data_directory=/tmp/redpanda",
+                rpk, "redpanda", "start", "--mode", "dev-container",
+                "-X", "redpanda.data_directory=/tmp/redpanda",
+                "--kafka-addr", "0.0.0.0:9092",
+                "--advertise-kafka-addr", "localhost:9092",
             ], stdout=lf, stderr=lf)
             log.info("redpanda (kafka) lanzado")
     except Exception as exc:  # noqa: BLE001
