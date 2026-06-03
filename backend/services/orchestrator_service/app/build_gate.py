@@ -134,7 +134,9 @@ def _seed_initial_state(files_rel: list[dict], report: list[str]) -> list[dict]:
         if not (p.endswith("page.tsx") or p.endswith("page.jsx")):
             continue
         c = f.get("content") or ""
-        if not _re.search(r"useState\s*(<[^>]*>)?\s*\(\s*(\[\s*\]|null)\s*\)", c):
+        # SOLO arrays vacíos (useState([])). NO tocar useState(null): puede ser un
+        # objeto/booleano/selección y sembrarlo con un array rompería la página.
+        if not _re.search(r"useState\s*(<[^>]*>)?\s*\(\s*\[\s*\]\s*\)", c):
             continue
         # claves de columna declaradas en la página (DataTable columns / accesos)
         keys = list(dict.fromkeys(_re.findall(r"key:\s*['\"]([a-zA-Z_][\w]*)['\"]", c)))
@@ -150,7 +152,7 @@ def _seed_initial_state(files_rel: list[dict], report: list[str]) -> list[dict]:
         mock = "[" + ", ".join(rows) + "]"
         # sembrar TODOS los estados vacíos (un dashboard tiene varios: una métrica
         # por entidad + la tabla); con count=1 las MetricCard quedaban en 0.
-        new = _re.sub(r"useState\s*(<[^>]*>)?\s*\(\s*(\[\s*\]|null)\s*\)",
+        new = _re.sub(r"useState\s*(<[^>]*>)?\s*\(\s*\[\s*\]\s*\)",
                       lambda m: f"useState({mock})", c)
         if new != c:
             f["content"] = new
