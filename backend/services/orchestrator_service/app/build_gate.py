@@ -1098,7 +1098,10 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     # DETERMINISTAS (sin navegador): evitan la pantalla en blanco que el build no
     # ve -> data access seguro + páginas dinámicas. Se aplican SIEMPRE, no solo
     # tras un smoke fallido (el smoke con navegador es best-effort/opcional).
-    files_rel = _seed_initial_state(files_rel, _pre)  # nunca arrancar vacío
+    # NOTA: _seed_initial_state DESACTIVADO. Sembrar useState([]) con un mock
+    # genérico puede caer en un valor que la página renderiza directo -> React
+    # client-side crash (peor que vacío). Claude ya genera datos inline (prompt
+    # reforzado) y el UI-kit maneja vacío con gracia ("Sin registros"). Estabilidad > seed.
     files_rel = _harden_data_access(files_rel, _pre)
     files_rel = _force_dynamic_pages(files_rel, _pre)
 
