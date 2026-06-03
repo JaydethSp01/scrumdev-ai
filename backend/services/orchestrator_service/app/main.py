@@ -2975,40 +2975,45 @@ async def _deploy_project_impl(project_key: str, triggered_by: str) -> dict:
 async def deploy_preview(project_key: str) -> dict:
     """Devuelve estado real del deploy. Valida que el repo EXISTA en GitHub
     antes de retornar github_url (sino el UI muestra link 404)."""
-    repo_slug = project_key.lower().replace("_", "-")
+    base = project_key.lower().replace("_", "-")
+    # El FRONTEND se publica como `<base>-web` (fullstack) o `<base>` (landing).
+    # Probamos ambos slugs: antes solo se chequeaba `<base>` -> 404 -> el deploy
+    # exitoso (`<base>-web` READY en Vercel) se reportaba como NO desplegado.
+    candidates = [f"{base}-web", base]
+    repo_slug = base
     owner = settings.scrumdev_git_owner
     repo_exists = False
     repo_url: str | None = None
     vercel_url = None
     state = None
 
-    # 1. Verifica si el repo realmente existe en GitHub.
+    # 1. Verifica cuál repo existe en GitHub (prioriza `<base>-web`).
     if owner and settings.scrumdev_git_token:
-        try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                r = await client.get(
-                    f"https://api.github.com/repos/{owner}/{repo_slug}",
-                    headers={
-                        "Authorization": f"Bearer {settings.scrumdev_git_token}",
-                        "Accept": "application/vnd.github+json",
-                    },
-                )
-                if r.status_code == 200:
-                    repo_exists = True
-                    repo_url = r.json().get("html_url")
-        except Exception:
-            pass
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            for slug in candidates:
+                try:
+                    r = await client.get(
+                        f"https://api.github.com/repos/{owner}/{slug}",
+                        headers={"Authorization": f"Bearer {settings.scrumdev_git_token}",
+                                 "Accept": "application/vnd.github+json"})
+                    if r.status_code == 200:
+                        repo_exists = True; repo_url = r.json().get("html_url"); repo_slug = slug
+                        break
+                except Exception:
+                    pass
 
-    # 2. Si hay deploy Vercel previo, retorna su URL + estado.
+    # 2. Estado del deploy en Vercel (mismo slug que el repo encontrado, o ambos).
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(
-                f"{settings.deploy_connector_service_url}/vercel/deployments/{repo_slug}"
-            )
-            if r.status_code == 200:
-                ld = r.json()
-                vercel_url = ld.get("url")
-                state = ld.get("readyState") or ld.get("state")
+            for slug in ([repo_slug] if repo_exists else candidates):
+                r = await client.get(
+                    f"{settings.deploy_connector_service_url}/vercel/deployments/{slug}")
+                if r.status_code == 200:
+                    ld = r.json()
+                    if ld.get("url"):
+                        vercel_url = ld.get("url")
+                        state = ld.get("readyState") or ld.get("state")
+                        break
     except Exception:
         pass
 
