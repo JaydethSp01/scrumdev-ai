@@ -123,7 +123,9 @@ async def _deploy_frontend(
 ) -> dict:
     """Push repo frontend + crea proyecto Vercel con NEXT_PUBLIC_API_URL y despliega."""
     out: dict[str, Any] = {"tier": "frontend", "repo": web_repo}
-    pub = await _publish_repo(web_repo, files_rel, f"ScrumDev AI frontend ({web_repo})")
+    # PÚBLICO: para que tanto Vercel como el FALLBACK de Render puedan fetchear el
+    # repo sin OAuth conectado.
+    pub = await _publish_repo(web_repo, files_rel, f"ScrumDev AI frontend ({web_repo})", private=False)
     out["git_url"] = (pub.get("push") or {}).get("url")
     if pub.get("needs_user_action"):
         out["error"] = "git_repo_failed"
@@ -168,6 +170,37 @@ async def _deploy_frontend(
     out["vercel_deploy"] = ddata
     out["url"] = ddata.get("url")
     out["deployed"] = "error" not in ddata
+
+    # FALLBACK A RENDER: si Vercel falla (p.ej. cuota free 402 "100 deploys/día"),
+    # desplegamos el MISMO frontend Next.js en Render como web service node. Así el
+    # deploy NO depende de la cuota de Vercel -> resiliente para la demo.
+    if "error" in ddata:
+        out["vercel_error"] = str(ddata.get("error"))[:200]
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                rr = await client.post(
+                    f"{conn}/render/services",
+                    json={
+                        "name": web_repo, "git_owner": owner, "git_repo": web_repo,
+                        "branch": "main", "runtime": "node",
+                        "build_command": "npm install && npm run build",
+                        "start_command": "npx next start -p $PORT",
+                        "env_vars": ([{"key": "NEXT_PUBLIC_API_URL", "value": api_url}]
+                                     if api_url else []) + [{"key": "NODE_VERSION", "value": "20"}],
+                    },
+                )
+                rdata = rr.json() if rr.status_code < 500 else {"error": rr.text}
+            if "error" not in rdata:
+                out["render_fallback"] = rdata
+                out["url"] = f"https://{web_repo}.onrender.com"
+                out["deployed"] = True
+                out["provider"] = "render"
+                logger.info("frontend_render_fallback_ok", repo=web_repo)
+            else:
+                out["render_error"] = str(rdata.get("error"))[:200]
+                logger.warning("frontend_render_fallback_failed", repo=web_repo, error=out["render_error"])
+        except Exception as exc:  # noqa: BLE001
+            out["render_error"] = str(exc)[:200]
     return out
 
 
