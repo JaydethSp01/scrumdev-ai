@@ -72,21 +72,37 @@ def _start_brokers() -> None:
         log.warning("redis no arrancó: %s", exc)
 
     # Redpanda (Kafka-compatible, single binary, sin Zookeeper/JVM). Corre como
-    # usuario no-root -> data-dir en /tmp (escribible). Se lanza vía rpk.
+    # usuario no-root -> escribimos un redpanda.yaml (data_directory en /tmp,
+    # kafka_api 9092, developer_mode) y lanzamos el BINARIO directo (evita la CLI
+    # cambiante de rpk). single-node: empty_seed_starts_cluster + bypass fsync.
     try:
-        rpk = shutil.which("rpk")
-        if rpk and not _up("127.0.0.1", 9092):
+        rpbin = shutil.which("redpanda") or "/usr/bin/redpanda"
+        if os.path.exists(rpbin) and not _up("127.0.0.1", 9092):
             os.makedirs("/tmp/redpanda", exist_ok=True)
+            cfg = """redpanda:
+  data_directory: /tmp/redpanda
+  node_id: 0
+  rpc_server: {address: 127.0.0.1, port: 33145}
+  kafka_api:
+    - {address: 0.0.0.0, port: 9092}
+  advertised_kafka_api:
+    - {address: localhost, port: 9092}
+  seed_servers: []
+  empty_seed_starts_cluster: true
+  developer_mode: true
+rpk:
+  overprovisioned: true
+  tune_aio_events: false
+"""
+            with open("/tmp/redpanda.yaml", "w") as fh:
+                fh.write(cfg)
             lf = open("/tmp/redpanda_start.log", "wb")
-            # rpk moderno: --mode dev-container (single-node, bypass fsync, mem baja)
-            # + -X para overrides de config. data_directory en /tmp (no-root).
             subprocess.Popen([
-                rpk, "redpanda", "start", "--mode", "dev-container",
-                "-X", "redpanda.data_directory=/tmp/redpanda",
-                "--kafka-addr", "0.0.0.0:9092",
-                "--advertise-kafka-addr", "localhost:9092",
+                rpbin, "--redpanda-cfg", "/tmp/redpanda.yaml",
+                "--smp", "1", "--memory", "1G", "--reserve-memory", "0M",
+                "--default-log-level=info", "--unsafe-bypass-fsync", "1",
             ], stdout=lf, stderr=lf)
-            log.info("redpanda (kafka) lanzado")
+            log.info("redpanda (kafka) lanzado (binario directo)")
     except Exception as exc:  # noqa: BLE001
         log.warning("redpanda no arrancó: %s", exc)
 
@@ -128,19 +144,26 @@ async def brokers_status() -> dict:
         except Exception:
             return False
 
-    rp_log = ""
+    rp_head = ""
     try:
         with open("/tmp/redpanda_start.log", "r", errors="ignore") as fh:
-            rp_log = fh.read()[-600:]
+            rp_head = fh.read()[:700]
     except Exception:
-        rp_log = "(sin log)"
+        rp_head = "(sin log)"
+    import subprocess as _sp
+    ver = ""
+    try:
+        ver = _sp.run(["rpk", "version"], capture_output=True, text=True, timeout=10).stdout[:120]
+    except Exception as e:
+        ver = f"(rpk version err: {e})"
     return {
         "kafka_enabled_env": os.environ.get("KAFKA_ENABLED"),
         "rpk_binary": bool(shutil.which("rpk")),
-        "redis_binary": bool(shutil.which("redis-server")),
+        "redpanda_binary_path": shutil.which("redpanda") or "/opt/redpanda/libexec/redpanda",
         "redis_up_6379": _port("127.0.0.1", 6379),
         "kafka_up_9092": _port("127.0.0.1", 9092),
-        "redpanda_log_tail": rp_log,
+        "rpk_version": ver,
+        "redpanda_log_head": rp_head,
     }
 
 # servicios internos bajo /_svc/* (el gateway los llama ahi por HTTP)
