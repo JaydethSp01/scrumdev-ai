@@ -103,14 +103,16 @@ RUN npm install -g @anthropic-ai/claude-code || true
 # falla, el build falla y nos enteramos (mejor que un juez visual muerto).
 # PW_BUST: incrementar este número fuerza a HF a reconstruir esta capa (su cache
 # de Docker ignora cambios sutiles; un ARG que cambia sí la invalida).
-ARG PW_BUST=4
+ARG PW_BUST=5
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+# RESILIENTE: si playwright/--with-deps falla (en trixie faltan algunas fuentes),
+# NO debe tumbar el build (el juez visual es opcional; los brokers SÍ importan).
 RUN echo "pw-bust=${PW_BUST}" \
     && mkdir -p /opt/pw-browsers \
-    && apt-get update \
-    && python -m playwright install --with-deps chromium \
-    && chmod -R a+rx /opt/pw-browsers \
-    && rm -rf /var/lib/apt/lists/*
+    && (apt-get update \
+        && python -m playwright install --with-deps chromium \
+        && chmod -R a+rx /opt/pw-browsers; \
+        rm -rf /var/lib/apt/lists/*) || echo "chromium install skipped (no rompe el build)"
 
 # Redpanda (Kafka-compatible, single-binary) para que la arquitectura
 # event-driven esté VIVA en prod (allinone lo arranca en background). Resiliente:
