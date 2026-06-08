@@ -33,9 +33,12 @@ class Template:
     has_files: bool = False       # True cuando la plantilla ya está seedeada en el repo
 
     def to_public(self) -> dict:
-        """Vista pública para la galería (incluye URL de preview en el repo)."""
+        """Vista pública para la galería. Solo expone preview_url cuando la
+        plantilla tiene archivos/preview real en el repo; si no, devuelve cadena
+        vacía para que la galería no intente cargar una imagen 404."""
         d = asdict(self)
-        d["preview_url"] = preview_url(self.id)
+        d["preview_url"] = preview_url(self.id) if self.has_files else ""
+        d["has_preview"] = bool(self.has_files)
         return d
 
 
@@ -69,6 +72,55 @@ CATALOG: list[Template] = [
              "Agenda de citas médicas: pacientes, profesionales, horarios y recordatorios.",
              ["paciente", "cita", "profesional", "especialidad"], "#0d9488",
              ["clinica", "citas", "medico", "agenda", "pacientes", "salud", "consultorio"]),
+    Template("iglesia", "IglesiaApp", "iglesia", "Iglesia / Congregación",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de iglesia: miembros, cultos, ayunos, ministerios y diezmos/ofrendas con totales.",
+             ["miembro", "culto", "ayuno", "ministerio", "diezmo", "ofrenda"], "#7c3aed",
+             ["iglesia", "culto", "cultos", "ayuno", "ayunos", "diezmo", "ofrenda", "ministerio",
+              "congregacion", "templo", "parroquia", "cristiana", "religion"]),
+    Template("universidad", "EduCampus", "universidad", "Educación / Universidad",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión académica: estudiantes, materias, notas, matrículas y asistencia.",
+             ["estudiante", "materia", "nota", "matricula", "asistencia"], "#1d4ed8",
+             ["universidad", "colegio", "academia", "estudiantes", "notas", "matriculas", "educacion", "facultad"]),
+    Template("veterinaria", "VetCare", "veterinaria", "Salud / Veterinaria",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión veterinaria: mascotas, dueños, citas, vacunas e historia clínica.",
+             ["mascota", "dueno", "cita", "vacuna", "historia"], "#0d9488",
+             ["veterinaria", "mascotas", "vacunas", "perros", "gatos", "vet", "animales"]),
+    Template("hotel", "HotelPro", "hotel", "Turismo / Hotel",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión hotelera: habitaciones, reservas, huéspedes, servicios y pagos.",
+             ["habitacion", "reserva", "huesped", "servicio", "pago"], "#0284c7",
+             ["hotel", "hospedaje", "reservas", "habitaciones", "huespedes", "turismo", "hostal"]),
+    Template("gimnasio", "FitGym", "gimnasio", "Fitness / Gimnasio",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de gimnasio: miembros, membresías, clases, rutinas y pagos.",
+             ["miembro", "membresia", "clase", "rutina", "pago"], "#dc2626",
+             ["gimnasio", "gym", "fitness", "membresias", "clases", "rutinas", "entreno"]),
+    Template("belleza", "BellaApp", "belleza", "Belleza / Barbería",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de barbería/salón: clientes, servicios, citas, empleados y pagos.",
+             ["cliente", "servicio", "cita", "empleado", "pago"], "#db2777",
+             ["belleza", "barberia", "peluqueria", "salon", "estetica", "spa", "manicure", "citas"]),
+    Template("taller", "TallerPro", "taller", "Automotriz / Taller",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de taller automotriz: órdenes, vehículos, clientes, repuestos y mecánicos.",
+             ["orden", "vehiculo", "cliente", "repuesto", "mecanico"], "#475569",
+             ["taller", "mecanico", "automotriz", "vehiculos", "repuestos", "carros", "ordenes"]),
+    Template("inmobiliaria", "InmoApp", "inmobiliaria", "Inmobiliaria",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión inmobiliaria: propiedades, clientes, visitas, agentes y contratos.",
+             ["propiedad", "cliente", "visita", "agente", "contrato"], "#0f766e",
+             ["inmobiliaria", "propiedades", "propiedad", "bienes raices", "arriendo", "venta",
+              "agentes", "apartamentos", "apartamento", "vivienda", "viviendas", "casa", "casas",
+              "inmueble", "inmuebles", "constructora", "constructoras", "feria de vivienda",
+              "expositor", "expositores", "stand", "stands", "proyecto inmobiliario"]),
+    Template("legal", "LexApp", "legal", "Legal / Bufete",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión legal: casos, clientes, audiencias, abogados y documentos.",
+             ["caso", "cliente", "audiencia", "abogado", "documento"], "#1d4ed8",
+             ["legal", "abogados", "bufete", "casos", "juridico", "audiencias", "demanda", "derecho"]),
     Template("salud-historia", "Historia Clínica", "salud", "Salud / Expediente",
              "saas_crud", "nextjs-fastapi-postgres",
              "Expediente clínico: pacientes, consultas, diagnósticos y tratamientos.",
@@ -232,7 +284,7 @@ CATALOG_BY_ID = {t.id: t for t in CATALOG}
 
 # Plantillas YA seedeadas en el repo (files + preview.png). Marcar aquí al subir
 # una plantilla con scripts/seed_templates.py o manualmente.
-_SEEDED = {"retail-inventory-pro", "salud-citas", "saas-crm", "ecommerce-fashion", "landing-startup", "restaurante-pedidos", "logistica-flota", "fintech-facturacion"}
+_SEEDED = {"retail-inventory-pro", "salud-citas", "saas-crm", "ecommerce-fashion", "landing-startup", "restaurante-pedidos", "logistica-flota", "fintech-facturacion", "iglesia", "universidad", "veterinaria", "hotel", "gimnasio", "belleza", "taller", "inmobiliaria", "legal"}
 for _sid in _SEEDED:
     if _sid in CATALOG_BY_ID:
         CATALOG_BY_ID[_sid].has_files = True
