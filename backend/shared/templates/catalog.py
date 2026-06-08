@@ -140,6 +140,30 @@ CATALOG: list[Template] = [
              ["cultivo", "lote", "insumo", "cosecha", "trabajador"], "#65a30d",
              ["agro", "agricola", "agrícola", "finca", "cultivos", "cosecha", "campo",
               "agropecuario", "granja", "ganaderia", "siembra", "café", "cafe"]),
+    Template("transporte", "TaxiPro", "transporte", "Transporte / Taxi",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de transporte/taxi: viajes, conductores, vehículos, clientes y tarifas.",
+             ["viaje", "conductor", "vehiculo", "cliente", "tarifa"], "#ca8a04",
+             ["transporte", "taxi", "taxis", "conductores", "viajes", "pasajeros", "movilidad",
+              "flota de taxis", "transportadora", "carreras"]),
+    Template("dental", "DentalPro", "dental", "Salud / Odontología",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de clínica dental: pacientes, citas, tratamientos, odontólogos y pagos.",
+             ["paciente", "cita", "tratamiento", "odontologo", "pago"], "#06b6d4",
+             ["dental", "odontologia", "odontología", "dentista", "ortodoncia", "clinica dental",
+              "endodoncia", "muelas", "dientes", "odontologo"]),
+    Template("contador", "ContaPro", "contador", "Finanzas / Contabilidad",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión contable: clientes, declaraciones, obligaciones, documentos y facturas.",
+             ["cliente", "declaracion", "obligacion", "documento", "factura"], "#1e40af",
+             ["contador", "contabilidad", "contaduria", "contaduría", "declaraciones", "impuestos",
+              "tributario", "dian", "nit", "obligaciones", "renta", "iva"]),
+    Template("guarderia", "KinderApp", "guarderia", "Educación / Jardín infantil",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de guardería/jardín infantil: niños, acudientes, asistencia, docentes y mensualidades.",
+             ["nino", "acudiente", "asistencia", "docente", "mensualidad"], "#f97316",
+             ["guarderia", "guardería", "jardin", "jardín", "jardin infantil", "preescolar",
+              "kinder", "niños", "ninos", "infantil", "cuidado infantil", "acudientes"]),
     Template("legal", "LexApp", "legal", "Legal / Bufete",
              "saas_crud", "nextjs-fastapi-postgres",
              "Gestión legal: casos, clientes, audiencias, abogados y documentos.",
@@ -308,7 +332,7 @@ CATALOG_BY_ID = {t.id: t for t in CATALOG}
 
 # Plantillas YA seedeadas en el repo (files + preview.png). Marcar aquí al subir
 # una plantilla con scripts/seed_templates.py o manualmente.
-_SEEDED = {"retail-inventory-pro", "salud-citas", "saas-crm", "ecommerce-fashion", "landing-startup", "restaurante-pedidos", "logistica-flota", "fintech-facturacion", "iglesia", "universidad", "veterinaria", "hotel", "gimnasio", "belleza", "taller", "inmobiliaria", "legal", "farmacia", "eventos", "ong", "agro"}
+_SEEDED = {"retail-inventory-pro", "salud-citas", "saas-crm", "ecommerce-fashion", "landing-startup", "restaurante-pedidos", "logistica-flota", "fintech-facturacion", "iglesia", "universidad", "veterinaria", "hotel", "gimnasio", "belleza", "taller", "inmobiliaria", "legal", "farmacia", "eventos", "ong", "agro", "transporte", "dental", "contador", "guarderia"}
 for _sid in _SEEDED:
     if _sid in CATALOG_BY_ID:
         CATALOG_BY_ID[_sid].has_files = True
