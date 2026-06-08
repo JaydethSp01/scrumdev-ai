@@ -314,10 +314,16 @@ export default function ProjectDetailPage() {
     }
   }, [ready, user, router]);
 
+  // elección hecha en el wizard ANTES de crear (plantilla o "a medida")
+  const [autoPick, setAutoPick] = useState<string | null>(null);
+  const [pickApplied, setPickApplied] = useState(false);
+
   useEffect(() => {
     if (search.get("just_created") === "1") {
       setShowJustCreated(true);
-      setShowGallery(true);
+      const pick = search.get("pick");
+      if (pick) setAutoPick(pick); // ya eligió en el wizard -> aplicamos, sin galería
+      else setShowGallery(true);
     }
   }, [search]);
 
@@ -452,6 +458,30 @@ export default function ProjectDetailPage() {
     },
     [user, project, toasts]
   );
+
+  // Aplica la elección del wizard una vez cargado el proyecto: plantilla -> use-template;
+  // "scratch" -> generar a medida. Sin pasar por la galería (ya eligió antes de crear).
+  useEffect(() => {
+    if (!autoPick || !project || pickApplied) return;
+    setPickApplied(true);
+    setShowGallery(false);
+    (async () => {
+      if (autoPick === "scratch") {
+        toasts.success("Generando tu app a medida…");
+        void runSmartBuild(false);
+        return;
+      }
+      toasts.success("Aplicando la plantilla elegida…");
+      try {
+        const r = await apiUseTemplate(project.key, autoPick);
+        toasts.success(`Plantilla aplicada (${r.files} archivos). Lista para desplegar.`);
+        setRefreshKey((k) => k + 1);
+        setTab("code");
+      } catch (e) {
+        toasts.error(e instanceof Error ? e.message : String(e));
+      }
+    })();
+  }, [autoPick, project, pickApplied, runSmartBuild, toasts]);
 
   const smartButton: SmartButton | null = useMemo(() => {
     if (!state) return null;

@@ -21,11 +21,13 @@ export default function TemplateGallery({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const PER_PAGE = 9;
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    apiGetTemplates(projectKey, 6)
+    apiGetTemplates(projectKey, 50)
       .then((d) => {
         if (alive) setData(d);
       })
@@ -84,7 +86,7 @@ export default function TemplateGallery({
       </div>
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {data.templates.map((t) => (
+        {data.templates.slice(page * PER_PAGE, (page + 1) * PER_PAGE).map((t) => (
           <button
             key={t.id}
             onClick={() => setSelected(t.id)}
@@ -128,6 +130,33 @@ export default function TemplateGallery({
           </button>
         ))}
       </div>
+
+      {data.templates.length > PER_PAGE ? (
+        <div className="flex items-center justify-center gap-4">
+          <button
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium disabled:opacity-40 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          >
+            ← Anterior
+          </button>
+          <span className="text-sm text-neutral-500">
+            Página {page + 1} de {Math.ceil(data.templates.length / PER_PAGE)} ·{" "}
+            {data.templates.length} plantillas
+          </span>
+          <button
+            onClick={() =>
+              setPage((p) =>
+                Math.min(Math.ceil(data.templates.length / PER_PAGE) - 1, p + 1)
+              )
+            }
+            disabled={page >= Math.ceil(data.templates.length / PER_PAGE) - 1}
+            className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium disabled:opacity-40 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          >
+            Siguiente →
+          </button>
+        </div>
+      ) : null}
 
       <div className="flex flex-col items-center justify-between gap-4 rounded-2xl border border-dashed border-neutral-300 p-5 dark:border-neutral-700 sm:flex-row">
         <div>

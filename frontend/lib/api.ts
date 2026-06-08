@@ -658,6 +658,19 @@ export type TemplatesResponse = {
   template_eta_minutes: string;
 };
 
+// Rankea plantillas para una visión SIN proyecto (preview pre-creación en el wizard).
+export async function apiMatchTemplates(
+  vision: string,
+  topK = 50
+): Promise<{ templates: TemplateCard[]; recommended: TemplateCard | null; recommend_scratch: boolean; total: number }> {
+  const res = await fetch(`${API}/templates/match`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ vision, top_k: topK }),
+  });
+  return jsonOrThrow(res);
+}
+
 export async function apiGetTemplates(
   projectKey: string,
   topK = 6

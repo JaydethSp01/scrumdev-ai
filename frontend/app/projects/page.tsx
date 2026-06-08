@@ -247,7 +247,12 @@ export default function ProjectsPage() {
             setProjects((prev) =>
               prev.find((x) => x.key === project.key) ? prev : [...prev, project]
             );
-            router.push(`/projects/${encodeURIComponent(project.key)}?just_created=1`);
+            const pick = r.templateId
+              ? `&pick=${encodeURIComponent(r.templateId)}`
+              : r.fromScratch
+              ? "&pick=scratch"
+              : "";
+            router.push(`/projects/${encodeURIComponent(project.key)}?just_created=1${pick}`);
           } catch {
             // si algo falla, caer al wizard manual con los datos prellenados
             setPrefill(r);

@@ -18,8 +18,10 @@ import {
   apiGenIntakeForm,
   apiIntakeVision,
   apiVisionFromDocument,
+  apiMatchTemplates,
   type Industry,
   type IntakeForm,
+  type TemplateCard,
 } from "@/lib/api";
 
 type Mode = "choose" | "industry" | "document" | "free";
@@ -28,6 +30,8 @@ type Result = {
   vision: string;
   targetUsers?: string;
   name?: string;
+  templateId?: string;   // plantilla elegida en el paso de revisión
+  fromScratch?: boolean;  // crear a medida (sin plantilla)
 };
 
 /**
@@ -44,6 +48,9 @@ export function CreateModeModal({
   onReady: (r: Result) => void;
 }) {
   const [mode, setMode] = useState<Mode>("choose");
+  // visión ya recolectada -> mostramos el paso de REVISIÓN (qué plantilla se usará)
+  // ANTES de crear el proyecto.
+  const [pending, setPending] = useState<Result | null>(null);
 
   if (!open) return null;
 
@@ -52,16 +59,16 @@ export function CreateModeModal({
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-2xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-200 dark:border-neutral-800 sticky top-0 bg-white dark:bg-neutral-950 z-10">
           <div className="flex items-center gap-2">
-            {mode !== "choose" && (
+            {(mode !== "choose" || pending) && (
               <button
-                onClick={() => setMode("choose")}
+                onClick={() => (pending ? setPending(null) : setMode("choose"))}
                 className="p-1.5 rounded hover:bg-neutral-100 dark:hover:bg-neutral-900"
               >
                 <ArrowLeft size={16} />
               </button>
             )}
             <Sparkles size={16} className="text-brand" />
-            <h3 className="font-semibold">Crear proyecto</h3>
+            <h3 className="font-semibold">{pending ? "Revisa tu plantilla" : "Crear proyecto"}</h3>
           </div>
           <button onClick={onClose} className="p-1.5 rounded hover:bg-neutral-100 dark:hover:bg-neutral-900">
             <X size={16} />
@@ -69,10 +76,19 @@ export function CreateModeModal({
         </div>
 
         <div className="p-5">
-          {mode === "choose" && <ChooseMode onPick={setMode} onFree={() => setMode("free")} />}
-          {mode === "industry" && <IndustryFlow onReady={onReady} />}
-          {mode === "document" && <DocumentFlow onReady={onReady} />}
-          {mode === "free" && <FreeFlow onReady={onReady} />}
+          {pending ? (
+            <ReviewStep
+              result={pending}
+              onConfirm={(extra) => onReady({ ...pending, ...extra })}
+            />
+          ) : (
+            <>
+              {mode === "choose" && <ChooseMode onPick={setMode} onFree={() => setMode("free")} />}
+              {mode === "industry" && <IndustryFlow onReady={setPending} />}
+              {mode === "document" && <DocumentFlow onReady={setPending} />}
+              {mode === "free" && <FreeFlow onReady={setPending} />}
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -171,6 +187,109 @@ function FreeFlow({ onReady }: { onReady: (r: Result) => void }) {
       >
         Continuar →
       </button>
+    </div>
+  );
+}
+
+const confPct = (t: TemplateCard) => {
+  const c = (t as unknown as { match_confidence?: number }).match_confidence;
+  return typeof c === "number" ? c : Math.round(Math.min(100, t.match_score * 7));
+};
+
+function TemplateMini({ t, onUse, highlight }: { t: TemplateCard; onUse: () => void; highlight?: boolean }) {
+  return (
+    <div className={`overflow-hidden rounded-xl border ${highlight ? "border-brand ring-2 ring-brand/30" : "border-neutral-200 dark:border-neutral-800"}`}>
+      <div className="relative aspect-[16/9] w-full bg-neutral-100 dark:bg-neutral-800" style={{ backgroundColor: t.brand_color + "14" }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={t.preview_url} alt={t.name} className="h-full w-full object-cover"
+          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+        <span className="absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ backgroundColor: t.brand_color }}>{t.sector_label}</span>
+        <span className="absolute right-2 top-2 rounded-full bg-white/90 px-2 py-0.5 text-[10px] font-bold text-neutral-700">{confPct(t)}% match</span>
+      </div>
+      <div className="flex items-center justify-between gap-2 p-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold">{t.name}</p>
+          <p className="truncate text-xs text-neutral-500">{t.description}</p>
+        </div>
+        <button onClick={onUse} className="shrink-0 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90">Usar</button>
+      </div>
+    </div>
+  );
+}
+
+function ReviewStep({ result, onConfirm }: { result: Result; onConfirm: (extra: { templateId?: string; fromScratch?: boolean }) => void }) {
+  const [tpls, setTpls] = useState<TemplateCard[] | null>(null);
+  const [rec, setRec] = useState<TemplateCard | null>(null);
+  const [recScratch, setRecScratch] = useState(false);
+  const [page, setPage] = useState(0);
+  const [showAll, setShowAll] = useState(false);
+  const PER = 4;
+
+  if (tpls === null) {
+    void apiMatchTemplates(result.vision, 50)
+      .then((d) => { setTpls(d.templates || []); setRec(d.recommended); setRecScratch(d.recommend_scratch); })
+      .catch(() => { setTpls([]); });
+  }
+
+  if (tpls === null) {
+    return (
+      <div className="grid place-items-center py-12 text-neutral-500">
+        <Loader2 className="animate-spin mb-2" /> Analizando tu idea y buscando la mejor plantilla…
+      </div>
+    );
+  }
+
+  const others = tpls.filter((t) => t.id !== rec?.id);
+  const pages = Math.ceil(others.length / PER);
+  const shown = others.slice(page * PER, (page + 1) * PER);
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-neutral-600 dark:text-neutral-400">
+        Con lo que nos contaste, <strong>antes de crear</strong> esto es lo que usaríamos:
+      </p>
+
+      {rec && !recScratch ? (
+        <div className="rounded-2xl border border-brand/30 bg-brand/5 p-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand">Recomendada para ti</p>
+          <TemplateMini t={rec} highlight onUse={() => onConfirm({ templateId: rec.id })} />
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+          Tu idea es bastante específica: lo mejor es <strong>crearla a medida</strong> (desde cero). También puedes partir de una plantilla cercana abajo.
+        </div>
+      )}
+
+      <button onClick={() => onConfirm({ fromScratch: true })}
+        className="flex w-full items-center justify-between rounded-xl border border-dashed border-neutral-300 p-3 text-left hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900">
+        <div>
+          <p className="text-sm font-semibold">Crear a medida (desde cero)</p>
+          <p className="text-xs text-neutral-500">La IA diseña cada pantalla según tu visión. Tarda un poco más.</p>
+        </div>
+        <ArrowRight size={16} className="text-neutral-400" />
+      </button>
+
+      {others.length > 0 ? (
+        <div>
+          <button onClick={() => setShowAll((s) => !s)} className="mb-3 text-sm font-medium text-brand hover:underline">
+            {showAll ? "Ocultar otras plantillas" : `Ver todas las plantillas (${others.length})`}
+          </button>
+          {showAll ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {shown.map((t) => <TemplateMini key={t.id} t={t} onUse={() => onConfirm({ templateId: t.id })} />)}
+              </div>
+              {pages > 1 ? (
+                <div className="flex items-center justify-center gap-3 text-sm">
+                  <button disabled={page === 0} onClick={() => setPage((p) => p - 1)} className="rounded border border-neutral-300 px-2 py-1 disabled:opacity-40 dark:border-neutral-700">←</button>
+                  <span className="text-neutral-500">Página {page + 1} de {pages}</span>
+                  <button disabled={page >= pages - 1} onClick={() => setPage((p) => p + 1)} className="rounded border border-neutral-300 px-2 py-1 disabled:opacity-40 dark:border-neutral-700">→</button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
