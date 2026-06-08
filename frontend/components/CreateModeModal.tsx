@@ -69,9 +69,10 @@ export function CreateModeModal({
         </div>
 
         <div className="p-5">
-          {mode === "choose" && <ChooseMode onPick={setMode} onFree={() => onReady({ vision: "" })} />}
+          {mode === "choose" && <ChooseMode onPick={setMode} onFree={() => setMode("free")} />}
           {mode === "industry" && <IndustryFlow onReady={onReady} />}
           {mode === "document" && <DocumentFlow onReady={onReady} />}
+          {mode === "free" && <FreeFlow onReady={onReady} />}
         </div>
       </div>
     </div>
@@ -131,6 +132,45 @@ function ChooseMode({ onPick, onFree }: { onPick: (m: Mode) => void; onFree: () 
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function FreeFlow({ onReady }: { onReady: (r: Result) => void }) {
+  const [name, setName] = useState("");
+  const [vision, setVision] = useState("");
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-neutral-600 dark:text-neutral-400">
+        Cuéntale a la IA qué necesita tu negocio. Mientras más claro, mejor encaja la plantilla.
+      </p>
+      <div>
+        <label className="text-xs font-medium text-neutral-500">Nombre del proyecto (opcional)</label>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Ej: Iglesia Vida"
+          className="mt-1 w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/30"
+        />
+      </div>
+      <div>
+        <label className="text-xs font-medium text-neutral-500">Describe tu negocio / software</label>
+        <textarea
+          value={vision}
+          onChange={(e) => setVision(e.target.value)}
+          rows={5}
+          autoFocus
+          placeholder="Ej: Software para una iglesia: gestionar miembros, cultos, ayunos, ministerios y diezmos/ofrendas."
+          className="mt-1 w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/30"
+        />
+      </div>
+      <button
+        disabled={vision.trim().length < 10}
+        onClick={() => onReady({ vision: vision.trim(), name: name.trim() || undefined })}
+        className="w-full rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Continuar →
+      </button>
     </div>
   );
 }
