@@ -5,7 +5,6 @@ import {
   X,
   Sparkles,
   FileText,
-  PenLine,
   Loader2,
   ArrowLeft,
   ArrowRight,
@@ -24,7 +23,7 @@ import {
   type TemplateCard,
 } from "@/lib/api";
 
-type Mode = "choose" | "industry" | "document" | "free";
+type Mode = "choose" | "industry" | "document";
 
 type Result = {
   vision: string;
@@ -83,10 +82,9 @@ export function CreateModeModal({
             />
           ) : (
             <>
-              {mode === "choose" && <ChooseMode onPick={setMode} onFree={() => setMode("free")} />}
+              {mode === "choose" && <ChooseMode onPick={setMode} />}
               {mode === "industry" && <IndustryFlow onReady={setPending} />}
               {mode === "document" && <DocumentFlow onReady={setPending} />}
-              {mode === "free" && <FreeFlow onReady={setPending} />}
             </>
           )}
         </div>
@@ -95,13 +93,13 @@ export function CreateModeModal({
   );
 }
 
-function ChooseMode({ onPick, onFree }: { onPick: (m: Mode) => void; onFree: () => void }) {
+function ChooseMode({ onPick }: { onPick: (m: Mode) => void }) {
   const cards = [
     {
       mode: "industry" as Mode,
       icon: Building2,
       title: "Por industria",
-      desc: "Elige tu industria y la IA genera preguntas específicas para entender tu negocio.",
+      desc: "Elige tu industria (o agrega una nueva) y la IA genera preguntas específicas para entender tu negocio.",
       grad: "from-brand to-fuchsia-500",
       action: () => onPick("industry"),
     },
@@ -112,14 +110,6 @@ function ChooseMode({ onPick, onFree }: { onPick: (m: Mode) => void; onFree: () 
       desc: "Sube tu doc de requerimientos (PDF, Word, texto) y la IA lo analiza.",
       grad: "from-cyan-500 to-blue-500",
       action: () => onPick("document"),
-    },
-    {
-      mode: "free" as Mode,
-      icon: PenLine,
-      title: "Describir libre",
-      desc: "Cuéntale a la IA tu idea con tus propias palabras.",
-      grad: "from-emerald-500 to-teal-500",
-      action: onFree,
     },
   ];
   return (
@@ -148,45 +138,6 @@ function ChooseMode({ onPick, onFree }: { onPick: (m: Mode) => void; onFree: () 
           );
         })}
       </div>
-    </div>
-  );
-}
-
-function FreeFlow({ onReady }: { onReady: (r: Result) => void }) {
-  const [name, setName] = useState("");
-  const [vision, setVision] = useState("");
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-neutral-600 dark:text-neutral-400">
-        Cuéntale a la IA qué necesita tu negocio. Mientras más claro, mejor encaja la plantilla.
-      </p>
-      <div>
-        <label className="text-xs font-medium text-neutral-500">Nombre del proyecto (opcional)</label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Ej: Iglesia Vida"
-          className="mt-1 w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/30"
-        />
-      </div>
-      <div>
-        <label className="text-xs font-medium text-neutral-500">Describe tu negocio / software</label>
-        <textarea
-          value={vision}
-          onChange={(e) => setVision(e.target.value)}
-          rows={5}
-          autoFocus
-          placeholder="Ej: Software para una iglesia: gestionar miembros, cultos, ayunos, ministerios y diezmos/ofrendas."
-          className="mt-1 w-full rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/30"
-        />
-      </div>
-      <button
-        disabled={vision.trim().length < 10}
-        onClick={() => onReady({ vision: vision.trim(), name: name.trim() || undefined })}
-        className="w-full rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        Continuar →
-      </button>
     </div>
   );
 }
@@ -302,6 +253,7 @@ function IndustryFlow({ onReady }: { onReady: (r: Result) => void }) {
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
+  const [custom, setCustom] = useState(""); // industria nueva escrita por el usuario
 
   // cargar industrias on mount
   if (!loaded) {
@@ -348,17 +300,41 @@ function IndustryFlow({ onReady }: { onReady: (r: Result) => void }) {
             <p className="text-sm text-neutral-500 mt-2">Generando preguntas para tu industria...</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {industries.map((ind) => (
-              <button
-                key={ind.id}
-                onClick={() => void pickIndustry(ind.id)}
-                className="px-3 py-3 rounded-xl border border-neutral-200 dark:border-neutral-800 hover:border-brand/40 hover:bg-brand/5 text-sm font-medium transition text-left"
-              >
-                {ind.label}
-              </button>
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {industries.map((ind) => (
+                <button
+                  key={ind.id}
+                  onClick={() => void pickIndustry(ind.id)}
+                  className="px-3 py-3 rounded-xl border border-neutral-200 dark:border-neutral-800 hover:border-brand/40 hover:bg-brand/5 text-sm font-medium transition text-left"
+                >
+                  {ind.label}
+                </button>
+              ))}
+            </div>
+            {/* Industria NUEVA: si no está en la lista, el usuario la escribe y la IA genera las preguntas */}
+            <div className="mt-4 rounded-xl border border-dashed border-neutral-300 dark:border-neutral-700 p-3">
+              <p className="text-xs font-medium text-neutral-500 mb-2">
+                ¿No está tu industria? Escríbela y la IA crea las preguntas:
+              </p>
+              <div className="flex gap-2">
+                <input
+                  value={custom}
+                  onChange={(e) => setCustom(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && custom.trim().length >= 3) void pickIndustry(custom.trim()); }}
+                  placeholder="Ej: Funeraria, Viñedo, Feria de vivienda…"
+                  className="flex-1 px-3 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-sm"
+                />
+                <button
+                  onClick={() => custom.trim().length >= 3 && void pickIndustry(custom.trim())}
+                  disabled={custom.trim().length < 3}
+                  className="shrink-0 rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                >
+                  Agregar
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </div>
     );
