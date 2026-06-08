@@ -188,6 +188,30 @@ CATALOG: list[Template] = [
              ["orden", "cliente", "servicio", "prenda", "entrega"], "#0369a1",
              ["lavanderia", "lavandería", "lavado", "planchado", "tintoreria", "lavado en seco",
               "prendas", "ropa", "lavanderias"]),
+    Template("cafeteria", "CafePro", "cafeteria", "Restaurante / Cafetería",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de cafetería: productos, pedidos, mesas, clientes e inventario.",
+             ["producto", "pedido", "mesa", "cliente", "inventario"], "#92400e",
+             ["cafeteria", "cafetería", "cafe", "café", "coffee", "barista", "panaderia cafe",
+              "pasteleria", "desayunos"]),
+    Template("libreria", "LibroPro", "libreria", "Retail / Librería",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de librería/papelería: productos, ventas, inventario, clientes y proveedores.",
+             ["producto", "venta", "inventario", "cliente", "proveedor"], "#9333ea",
+             ["libreria", "librería", "papeleria", "papelería", "libros", "utiles escolares",
+              "cuadernos", "lapices", "escolar"]),
+    Template("autolavado", "WashPro", "autolavado", "Automotriz / Autolavado",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de autolavado: servicios, vehículos, clientes, empleados y pagos.",
+             ["servicio", "vehiculo", "cliente", "empleado", "pago"], "#0ea5e9",
+             ["autolavado", "lavadero de carros", "car wash", "lavado de autos", "lavado de vehiculos",
+              "encerado", "polichado", "carwash"]),
+    Template("funeraria", "MemorialPro", "funeraria", "Servicios / Funeraria",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de funeraria: servicios, clientes, salas, planes y pagos.",
+             ["servicio", "cliente", "sala", "plan", "pago"], "#334155",
+             ["funeraria", "funebre", "fúnebre", "velacion", "velación", "cremacion", "cremación",
+              "exequias", "funebres", "memorial"]),
     Template("legal", "LexApp", "legal", "Legal / Bufete",
              "saas_crud", "nextjs-fastapi-postgres",
              "Gestión legal: casos, clientes, audiencias, abogados y documentos.",
@@ -356,7 +380,7 @@ CATALOG_BY_ID = {t.id: t for t in CATALOG}
 
 # Plantillas YA seedeadas en el repo (files + preview.png). Marcar aquí al subir
 # una plantilla con scripts/seed_templates.py o manualmente.
-_SEEDED = {"retail-inventory-pro", "salud-citas", "saas-crm", "ecommerce-fashion", "landing-startup", "restaurante-pedidos", "logistica-flota", "fintech-facturacion", "iglesia", "universidad", "veterinaria", "hotel", "gimnasio", "belleza", "taller", "inmobiliaria", "legal", "farmacia", "eventos", "ong", "agro", "transporte", "dental", "contador", "guarderia", "optica", "ferreteria", "spa", "lavanderia"}
+_SEEDED = {"retail-inventory-pro", "salud-citas", "saas-crm", "ecommerce-fashion", "landing-startup", "restaurante-pedidos", "logistica-flota", "fintech-facturacion", "iglesia", "universidad", "veterinaria", "hotel", "gimnasio", "belleza", "taller", "inmobiliaria", "legal", "farmacia", "eventos", "ong", "agro", "transporte", "dental", "contador", "guarderia", "optica", "ferreteria", "spa", "lavanderia", "cafeteria", "libreria", "autolavado", "funeraria"}
 for _sid in _SEEDED:
     if _sid in CATALOG_BY_ID:
         CATALOG_BY_ID[_sid].has_files = True
