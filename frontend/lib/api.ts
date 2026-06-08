@@ -212,6 +212,10 @@ function getStoredToken(): string | null {
   }
 }
 
+const _sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Estados típicos de backend "frío"/despertando (HF Space, Render free).
+const _COLD = new Set([502, 503, 504, 522, 524]);
+
 export async function authFetch(
   url: string,
   options: RequestInit = {}
@@ -224,7 +228,22 @@ export async function authFetch(
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  return fetch(url, { ...options, headers, cache: options.cache || "no-store" });
+  // Reintenta ante cold-start del backend (servidor despertando) con backoff,
+  // para que la 1ª acción tras inactividad NO falle con error feo.
+  const delays = [2000, 4000, 6000, 8000];
+  let lastErr: unknown;
+  for (let i = 0; i <= delays.length; i++) {
+    try {
+      const res = await fetch(url, { ...options, headers, cache: options.cache || "no-store" });
+      if (_COLD.has(res.status) && i < delays.length) { await _sleep(delays[i]); continue; }
+      return res;
+    } catch (e) {
+      lastErr = e;
+      if (i < delays.length) { await _sleep(delays[i]); continue; }
+      throw e;
+    }
+  }
+  throw lastErr;
 }
 
 export async function getServicesStatus(): Promise<ServiceStatus> {
@@ -339,9 +358,9 @@ export async function apiLogin(body: {
   email: string;
   password: string;
 }): Promise<AuthSession> {
-  const res = await fetch(`${API}/auth/login`, {
+  // authFetch -> reintenta si el backend está despertando (cold-start)
+  const res = await authFetch(`${API}/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   return jsonOrThrow<AuthSession>(res);
