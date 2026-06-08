@@ -164,6 +164,30 @@ CATALOG: list[Template] = [
              ["nino", "acudiente", "asistencia", "docente", "mensualidad"], "#f97316",
              ["guarderia", "guardería", "jardin", "jardín", "jardin infantil", "preescolar",
               "kinder", "niños", "ninos", "infantil", "cuidado infantil", "acudientes"]),
+    Template("optica", "OptiPro", "optica", "Salud / Óptica",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de óptica: pacientes, exámenes, fórmulas, productos y ventas.",
+             ["paciente", "examen", "formula", "producto", "venta"], "#0e7490",
+             ["optica", "óptica", "optometria", "optometría", "lentes", "gafas", "monturas",
+              "vision", "formula", "examen visual"]),
+    Template("ferreteria", "FerrePro", "ferreteria", "Retail / Ferretería",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de ferretería: productos, ventas, inventario, clientes y proveedores.",
+             ["producto", "venta", "inventario", "cliente", "proveedor"], "#b45309",
+             ["ferreteria", "ferretería", "herramientas", "materiales", "construccion",
+              "pinturas", "plomeria", "electricos", "tornillos"]),
+    Template("spa", "SpaPro", "spa", "Bienestar / Spa",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de spa/estética: clientes, servicios, citas, paquetes y empleados.",
+             ["cliente", "servicio", "cita", "paquete", "empleado"], "#a21caf",
+             ["spa", "estetica", "estética", "masajes", "faciales", "depilacion", "bienestar",
+              "relajacion", "wellness", "tratamientos esteticos"]),
+    Template("lavanderia", "LavaPro", "lavanderia", "Servicios / Lavandería",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de lavandería: órdenes, clientes, servicios, prendas y entregas.",
+             ["orden", "cliente", "servicio", "prenda", "entrega"], "#0369a1",
+             ["lavanderia", "lavandería", "lavado", "planchado", "tintoreria", "lavado en seco",
+              "prendas", "ropa", "lavanderias"]),
     Template("legal", "LexApp", "legal", "Legal / Bufete",
              "saas_crud", "nextjs-fastapi-postgres",
              "Gestión legal: casos, clientes, audiencias, abogados y documentos.",
@@ -332,7 +356,7 @@ CATALOG_BY_ID = {t.id: t for t in CATALOG}
 
 # Plantillas YA seedeadas en el repo (files + preview.png). Marcar aquí al subir
 # una plantilla con scripts/seed_templates.py o manualmente.
-_SEEDED = {"retail-inventory-pro", "salud-citas", "saas-crm", "ecommerce-fashion", "landing-startup", "restaurante-pedidos", "logistica-flota", "fintech-facturacion", "iglesia", "universidad", "veterinaria", "hotel", "gimnasio", "belleza", "taller", "inmobiliaria", "legal", "farmacia", "eventos", "ong", "agro", "transporte", "dental", "contador", "guarderia"}
+_SEEDED = {"retail-inventory-pro", "salud-citas", "saas-crm", "ecommerce-fashion", "landing-startup", "restaurante-pedidos", "logistica-flota", "fintech-facturacion", "iglesia", "universidad", "veterinaria", "hotel", "gimnasio", "belleza", "taller", "inmobiliaria", "legal", "farmacia", "eventos", "ong", "agro", "transporte", "dental", "contador", "guarderia", "optica", "ferreteria", "spa", "lavanderia"}
 for _sid in _SEEDED:
     if _sid in CATALOG_BY_ID:
         CATALOG_BY_ID[_sid].has_files = True
