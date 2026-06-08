@@ -48,12 +48,47 @@ def score_template(t: Template, classification: dict, vision: str) -> float:
         score += 2.0
     elif is_static != (t.software_type == "landing"):
         score -= 6.0  # no mezclar landing con app de datos
-    # solape de entidades
+    # solape de entidades. Las entidades GENÉRICAS (cliente, pago, usuario…) las
+    # comparten casi todas las plantillas -> peso bajo, para que NO hagan ganar al
+    # sector equivocado (ej. una feria de vivienda cayendo en barbería por "cliente/
+    # cita/pago"). El dominio (tags) debe dominar. Además se topa el aporte total.
+    GENERIC = {"cliente", "clientes", "usuario", "usuarios", "pago", "pagos",
+               "producto", "productos", "servicio", "servicios", "cita", "citas"}
+    ent_score = 0.0
     for e in ents:
         for te in t.entities:
             if e and (e in te or te in e):
-                score += 1.5
+                ent_score += 0.4 if (e in GENERIC or te in GENERIC) else 1.5
+                break
+    score += min(ent_score, 4.5)  # tope: las entidades no pueden dominar al dominio
     return score
+
+
+def explain_match(t: Template, classification: dict, vision: str, score: float) -> dict:
+    """Explica POR QUÉ una plantilla matchea (no caja negra): confianza 0-100 y
+    razones legibles. Diferenciador UX: el usuario ve el criterio del match."""
+    vis = _norm(vision)
+    vis_tokens = _tokens(vision)
+    sector = str(classification.get("sector", "")).lower()
+    ents = {_norm(e) for e in (classification.get("entities") or []) if isinstance(e, str)}
+    reasons: list[str] = []
+    if sector and (sector in t.sector or t.sector in sector):
+        reasons.append(f"sector {getattr(t, 'sector_label', '') or t.sector}")
+    matched_tags = [tag for tag in t.tags if tag in vis or (_tokens(tag) & vis_tokens)]
+    if matched_tags:
+        reasons.append("palabras: " + ", ".join(matched_tags[:3]))
+    matched_ents = [e for e in ents for te in t.entities if e and (e in te or te in e)]
+    if matched_ents:
+        reasons.append("entidades: " + ", ".join(sorted(set(matched_ents))[:3]))
+    ctype = str(classification.get("type", "")).lower()
+    is_static = classification.get("is_static") or ctype == "landing"
+    if is_static == (t.software_type == "landing"):
+        reasons.append("tipo de software compatible")
+    conf = max(35, min(99, int(40 + score * 4)))
+    if not reasons:
+        reasons.append("sugerencia por defecto")
+        conf = min(conf, 45)
+    return {"confidence": conf, "reasons": reasons}
 
 
 def match_templates(
