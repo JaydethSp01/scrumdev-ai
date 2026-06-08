@@ -116,6 +116,30 @@ CATALOG: list[Template] = [
               "agentes", "apartamentos", "apartamento", "vivienda", "viviendas", "casa", "casas",
               "inmueble", "inmuebles", "constructora", "constructoras", "feria de vivienda",
               "expositor", "expositores", "stand", "stands", "proyecto inmobiliario"]),
+    Template("farmacia", "FarmaApp", "farmacia", "Salud / Farmacia",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de farmacia/droguería: productos, ventas, inventario con vencimientos, clientes y proveedores.",
+             ["producto", "venta", "inventario", "cliente", "proveedor"], "#16a34a",
+             ["farmacia", "drogueria", "droguería", "medicamentos", "medicina", "botica",
+              "farmaceutica", "vencimiento", "pastillas", "droga"]),
+    Template("eventos", "EventPro", "eventos", "Eventos / Bodas",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Organización de eventos y bodas: eventos, clientes, proveedores, cotizaciones y tareas.",
+             ["evento", "cliente", "proveedor", "cotizacion", "tarea"], "#e11d48",
+             ["eventos", "evento", "bodas", "boda", "fiesta", "banquete", "banquetes",
+              "organizacion de eventos", "wedding", "matrimonio", "celebracion"]),
+    Template("ong", "FundaApp", "ong", "ONG / Fundación",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión de ONG/fundación: donantes, donaciones, voluntarios, proyectos y beneficiarios.",
+             ["donante", "donacion", "voluntario", "proyecto", "beneficiario"], "#0891b2",
+             ["ong", "fundacion", "fundación", "donaciones", "donantes", "voluntarios",
+              "sin animo de lucro", "caridad", "beneficiarios", "filantropia"]),
+    Template("agro", "AgroApp", "agro", "Agro / Finca",
+             "saas_crud", "nextjs-fastapi-postgres",
+             "Gestión agrícola/finca: cultivos, lotes, insumos, cosechas y trabajadores.",
+             ["cultivo", "lote", "insumo", "cosecha", "trabajador"], "#65a30d",
+             ["agro", "agricola", "agrícola", "finca", "cultivos", "cosecha", "campo",
+              "agropecuario", "granja", "ganaderia", "siembra", "café", "cafe"]),
     Template("legal", "LexApp", "legal", "Legal / Bufete",
              "saas_crud", "nextjs-fastapi-postgres",
              "Gestión legal: casos, clientes, audiencias, abogados y documentos.",
@@ -284,7 +308,7 @@ CATALOG_BY_ID = {t.id: t for t in CATALOG}
 
 # Plantillas YA seedeadas en el repo (files + preview.png). Marcar aquí al subir
 # una plantilla con scripts/seed_templates.py o manualmente.
-_SEEDED = {"retail-inventory-pro", "salud-citas", "saas-crm", "ecommerce-fashion", "landing-startup", "restaurante-pedidos", "logistica-flota", "fintech-facturacion", "iglesia", "universidad", "veterinaria", "hotel", "gimnasio", "belleza", "taller", "inmobiliaria", "legal"}
+_SEEDED = {"retail-inventory-pro", "salud-citas", "saas-crm", "ecommerce-fashion", "landing-startup", "restaurante-pedidos", "logistica-flota", "fintech-facturacion", "iglesia", "universidad", "veterinaria", "hotel", "gimnasio", "belleza", "taller", "inmobiliaria", "legal", "farmacia", "eventos", "ong", "agro"}
 for _sid in _SEEDED:
     if _sid in CATALOG_BY_ID:
         CATALOG_BY_ID[_sid].has_files = True
