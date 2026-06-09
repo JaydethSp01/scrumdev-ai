@@ -803,7 +803,8 @@ export async function apiPlanSprints(projectKey: string): Promise<SprintBoard> {
 
 export async function apiGetSprints(projectKey: string, versionId?: string): Promise<SprintBoard> {
   const q = versionId ? `?version_id=${encodeURIComponent(versionId)}` : "";
-  const res = await fetch(`${API}/projects/${encodeURIComponent(projectKey)}/sprints${q}`);
+  // authFetch -> reintenta si el backend está despertando (evita board colgado en cold-start)
+  const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/sprints${q}`);
   if (!res.ok) return { sprints: [], unassigned: [] };
   return res.json();
 }
