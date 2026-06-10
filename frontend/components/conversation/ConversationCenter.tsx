@@ -62,7 +62,12 @@ export default function ConversationCenter({
   const lastState = useRef<string | null>(null);
   const idRef = useRef(1);
   const fileRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const resetInputHeight = () => {
+    if (inputRef.current) inputRef.current.style.height = "auto";
+  };
 
   const push = useCallback((m: Omit<Msg, "id">) => {
     setMsgs((prev) => [...prev, { ...m, id: idRef.current++ }]);
@@ -150,6 +155,7 @@ export default function ConversationCenter({
     if (!vision) return;
     push({ role: "human", content: vision });
     setInput("");
+    resetInputHeight();
     setBusy(true);
     try {
       await http.post(`/projects/${encodeURIComponent(projectKey)}/vision`, {
@@ -189,6 +195,7 @@ export default function ConversationCenter({
     if (!started) { void startFlow(text); return; }
     push({ role: "human", content: text });
     setInput("");
+    resetInputHeight();
     setBusy(true);
     try {
       const r = await apiAssistant(projectKey, { user_id: userId || "po", message: text });
@@ -282,16 +289,23 @@ export default function ConversationCenter({
           className="p-2 rounded-lg border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
           <Paperclip size={16} />
         </button>
-        <input
+        <textarea
+          ref={inputRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          rows={1}
+          onChange={(e) => {
+            setInput(e.target.value);
+            const el = e.currentTarget;
+            el.style.height = "auto";
+            el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+          }}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } }}
-          placeholder={started ? "Escribe un mensaje…" : "Escribe tus requerimientos…"}
+          placeholder={started ? "Escribe un mensaje… (Shift+Enter = salto de línea)" : "Pega tus requerimientos aquí… (Shift+Enter = salto de línea)"}
           disabled={busy}
-          className="flex-1 px-3.5 py-2.5 text-sm rounded-xl border border-neutral-300 dark:border-neutral-700 bg-transparent"
+          className="flex-1 px-3.5 py-2.5 text-sm rounded-xl border border-neutral-300 dark:border-neutral-700 bg-transparent resize-none leading-relaxed max-h-[200px] overflow-y-auto"
         />
         <button onClick={onSend} disabled={busy || !input.trim()}
-          className="p-2.5 rounded-xl bg-brand text-white hover:bg-brand-dark disabled:opacity-60">
+          className="p-2.5 rounded-xl bg-brand text-white hover:bg-brand-dark disabled:opacity-60 self-end">
           <Send size={16} />
         </button>
       </div>
