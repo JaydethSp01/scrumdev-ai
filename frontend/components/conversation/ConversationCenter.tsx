@@ -9,6 +9,7 @@ import http from "@/lib/http";
 import { API, apiVisionFromDocument, apiStartLifecycle, apiGetPipeline, apiApproveGate, apiAssistant } from "@/lib/api";
 
 import BacklogReview, { type ReviewStory } from "@/components/conversation/BacklogReview";
+import NfrInline from "@/components/conversation/NfrInline";
 
 type Gate = {
   is_gate?: boolean; gate_n?: number; current_state?: string;
@@ -16,7 +17,7 @@ type Gate = {
     title?: string; summary?: string;
     stories?: ReviewStory[];
     dor_summary?: { ready: number; total: number };
-    adrs?: { number: number; title: string }[];
+    adrs?: { number: number; title: string; markdown?: string; decision?: string; context?: string }[];
     evidence?: { checks?: { name: string; ok: boolean }[] };
     dod?: { done: boolean };
     planner?: { ok: boolean; blockers: number };
@@ -348,6 +349,8 @@ export default function ConversationCenter({
               {m.gate && (
                 <GateCard
                   gate={m.gate}
+                  projectKey={projectKey}
+                  userId={userId || "po"}
                   onApprove={approve}
                   onRequestChanges={() => push({ role: "agent", content: "Claro — dime qué te gustaría cambiar y lo ajusto antes de continuar." })}
                   onExplain={() => m.gate && explainGate(m.gate)}
@@ -459,7 +462,7 @@ export default function ConversationCenter({
   );
 }
 
-function GateCard({ gate, onApprove, onRequestChanges, onExplain, onReviewStories, busy }: { gate: Gate; onApprove: () => void; onRequestChanges: () => void; onExplain: () => void; onReviewStories?: () => void; busy: boolean }) {
+function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExplain, onReviewStories, busy }: { gate: Gate; projectKey: string; userId: string; onApprove: () => void; onRequestChanges: () => void; onExplain: () => void; onReviewStories?: () => void; busy: boolean }) {
   const r = gate.gate_review || {};
   const nMock = (r.stories || []).filter((s) => s.mockup).length;
   const chips: string[] = [];
@@ -504,9 +507,38 @@ function GateCard({ gate, onApprove, onRequestChanges, onExplain, onReviewStorie
         </ul>
       )}
       {r.adrs && r.adrs.length > 0 && (
-        <ul className="mt-2 space-y-1">
-          {r.adrs.map((a) => <li key={a.number} className="text-xs text-neutral-600 dark:text-neutral-300">ADR-{String(a.number).padStart(3, "0")}: {a.title}</li>)}
-        </ul>
+        <div className="mt-2">
+          <ul className="space-y-1">
+            {r.adrs.map((a) => (
+              <li key={a.number} className="text-xs">
+                <details>
+                  <summary className="cursor-pointer text-neutral-600 dark:text-neutral-300">
+                    ADR-{String(a.number).padStart(3, "0")}: {a.title}
+                  </summary>
+                  {(a.markdown || a.decision || a.context) && (
+                    <div className="mt-1 pl-3 text-[11px] text-neutral-500 whitespace-pre-wrap max-h-44 overflow-y-auto border-l-2 border-neutral-200 dark:border-neutral-800">
+                      {a.markdown || a.decision || a.context}
+                    </div>
+                  )}
+                </details>
+              </li>
+            ))}
+          </ul>
+          <button
+            onClick={() => {
+              const md = (r.adrs || []).map((a) =>
+                `# ADR-${String(a.number).padStart(3, "0")}: ${a.title}\n\n${a.markdown || a.decision || a.context || ""}`
+              ).join("\n\n---\n\n");
+              const url = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
+              const el = document.createElement("a");
+              el.href = url; el.download = "arquitectura-adrs.md"; el.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-900"
+          >
+            ⬇ Descargar ADRs (.md)
+          </button>
+        </div>
       )}
       {r.planner && (
         <p className={`text-xs mt-2 ${r.planner.ok ? "text-emerald-600" : "text-red-600"}`}>
@@ -522,15 +554,18 @@ function GateCard({ gate, onApprove, onRequestChanges, onExplain, onReviewStorie
           ))}
         </ul>
       )}
+      {/* NFR conversacional: el agente pregunta AQUÍ y el PO responde (sin paneles) */}
       {r.needs_nfr_form && (
-        <p className="text-xs mt-2 text-amber-700 dark:text-amber-300">Completa el formulario NFR en el panel de la derecha, luego aprueba.</p>
+        <NfrInline projectKey={projectKey} userId={userId} onDone={onApprove} busy={busy} />
       )}
 
       <div className="mt-3 flex items-center gap-2">
+        {!r.needs_nfr_form && (
         <button onClick={onApprove} disabled={busy}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-green-600 to-emerald-600 text-white text-sm font-medium shadow disabled:opacity-60">
           {busy ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />} Aprobar
         </button>
+        )}
         <button onClick={onRequestChanges} disabled={busy}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-900 disabled:opacity-60">
           Pedir cambios
