@@ -312,7 +312,9 @@ export async function apiStartLifecycle(projectKey: string): Promise<unknown> {
     `${API}/projects/${encodeURIComponent(projectKey)}/pipeline/autorun`,
     { method: "POST", body: JSON.stringify({ triggered_by: "po" }) }
   );
-  return res.ok ? res.json() : null;
+  // NUNCA tragar el error: un 404/500 aquí significa que el ciclo NO arrancó.
+  if (!res.ok) throw new Error(`No se pudo iniciar el ciclo (HTTP ${res.status})`);
+  return res.json();
 }
 
 export type TechTask = {
