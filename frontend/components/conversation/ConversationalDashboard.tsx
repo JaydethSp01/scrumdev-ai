@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { MessageSquare, Workflow, Bot, Gavel, Settings2 } from "lucide-react";
+import { MessageSquare, Workflow, Bot, Gavel } from "lucide-react";
 import type { AuthUser } from "@/app/auth/_lib";
 import ConversationCenter from "@/components/conversation/ConversationCenter";
 import LiveContextPanel from "@/components/conversation/LiveContextPanel";
@@ -19,11 +19,9 @@ const NAV: { key: Panel; label: string; icon: typeof Workflow }[] = [
 export default function ConversationalDashboard({
   projectKey,
   user,
-  onOpenAdvanced,
 }: {
   projectKey: string;
   user: AuthUser;
-  onOpenAdvanced?: () => void;
 }) {
   const [panel, setPanel] = useState<Panel>("flujos");
 
@@ -50,15 +48,6 @@ export default function ConversationalDashboard({
             <span className="hidden sm:inline">{n.label}</span>
           </button>
         ))}
-        {onOpenAdvanced && (
-          <button
-            onClick={onOpenAdvanced}
-            className="mt-auto flex items-center gap-2.5 px-3 sm:px-4 py-2.5 text-sm text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-          >
-            <Settings2 size={16} className="shrink-0" />
-            <span className="hidden sm:inline">Avanzado</span>
-          </button>
-        )}
       </nav>
 
       {/* Centro: el CHAT (espina dorsal) */}

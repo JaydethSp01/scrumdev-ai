@@ -305,7 +305,7 @@ export default function ProjectDetailPage() {
   const [statsLoading, setStatsLoading] = useState(true);
   const [showJustCreated, setShowJustCreated] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
-  const [advanced, setAdvanced] = useState(false);
+  const [advanced] = useState(false); // dashboard conversacional = única vista (sin "Avanzado")
   const [refreshKey, setRefreshKey] = useState(0);
   const [state, setState] = useState<ProjectState | null>(null);
   const [stateLoading, setStateLoading] = useState(true);
@@ -699,11 +699,7 @@ export default function ProjectDetailPage() {
       </header>
 
       {!advanced ? (
-        <ConversationalDashboard
-          projectKey={project.key}
-          user={user}
-          onOpenAdvanced={() => setAdvanced(true)}
-        />
+        <ConversationalDashboard projectKey={project.key} user={user} />
       ) : (
       <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-6">
         <aside>
