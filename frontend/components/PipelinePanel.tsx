@@ -92,7 +92,7 @@ export function PipelinePanel({ projectKey }: { projectKey: string }) {
     let retry: ReturnType<typeof setTimeout> | undefined;
     const connect = () => {
       try {
-        ws = new WebSocket(`${base}/projects/${encodeURIComponent(projectKey)}/events/ws`);
+        ws = new WebSocket(`${base}/_svc/orchestrator/projects/${encodeURIComponent(projectKey)}/events/ws`);
         ws.onmessage = () => { void load(); };
         ws.onclose = () => { if (!closed) retry = setTimeout(connect, 6000); };
         ws.onerror = () => { try { ws?.close(); } catch { /* noop */ } };

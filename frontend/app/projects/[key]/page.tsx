@@ -54,7 +54,6 @@ import DeployPanel from "@/components/DeployPanel";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
 import PipelinePanel from "@/components/PipelinePanel";
 import RefinementPanel from "@/components/RefinementPanel";
-import { useRealtime } from "@/lib/useRealtime";
 import RequirementsChat from "@/components/RequirementsChat";
 import VersionsPanel from "@/components/VersionsPanel";
 import ArchitecturePanel from "@/components/ArchitecturePanel";
@@ -306,10 +305,6 @@ export default function ProjectDetailPage() {
   const [showJustCreated, setShowJustCreated] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-
-  // Tiempo real (Taller 4 I): cualquier evento de agentes/workflow/historias
-  // refresca el estado del proyecto. Degrada elegante si el WS no está.
-  useRealtime(user?.user_id, () => setRefreshKey((k) => k + 1));
   const [state, setState] = useState<ProjectState | null>(null);
   const [stateLoading, setStateLoading] = useState(true);
   const [smartLoading, setSmartLoading] = useState(false);
