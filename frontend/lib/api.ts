@@ -333,6 +333,22 @@ export async function apiGetRefinement(projectKey: string): Promise<Refinement> 
   return jsonOrThrow<Refinement>(res);
 }
 
+export type Mockup = {
+  matched: boolean;
+  source: "template" | "generated";
+  recommend_scratch?: boolean;
+  template: { id: string; name: string; preview_url: string; confidence: number } | null;
+  alternatives: { id: string; name: string; preview_url: string; confidence: number }[];
+};
+
+// Mockup del backlog: se adapta a la plantilla que matchea, o "a medida" si no.
+export async function apiGetMockups(projectKey: string): Promise<Mockup> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/mockups`
+  );
+  return jsonOrThrow<Mockup>(res);
+}
+
 // Feedback loop: error/mejora → nueva historia en el backlog (Adam #15).
 export async function apiAddFeedback(
   projectKey: string, title: string, kind: "bug" | "improvement", description = ""

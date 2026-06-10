@@ -6,8 +6,8 @@ import {
   Server, Monitor, FlaskConical, Bug, Lightbulb, Plus,
 } from "lucide-react";
 import {
-  apiGetRefinement, apiAddFeedback,
-  type Refinement, type RefinementStory,
+  apiGetRefinement, apiAddFeedback, apiGetMockups,
+  type Refinement, type RefinementStory, type Mockup,
 } from "@/lib/api";
 
 const MODULE_META: Record<string, { icon: typeof Server; label: string; cls: string }> = {
@@ -18,6 +18,7 @@ const MODULE_META: Record<string, { icon: typeof Server; label: string; cls: str
 
 export default function RefinementPanel({ projectKey }: { projectKey: string }) {
   const [data, setData] = useState<Refinement | null>(null);
+  const [mockup, setMockup] = useState<Mockup | null>(null);
   const [loading, setLoading] = useState(true);
   const [fbTitle, setFbTitle] = useState("");
   const [fbKind, setFbKind] = useState<"bug" | "improvement">("bug");
@@ -27,7 +28,12 @@ export default function RefinementPanel({ projectKey }: { projectKey: string }) 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await apiGetRefinement(projectKey));
+      const [ref, mk] = await Promise.allSettled([
+        apiGetRefinement(projectKey),
+        apiGetMockups(projectKey),
+      ]);
+      setData(ref.status === "fulfilled" ? ref.value : null);
+      setMockup(mk.status === "fulfilled" ? mk.value : null);
     } catch {
       setData(null);
     } finally {
@@ -83,6 +89,51 @@ export default function RefinementPanel({ projectKey }: { projectKey: string }) 
         </button>
       </header>
 
+      {/* Mockup del backlog (Adam A): adaptado a la plantilla que matchea */}
+      {mockup && (
+        <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 p-5">
+          <h3 className="font-semibold flex items-center gap-2 mb-1">
+            <Monitor size={16} className="text-brand" /> Mockup — así se verá tu app
+          </h3>
+          {mockup.matched && mockup.template ? (
+            <>
+              <p className="text-xs text-neutral-500 mb-3">
+                Diseño de referencia basado en la plantilla <b>{mockup.template.name}</b>
+                {typeof mockup.template.confidence === "number" && ` (match ${mockup.template.confidence}%)`}.
+              </p>
+              {mockup.template.preview_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={mockup.template.preview_url}
+                  alt={`Mockup ${mockup.template.name}`}
+                  className="w-full max-w-2xl rounded-xl border border-neutral-200 dark:border-neutral-800"
+                />
+              ) : (
+                <WireframePlaceholder label={mockup.template.name} />
+              )}
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-neutral-500 mb-3">
+                Ninguna plantilla coincide lo suficiente: el diseño se genera <b>a medida</b>
+                durante el desarrollo según tus historias.
+              </p>
+              <WireframePlaceholder label="Diseño a medida" />
+            </>
+          )}
+          {mockup.alternatives && mockup.alternatives.length > 1 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span className="text-[11px] text-neutral-400 self-center">Alternativas:</span>
+              {mockup.alternatives.slice(0, 4).map((a) => (
+                <span key={a.id} className="text-[11px] px-2 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-800 text-neutral-500">
+                  {a.name}{typeof a.confidence === "number" ? ` ${a.confidence}%` : ""}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Generación por módulos (E #10): desglose */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 p-4">
@@ -134,6 +185,31 @@ export default function RefinementPanel({ projectKey }: { projectKey: string }) 
           </button>
         </div>
         {fbMsg && <p className="text-xs text-emerald-600 mt-2">{fbMsg}</p>}
+      </div>
+    </div>
+  );
+}
+
+function WireframePlaceholder({ label }: { label: string }) {
+  return (
+    <div className="w-full max-w-2xl rounded-xl border border-dashed border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 overflow-hidden">
+      <div className="h-9 bg-neutral-200 dark:bg-neutral-800 flex items-center px-3 gap-1.5">
+        <span className="w-2.5 h-2.5 rounded-full bg-neutral-400" />
+        <span className="w-2.5 h-2.5 rounded-full bg-neutral-400" />
+        <span className="w-2.5 h-2.5 rounded-full bg-neutral-400" />
+        <span className="ml-3 text-[10px] text-neutral-500">{label}</span>
+      </div>
+      <div className="flex">
+        <div className="w-1/5 p-2 space-y-1.5 border-r border-neutral-200 dark:border-neutral-800">
+          {[...Array(5)].map((_, i) => <div key={i} className="h-3 rounded bg-neutral-200 dark:bg-neutral-800" />)}
+        </div>
+        <div className="flex-1 p-3 space-y-2">
+          <div className="grid grid-cols-3 gap-2">
+            {[...Array(3)].map((_, i) => <div key={i} className="h-12 rounded-lg bg-neutral-200 dark:bg-neutral-800" />)}
+          </div>
+          <div className="h-24 rounded-lg bg-neutral-200 dark:bg-neutral-800" />
+          <div className="h-3 w-2/3 rounded bg-neutral-200 dark:bg-neutral-800" />
+        </div>
       </div>
     </div>
   );
