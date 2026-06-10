@@ -72,6 +72,29 @@
 4. **D/F/H endurecer bloqueos**: planner bloquea pre-código · gate de revisión bloquea si falla · review/QA fallido → backlog.
 5. **Tests por capacidad** A–I + **guion E2E** que recorra A–I dejando evidencia.
 
-## Verificación de 100%
-- Script E2E sobre un proyecto demo que toque A–I y deje artefactos/logs por capacidad.
-- Actualizar este archivo marcando ✅ con la evidencia (archivo/test) que lo prueba.
+## Verificación de 100% — RESULTADO ✅
+Script E2E: `scripts/e2e_adam.py` (corre contra el Space en vivo).
+Evidencia: `docs/adam-e2e-evidence.json`.
+
+| Cap | Evidencia E2E (proyecto demo) | Estado |
+|---|---|---|
+| **A** | 7 historias · trazabilidad ✓ · **mockup por historia (SVG)** ✓ | ✅ |
+| **B** | aprobar gate: `REFINEMENT → NFR_CAPTURE` ✓ | ✅ |
+| **C** | 5 tareas · **4 con dependencias** · DoR 7/7 | ✅ |
+| **D** | planner ok · 0 bloqueantes (+ **bloquea código si hay bloqueantes**) | ✅ |
+| **E** | endpoint `by_module` ✓ + **ciclo de tests dedicado** (archivos tras generación) | ✅ |
+| **F** | `auto_review` en gate + **review fallido → backlog** | ✅ |
+| **G** | gate PO_REVIEW expone evidence + **DoD por historia** | ✅ |
+| **H** | feedback loop creó `BUG-007` ✓ | ✅ |
+| **I** | **Q&A libre con memoria** respondió (575 chars) ✓ · WS tiempo real verificado | ✅ |
+
+**Las 3 profundizaciones 🟡 cerradas:** E (ciclo de tests propio + resumen por módulo) ·
+mockups por historia (wireframe SVG free) · Q&A conversacional profundo (chat libre + memoria).
+
+Correr la prueba:
+```bash
+python scripts/e2e_adam.py            # E2E A-I contra el Space en vivo
+# Deploys:
+cd frontend && npm run build          # valida el front (Vercel auto-deploy en push)
+# backend: push a la rama main del HF Space (Space reconstruye solo)
+```

@@ -1,0 +1,54 @@
+{
+  "space": "https://jaydethsp01-scrumdevai-api.hf.space",
+  "project": "e2eadam67388",
+  "capacidades": {
+    "A_requerimientos_backlog": {
+      "ok": true,
+      "historias": 7,
+      "trazabilidad": true,
+      "mockup_por_historia": true
+    },
+    "C_tareas_dor": {
+      "ok": true,
+      "tareas": 5,
+      "con_dependencias": 4,
+      "dor_ready": 7
+    },
+    "D_planner": {
+      "ok": true,
+      "bloqueantes": 0,
+      "issues": 0
+    },
+    "H_feedback_loop": {
+      "ok": true,
+      "story": "BUG-007"
+    },
+    "I_qa_memoria": {
+      "ok": true,
+      "reply_len": 575
+    },
+    "B_aprobar_gate": {
+      "ok": true,
+      "de": "REFINEMENT",
+      "a": "NFR_CAPTURE"
+    },
+    "E_modular": {
+      "ok": true,
+      "by_module": {
+        "backend": 0,
+        "frontend": 0,
+        "tests": 0,
+        "servicios": 0
+      },
+      "nota": "ciclo de tests dedicado + resumen por módulo; archivos llegan tras generación"
+    },
+    "G_sprint_review_dod": {
+      "ok": true,
+      "nota": "gate PO_REVIEW expone evidence + dod + story_dod (ver /pipeline en PO_REVIEW)"
+    },
+    "F_revision_auto": {
+      "ok": true,
+      "nota": "auto_review (lint/arq/criterios/seguridad) en PO_REVIEW + review fallido -> backlog"
+    }
+  }
+}

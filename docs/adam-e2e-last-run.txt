@@ -1,0 +1,18 @@
+esperando RUNNING (rebuild #146)...
+RUNNING
+== E2E Adam A-I sobre https://jaydethsp01-scrumdevai-api.hf.space | proyecto e2eadam67388 ==
+autorun lanzado, esperando gate de backlog…
+
+== EVIDENCIA POR CAPACIDAD ==
+  [PASS] A_requerimientos_backlog: {"ok": true, "historias": 7, "trazabilidad": true, "mockup_por_historia": true}
+  [PASS] C_tareas_dor: {"ok": true, "tareas": 5, "con_dependencias": 4, "dor_ready": 7}
+  [PASS] D_planner: {"ok": true, "bloqueantes": 0, "issues": 0}
+  [PASS] H_feedback_loop: {"ok": true, "story": "BUG-007"}
+  [PASS] I_qa_memoria: {"ok": true, "reply_len": 575}
+  [PASS] B_aprobar_gate: {"ok": true, "de": "REFINEMENT", "a": "NFR_CAPTURE"}
+  [PASS] E_modular: {"ok": true, "by_module": {"backend": 0, "frontend": 0, "tests": 0, "servicios": 0}}
+  [PASS] G_sprint_review_dod: {"ok": true}
+  [PASS] F_revision_auto: {"ok": true}
+
+RESULTADO: TODAS PASAN ✅
+evidencia -> docs/adam-e2e-evidence.json
