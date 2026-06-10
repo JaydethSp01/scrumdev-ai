@@ -148,22 +148,24 @@ export function ProjectOverview({
             <Rocket size={22} />
           </div>
           <h3 className="text-xl font-semibold tracking-tight mt-4">
-            Genera tu sistema completo
+            Inicia el ciclo de vida del producto
           </h3>
           <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-2 max-w-md mx-auto">
-            Los agentes leeran tu vision, generaran el backlog, decidiran la
-            arquitectura y produciran archivos de codigo.
+            Los agentes recorren el ciclo Scrum (backlog → arquitectura → código →
+            release) <b>fase por fase</b>, y se <b>detienen para que tú (Product Owner)
+            apruebes</b> cada punto clave. No se genera código sin tu visto bueno de la
+            arquitectura.
           </p>
           {!data.hasVision && (
             <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 inline-flex items-center gap-1">
-              <AlertTriangle size={11} /> Recomendado: define una vision antes de generar.
+              <AlertTriangle size={11} /> Recomendado: define una vision antes de iniciar.
             </p>
           )}
           <button
             onClick={onOpenBuild}
             className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 bg-brand text-white rounded-lg hover:bg-brand-dark transition font-medium shadow-sm"
           >
-            <Rocket size={16} /> Generar sistema completo
+            <Rocket size={16} /> Iniciar ciclo de vida (con aprobaciones)
           </button>
         </div>
       ) : (

@@ -38,6 +38,7 @@ import {
   apiListBuilds,
   apiSmartBuild,
   apiUseTemplate,
+  apiStartLifecycle,
   apiGetBrandKit,
   apiListAssets,
   type BuildRecord,
@@ -48,7 +49,6 @@ import Spinner from "@/components/Spinner";
 import ProjectOverview from "@/components/ProjectOverview";
 import VisionForm from "@/components/VisionForm";
 import BoardsPanel from "@/components/BoardsPanel";
-import JiraConnectPanel from "@/components/JiraConnectPanel";
 import CodeBrowser from "@/components/CodeBrowser";
 import DeployPanel from "@/components/DeployPanel";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
@@ -483,6 +483,20 @@ export default function ProjectDetailPage() {
     })();
   }, [autoPick, project, pickApplied, runSmartBuild, toasts]);
 
+  // Inicia el CICLO DE VIDA gateado (reemplaza al one-shot): corre fase por fase
+  // y se detiene en el próximo gate del PO. Lleva al tab Pipeline para verlo.
+  const startLifecycle = useCallback(async () => {
+    if (!project) return;
+    setTab("pipeline");
+    toasts.success("Iniciando el ciclo de vida… el sistema se detendrá para tu aprobación.");
+    try {
+      await apiStartLifecycle(project.key);
+      setRefreshKey((k) => k + 1);
+    } catch (e) {
+      toasts.error(e instanceof Error ? e.message : String(e));
+    }
+  }, [project, toasts]);
+
   const smartButton: SmartButton | null = useMemo(() => {
     if (!state) return null;
     const action = state.next_action;
@@ -498,10 +512,10 @@ export default function ProjectDetailPage() {
     }
     if (action === "generate_backlog") {
       return {
-        label: label || "Generar sistema",
+        label: label || "Iniciar ciclo de vida",
         icon: Rocket,
         variant: "primary",
-        onClick: () => runSmartBuild(false),
+        onClick: () => startLifecycle(),
       };
     }
     if (action === "generate_pending_code") {
@@ -534,12 +548,12 @@ export default function ProjectDetailPage() {
       };
     }
     return {
-      label: label || "Generar sistema",
+      label: label || "Iniciar ciclo de vida",
       icon: Rocket,
       variant: "primary",
-      onClick: () => runSmartBuild(false),
+      onClick: () => startLifecycle(),
     };
-  }, [state, runSmartBuild]);
+  }, [state, runSmartBuild, startLifecycle]);
 
   if (!ready || !user || loading) {
     return (
@@ -751,7 +765,7 @@ export default function ProjectDetailPage() {
               <ProjectOverview
                 projectKey={project.key}
                 projectName={project.name}
-                onOpenBuild={() => runSmartBuild(false)}
+                onOpenBuild={startLifecycle}
                 onGoTo={(t) => setTab(t as Tab)}
                 refreshKey={refreshKey}
               />
@@ -790,7 +804,7 @@ export default function ProjectDetailPage() {
           )}
           {tab === "integrations" && (
             <div className="space-y-8">
-              <JiraConnectPanel projectKey={project.key} />
+              {/* Jira desactivado por ahora — foco en el ciclo de vida gateado */}
               <IntegrationsPanel projectKey={project.key} />
             </div>
           )}

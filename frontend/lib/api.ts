@@ -305,6 +305,16 @@ export async function advanceWorkflow(body: {
   return jsonOrThrow<WorkflowResult>(res);
 }
 
+// Inicia/continúa el CICLO DE VIDA gateado (corre fase por fase y se detiene en
+// el próximo gate del PO). Reemplaza al one-shot.
+export async function apiStartLifecycle(projectKey: string): Promise<unknown> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/pipeline/autorun`,
+    { method: "POST", body: JSON.stringify({ triggered_by: "po" }) }
+  );
+  return res.ok ? res.json() : null;
+}
+
 const AGENT_ROLE_MAP: Record<string, { role: string; description: string }> = {
   po_agent: {
     role: "Product Owner",
