@@ -8,11 +8,13 @@ import {
 import http from "@/lib/http";
 import { API, apiVisionFromDocument, apiStartLifecycle, apiGetPipeline, apiApproveGate, apiAssistant } from "@/lib/api";
 
+import BacklogReview, { type ReviewStory } from "@/components/conversation/BacklogReview";
+
 type Gate = {
   is_gate?: boolean; gate_n?: number; current_state?: string;
   gate_review?: {
     title?: string; summary?: string;
-    stories?: { story_key: string; title: string; dor?: { ready: boolean }; mockup?: string }[];
+    stories?: ReviewStory[];
     dor_summary?: { ready: number; total: number };
     adrs?: { number: number; title: string }[];
     evidence?: { checks?: { name: string; ok: boolean }[] };
@@ -98,6 +100,7 @@ export default function ConversationCenter({
   const [busy, setBusy] = useState(false);
   const [started, setStarted] = useState(false);
   const [meta, setMeta] = useState<{ idx: number; total: number; gate: boolean; label: string; state: string } | null>(null);
+  const [reviewStories, setReviewStories] = useState<ReviewStory[] | null>(null);
   const lastState = useRef<string | null>(null);
   const idRef = useRef(1);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -348,6 +351,11 @@ export default function ConversationCenter({
                   onApprove={approve}
                   onRequestChanges={() => push({ role: "agent", content: "Claro — dime qué te gustaría cambiar y lo ajusto antes de continuar." })}
                   onExplain={() => m.gate && explainGate(m.gate)}
+                  onReviewStories={
+                    (m.gate.gate_review?.stories?.length || 0) > 0
+                      ? () => setReviewStories(m.gate!.gate_review!.stories!)
+                      : undefined
+                  }
                   busy={busy}
                 />
               )}
@@ -436,11 +444,22 @@ export default function ConversationCenter({
           <Send size={16} />
         </button>
       </div>
+
+      {/* Revisión completa del backlog: ver TODO, descargar y aprobar (Adam B) */}
+      {reviewStories && (
+        <BacklogReview
+          stories={reviewStories}
+          projectKey={projectKey}
+          busy={busy}
+          onClose={() => setReviewStories(null)}
+          onApprove={() => { setReviewStories(null); void approve(); }}
+        />
+      )}
     </div>
   );
 }
 
-function GateCard({ gate, onApprove, onRequestChanges, onExplain, busy }: { gate: Gate; onApprove: () => void; onRequestChanges: () => void; onExplain: () => void; busy: boolean }) {
+function GateCard({ gate, onApprove, onRequestChanges, onExplain, onReviewStories, busy }: { gate: Gate; onApprove: () => void; onRequestChanges: () => void; onExplain: () => void; onReviewStories?: () => void; busy: boolean }) {
   const r = gate.gate_review || {};
   const nMock = (r.stories || []).filter((s) => s.mockup).length;
   const chips: string[] = [];
@@ -516,6 +535,12 @@ function GateCard({ gate, onApprove, onRequestChanges, onExplain, busy }: { gate
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-900 disabled:opacity-60">
           Pedir cambios
         </button>
+        {onReviewStories && (
+          <button onClick={onReviewStories} disabled={busy} title="Ver cada historia completa, descargarlas y aprobar"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border border-brand/40 text-brand hover:bg-brand/10 disabled:opacity-60 font-medium">
+            Ver historias completas
+          </button>
+        )}
         <button onClick={onExplain} disabled={busy} title="Que el equipo te explique a fondo qué vas a aprobar"
           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-brand hover:bg-brand/10 disabled:opacity-60">
           <HelpCircle size={14} /> Explícame
