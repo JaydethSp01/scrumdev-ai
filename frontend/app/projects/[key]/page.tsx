@@ -53,6 +53,7 @@ import CodeBrowser from "@/components/CodeBrowser";
 import DeployPanel from "@/components/DeployPanel";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
 import PipelinePanel from "@/components/PipelinePanel";
+import RefinementPanel from "@/components/RefinementPanel";
 import VersionsPanel from "@/components/VersionsPanel";
 import ArchitecturePanel from "@/components/ArchitecturePanel";
 import DecisionsPanel from "@/components/DecisionsPanel";
@@ -134,6 +135,7 @@ type Tab =
   | "pipeline"
   | "vision"
   | "nfr"
+  | "refinement"
   | "architecture"
   | "personalization"
   | "versions"
@@ -176,6 +178,12 @@ const TABS: TabDef[] = [
     label: "Requisitos NFR",
     icon: SlidersHorizontal,
     description: "Captura requisitos no funcionales: performance, escala, seguridad, deploy.",
+  },
+  {
+    value: "refinement",
+    label: "Refinamiento",
+    icon: ListChecks,
+    description: "Historias descompuestas en tareas técnicas por módulo, DoR y trazabilidad. Feedback al backlog.",
   },
   {
     value: "architecture",
@@ -785,6 +793,7 @@ export default function ProjectDetailPage() {
           )}
           {tab === "boards" && <BoardsPanel projectKey={project.key} />}
           {tab === "pipeline" && <PipelinePanel projectKey={project.key} />}
+          {tab === "refinement" && <RefinementPanel projectKey={project.key} />}
           {tab === "versions" && <VersionsPanel projectKey={project.key} />}
           {tab === "agents" && (
             <div className="space-y-6">

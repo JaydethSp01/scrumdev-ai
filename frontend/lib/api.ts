@@ -315,6 +315,35 @@ export async function apiStartLifecycle(projectKey: string): Promise<unknown> {
   return res.ok ? res.json() : null;
 }
 
+export type TechTask = { module: string; type: string; title: string; detail?: string };
+export type RefinementStory = {
+  story_key: string; title: string; priority?: string; story_points?: number;
+  dor: { ready: boolean; checks: { name: string; ok: boolean }[] };
+  tech_tasks: TechTask[];
+};
+export type Refinement = {
+  stories: RefinementStory[]; dor_ready: number; total: number;
+  tech_tasks_total: number; by_module: Record<string, number>;
+};
+
+export async function apiGetRefinement(projectKey: string): Promise<Refinement> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/refinement`
+  );
+  return jsonOrThrow<Refinement>(res);
+}
+
+// Feedback loop: error/mejora → nueva historia en el backlog (Adam #15).
+export async function apiAddFeedback(
+  projectKey: string, title: string, kind: "bug" | "improvement", description = ""
+): Promise<unknown> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/feedback`,
+    { method: "POST", body: JSON.stringify({ title, kind, description }) }
+  );
+  return res.ok ? res.json() : null;
+}
+
 const AGENT_ROLE_MAP: Record<string, { role: string; description: string }> = {
   po_agent: {
     role: "Product Owner",
