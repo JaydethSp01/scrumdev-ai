@@ -54,6 +54,8 @@ import DeployPanel from "@/components/DeployPanel";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
 import PipelinePanel from "@/components/PipelinePanel";
 import RefinementPanel from "@/components/RefinementPanel";
+import { useRealtime } from "@/lib/useRealtime";
+import RequirementsChat from "@/components/RequirementsChat";
 import VersionsPanel from "@/components/VersionsPanel";
 import ArchitecturePanel from "@/components/ArchitecturePanel";
 import DecisionsPanel from "@/components/DecisionsPanel";
@@ -304,6 +306,10 @@ export default function ProjectDetailPage() {
   const [showJustCreated, setShowJustCreated] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Tiempo real (Taller 4 I): cualquier evento de agentes/workflow/historias
+  // refresca el estado del proyecto. Degrada elegante si el WS no está.
+  useRealtime(user?.user_id, () => setRefreshKey((k) => k + 1));
   const [state, setState] = useState<ProjectState | null>(null);
   const [stateLoading, setStateLoading] = useState(true);
   const [smartLoading, setSmartLoading] = useState(false);
@@ -780,7 +786,20 @@ export default function ProjectDetailPage() {
             </div>
           )}
           {tab === "vision" && (
-            <VisionForm projectKey={project.key} user={user} />
+            <div className="space-y-8">
+              <RequirementsChat
+                projectKey={project.key}
+                onCaptured={() => setRefreshKey((k) => k + 1)}
+              />
+              <details className="rounded-2xl border border-neutral-200 dark:border-neutral-800 p-4">
+                <summary className="cursor-pointer text-sm font-medium text-neutral-600 dark:text-neutral-300">
+                  ¿Prefieres el formulario estructurado? (alternativa)
+                </summary>
+                <div className="mt-4">
+                  <VisionForm projectKey={project.key} user={user} />
+                </div>
+              </details>
+            </div>
           )}
           {tab === "nfr" && (
             <NFRForm projectKey={project.key} user={user} />

@@ -82,6 +82,15 @@ export function PipelinePanel({ projectKey }: { projectKey: string }) {
     void load();
   }, [load]);
 
+  // Tiempo real (Taller 4 I): refresco automático mientras el ciclo avanza, para
+  // ver cambios de estado/gates sin recargar. Se detiene en RELEASED.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (view?.current_state !== "RELEASED" && !busy) void load();
+    }, 10000);
+    return () => clearInterval(id);
+  }, [load, view?.current_state, busy]);
+
   const advance = useCallback(async () => {
     setBusy(true);
     try {
