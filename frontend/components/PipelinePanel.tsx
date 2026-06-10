@@ -34,8 +34,13 @@ type Evidence = {
   code_files?: number; test_files?: string[]; test_count?: number;
   build_status?: string; build_summary?: string; checks?: Check[];
 };
+type Story = {
+  story_key: string; title: string; description?: string;
+  acceptance_criteria?: string[]; story_points?: number; priority?: string;
+};
 type GateReview = {
   title?: string; summary?: string; adrs?: Adr[]; evidence?: Evidence;
+  stories?: Story[]; needs_nfr_form?: boolean;
 };
 type PipelineView = {
   current_state: string;
@@ -178,6 +183,43 @@ export function PipelinePanel({ projectKey }: { projectKey: string }) {
                 {view.gate_review?.summary && (
                   <p className="text-sm text-neutral-600 dark:text-neutral-300 mt-1.5">
                     {view.gate_review.summary}
+                  </p>
+                )}
+                {/* PRODUCT BACKLOG a aprobar (gate 1): historias con criterios */}
+                {view.gate_review?.stories && view.gate_review.stories.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {view.gate_review.stories.map((s) => (
+                      <details key={s.story_key} className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 p-3">
+                        <summary className="cursor-pointer text-sm font-medium flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs text-brand">{s.story_key}</span>
+                          <span>{s.title}</span>
+                          {s.priority && (
+                            <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500">{s.priority}</span>
+                          )}
+                          {typeof s.story_points === "number" && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand/10 text-brand ml-auto">{s.story_points} pts</span>
+                          )}
+                        </summary>
+                        {s.description && (
+                          <p className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">{s.description}</p>
+                        )}
+                        {s.acceptance_criteria && s.acceptance_criteria.length > 0 && (
+                          <ul className="mt-2 space-y-1">
+                            {s.acceptance_criteria.map((c, i) => (
+                              <li key={i} className="text-xs text-neutral-500 flex gap-1.5">
+                                <CheckCircle2 size={12} className="text-emerald-500 shrink-0 mt-0.5" /> {c}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </details>
+                    ))}
+                  </div>
+                )}
+                {/* Gate NFR: invita a llenar el formulario */}
+                {view.gate_review?.needs_nfr_form && (
+                  <p className="mt-3 text-xs text-amber-700 dark:text-amber-300 inline-flex items-center gap-1.5">
+                    <Lock size={12} /> Completa el formulario en el tab <b>Requisitos NFR</b>, luego aprueba aquí.
                   </p>
                 )}
                 {/* Evidencia de QA (gate 2) */}
