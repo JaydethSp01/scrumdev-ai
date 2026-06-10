@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Bot, Send, Loader2, Paperclip, User as UserIcon, ShieldCheck,
-  CheckCircle2, Lock,
+  Bot, Send, Loader2, Paperclip, ShieldCheck,
+  CheckCircle2, Lock, HelpCircle,
 } from "lucide-react";
 import http from "@/lib/http";
 import { API, apiVisionFromDocument, apiStartLifecycle, apiGetPipeline, apiApproveGate, apiAssistant } from "@/lib/api";
@@ -121,9 +121,10 @@ export default function ConversationCenter({
         push({
           role: "agent",
           content:
-            "¡Hola! Soy el PO Agent de ScrumDev AI. Cuéntame qué quieres construir " +
-            "(o sube un documento de requerimientos) y arranco el ciclo: genero el " +
-            "Product Backlog y nos detenemos en cada decisión para que tú apruebes.",
+            "¡Hola! Soy ScrumDev AI — tu equipo de agentes (Architect, Developer, QA, " +
+            "Security). Tú eres el Product Owner: cuéntame qué quieres construir (escribe " +
+            "tus requerimientos o sube un documento) y arranco el ciclo. Genero el Product " +
+            "Backlog y me detengo en cada decisión para que TÚ apruebes.",
         });
       }
     })();
@@ -199,6 +200,24 @@ export default function ConversationCenter({
     }
   }, [input, started, startFlow, push, projectKey, userId]);
 
+  // "Explícame más a fondo" (que el PO entienda qué va a aprobar).
+  const explainGate = useCallback(async (g: Gate) => {
+    const title = g.gate_review?.title || `gate #${g.gate_n}`;
+    push({ role: "human", content: "Explícame más a fondo qué voy a aprobar." });
+    setBusy(true);
+    try {
+      const r = await apiAssistant(projectKey, {
+        user_id: userId || "po",
+        message: `Soy el Product Owner. Explícame en lenguaje claro y a fondo qué voy a aprobar en "${title}": qué generó el equipo, por qué, qué implica aprobarlo y qué pasa si pido cambios. Quiero decidir con criterio.`,
+      });
+      push({ role: "agent", content: r.reply || "…" });
+    } catch {
+      push({ role: "agent", content: "No pude generar la explicación ahora." });
+    } finally {
+      setBusy(false);
+    }
+  }, [projectKey, userId, push]);
+
   const approve = useCallback(async () => {
     setBusy(true);
     try {
@@ -230,8 +249,8 @@ export default function ConversationCenter({
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-4">
         {msgs.map((m) => (
           <div key={m.id} className={`flex gap-2.5 ${m.role === "human" ? "flex-row-reverse" : ""}`}>
-            <span className={`grid place-items-center w-8 h-8 rounded-full shrink-0 ${m.role === "agent" ? "bg-brand/10 text-brand" : "bg-neutral-200 dark:bg-neutral-800 text-neutral-500"}`}>
-              {m.role === "agent" ? <Bot size={15} /> : <UserIcon size={15} />}
+            <span className={`grid place-items-center w-8 h-8 rounded-full shrink-0 ${m.role === "agent" ? "bg-brand/10 text-brand" : "bg-neutral-800 dark:bg-neutral-700 text-white"}`} title={m.role === "human" ? "Product Owner (tú)" : "ScrumDev AI"}>
+              {m.role === "agent" ? <Bot size={15} /> : <span className="text-[10px] font-bold">PO</span>}
             </span>
             <div className={`max-w-[80%] space-y-2`}>
               <div className={`rounded-2xl px-4 py-2.5 text-sm ${m.role === "agent" ? "bg-neutral-100 dark:bg-neutral-900" : "bg-brand text-white"}`}>
@@ -242,6 +261,7 @@ export default function ConversationCenter({
                   gate={m.gate}
                   onApprove={approve}
                   onRequestChanges={() => push({ role: "agent", content: "Claro — dime qué te gustaría cambiar y lo ajusto antes de continuar." })}
+                  onExplain={() => m.gate && explainGate(m.gate)}
                   busy={busy}
                 />
               )}
@@ -279,7 +299,7 @@ export default function ConversationCenter({
   );
 }
 
-function GateCard({ gate, onApprove, onRequestChanges, busy }: { gate: Gate; onApprove: () => void; onRequestChanges: () => void; busy: boolean }) {
+function GateCard({ gate, onApprove, onRequestChanges, onExplain, busy }: { gate: Gate; onApprove: () => void; onRequestChanges: () => void; onExplain: () => void; busy: boolean }) {
   const r = gate.gate_review || {};
   const nMock = (r.stories || []).filter((s) => s.mockup).length;
   const chips: string[] = [];
@@ -354,6 +374,10 @@ function GateCard({ gate, onApprove, onRequestChanges, busy }: { gate: Gate; onA
         <button onClick={onRequestChanges} disabled={busy}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-neutral-300 dark:border-neutral-700 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-900 disabled:opacity-60">
           Pedir cambios
+        </button>
+        <button onClick={onExplain} disabled={busy} title="Que el equipo te explique a fondo qué vas a aprobar"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-brand hover:bg-brand/10 disabled:opacity-60">
+          <HelpCircle size={14} /> Explícame
         </button>
       </div>
     </div>
