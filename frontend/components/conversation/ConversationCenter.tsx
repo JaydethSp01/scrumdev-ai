@@ -78,6 +78,12 @@ const WORKING_DETAIL: Record<string, { detail: string; eta: string }> = {
   },
 };
 
+// Umbral (segundos) tras el cual ofrecemos "Detener y regenerar" por fase.
+const STUCK_AFTER: Record<string, number> = {
+  BACKLOG: 150, ARCHITECTURE_INCEPTION: 180, READY_FOR_DEVELOPMENT: 120,
+  DEVELOPMENT: 600, CODE_REVIEW: 240, QA: 240, STAGING_DEPLOYMENT: 360,
+};
+
 export default function ConversationCenter({
   projectKey,
   userId,
@@ -377,6 +383,27 @@ export default function ConversationCenter({
                 <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-brand to-fuchsia-500 animate-[slide_1.6s_ease-in-out_infinite]" />
               </div>
               <style jsx>{`@keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }`}</style>
+              {/* Si tardó más de lo normal: ofrecer detener y regenerar */}
+              {Math.floor((Date.now() - phaseStart.current) / 1000) > (STUCK_AFTER[meta.state] ?? 600) && (
+                <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-amber-600 dark:text-amber-400">
+                    Está tardando más de lo normal.
+                  </span>
+                  <button
+                    onClick={() => {
+                      push({ role: "human", content: "🔄 Detener y regenerar." });
+                      phaseStart.current = Date.now();
+                      void apiStartLifecycle(projectKey).then(() => {
+                        push({ role: "agent", content: "Listo — reinicié la generación de esta fase. Te aviso cuando esté." });
+                        setTimeout(() => void syncPipeline(), 4000);
+                      });
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10"
+                  >
+                    <Loader2 size={12} /> Detener y regenerar
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}

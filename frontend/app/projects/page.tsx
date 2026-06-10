@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/app/auth/_lib";
 import { listProjects, createProject, type Project } from "@/lib/projects";
-import { apiGetBacklog, apiGetCode, apiListBuilds, apiSaveVision, type BuildRecord } from "@/lib/api";
+import { apiGetBacklog, apiGetCode, apiListBuilds, apiSaveVision, apiGetPipeline, type BuildRecord } from "@/lib/api";
 import EmptyState from "@/components/EmptyState";
 import Spinner from "@/components/Spinner";
 import ProjectCreateWizard from "@/components/ProjectCreateWizard";
@@ -31,7 +31,30 @@ type ProjectMetrics = {
   stories?: number;
   files?: number;
   lastBuild?: BuildRecord;
+  // estado del ciclo de vida (Taller 4): en qué fase va y si espera al PO
+  phaseState?: string;
+  phaseIdx?: number;
+  phaseTotal?: number;
+  isGate?: boolean;
   loading: boolean;
+};
+
+// Cómo se lee cada fase para el PO (el card dice EN QUÉ VA la conversación).
+const PHASE_HUMAN: Record<string, string> = {
+  BACKLOG: "Generando el backlog…",
+  REFINEMENT: "Tu aprobación: Product Backlog",
+  NFR_CAPTURE: "Tu aprobación: requisitos NFR",
+  ARCHITECTURE_INCEPTION: "Diseñando arquitectura…",
+  ARCHITECTURE_APPROVAL_PENDING: "Tu aprobación: arquitectura",
+  READY_FOR_DEVELOPMENT: "Planificando sprints…",
+  DEVELOPMENT: "Desarrollando el sprint…",
+  CODE_REVIEW: "Revisión de código…",
+  QA: "Ejecutando pruebas…",
+  PO_REVIEW: "Tu aprobación: Sprint Review",
+  RELEASE_APPROVAL_PENDING: "Tu aprobación: release",
+  STAGING_DEPLOYMENT: "Desplegando a staging…",
+  PRODUCTION_DEPLOYMENT: "Tu aprobación: producción",
+  RELEASED: "Publicado",
 };
 
 export default function ProjectsPage() {
@@ -86,7 +109,11 @@ export default function ProjectsPage() {
         apiGetBacklog(p.key),
         apiGetCode(p.key),
         apiListBuilds(p.key, 1),
-      ]).then(([backlog, code, builds]) => {
+        apiGetPipeline(p.key),
+      ]).then(([backlog, code, builds, pipe]) => {
+        const pv = pipe.status === "fulfilled"
+          ? (pipe.value as { current_state?: string; current_index?: number; total?: number; is_gate?: boolean })
+          : null;
         setMetrics((prev) => ({
           ...prev,
           [p.key]: {
@@ -98,6 +125,10 @@ export default function ProjectsPage() {
               builds.status === "fulfilled" && builds.value.length > 0
                 ? builds.value[0]
                 : undefined,
+            phaseState: pv?.current_state,
+            phaseIdx: pv?.current_index,
+            phaseTotal: pv?.total,
+            isGate: pv?.is_gate,
           },
         }));
       });
@@ -116,14 +147,8 @@ export default function ProjectsPage() {
     );
   }
 
-  const totalStories = Object.values(metrics).reduce(
-    (acc, m) => acc + (m.stories ?? 0),
-    0
-  );
-  const totalFiles = Object.values(metrics).reduce(
-    (acc, m) => acc + (m.files ?? 0),
-    0
-  );
+  // ¿algún proyecto espera la decisión del PO? (lo más importante de la pantalla)
+  const pendingApprovals = Object.values(metrics).filter((m) => m.isGate).length;
 
   return (
     <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
@@ -163,9 +188,15 @@ export default function ProjectsPage() {
               Mis proyectos
             </h1>
             <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1.5 max-w-lg">
-              Cada proyecto agrupa vision, identidad visual, backlog, codigo
-              generado y deploy. Crea o abre uno para continuar.
+              Cada proyecto es una conversación con tu equipo de agentes: tú
+              (Product Owner) escribes los requerimientos y apruebas cada fase
+              del ciclo — backlog, arquitectura, sprints y release.
             </p>
+            {pendingApprovals > 0 && (
+              <span className="inline-flex items-center gap-1.5 mt-3 text-xs font-medium px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                <AlertTriangle size={11} /> {pendingApprovals} proyecto{pendingApprovals > 1 ? "s" : ""} esperando tu aprobación
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -183,13 +214,6 @@ export default function ProjectsPage() {
           </div>
         </div>
 
-        {projects.length > 0 && (
-          <div className="relative mt-6 grid grid-cols-3 gap-3 max-w-xl">
-            <HeroStat icon={<Rocket size={14} />} label="proyectos" value={projects.length} />
-            <HeroStat icon={<ListChecks size={14} />} label="historias" value={totalStories} />
-            <HeroStat icon={<Code2 size={14} />} label="archivos" value={totalFiles} />
-          </div>
-        )}
       </section>
 
       {error && (
@@ -274,27 +298,6 @@ export default function ProjectsPage() {
   );
 }
 
-function HeroStat({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-}) {
-  return (
-    <div className="rounded-xl border border-white/40 dark:border-white/10 bg-white/70 dark:bg-white/5 backdrop-blur px-3.5 py-3">
-      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-        <span className="text-brand">{icon}</span> {label}
-      </div>
-      <div className="text-2xl font-semibold tracking-tight mt-1 tabular-nums">
-        {value}
-      </div>
-    </div>
-  );
-}
-
 function ProjectCard({
   project,
   metrics,
@@ -302,28 +305,6 @@ function ProjectCard({
   project: Project;
   metrics: ProjectMetrics;
 }) {
-  const build = metrics.lastBuild;
-  const stage = (build?.stage || "").toLowerCase();
-  const progress = build?.progress_percent;
-
-  const buildTone =
-    stage === "completed"
-      ? "bg-green-500/15 text-green-700 dark:text-green-300 border-green-500/30"
-      : stage === "failed"
-      ? "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30"
-      : stage === "running" || stage === "queued"
-      ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
-      : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500 border-neutral-300 dark:border-neutral-700";
-
-  const buildIcon =
-    stage === "completed" ? (
-      <CheckCircle2 size={11} />
-    ) : stage === "failed" ? (
-      <AlertTriangle size={11} />
-    ) : stage === "running" || stage === "queued" ? (
-      <Loader2 size={11} className="animate-spin" />
-    ) : null;
-
   // Hash visual basico desde el key para diferenciar cards
   const hue = Math.abs(
     project.key.split("").reduce((a, c) => a + c.charCodeAt(0), 0)
@@ -362,47 +343,64 @@ function ProjectCard({
               {project.key}
             </p>
           </div>
-          {build && (
-            <span
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] uppercase tracking-wider border whitespace-nowrap ${buildTone}`}
-            >
-              {buildIcon}
-              {humanStageShort(stage)}
+        </div>
+
+        <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-3 line-clamp-2 min-h-[2.5rem]">
+          {project.description ||
+            "Aún sin requerimientos — entra y cuéntale al equipo qué quieres construir."}
+        </p>
+
+        {/* Estado del CICLO (Taller 4): en qué fase va la conversación */}
+        <div className="mt-3">
+          {metrics.loading ? (
+            <div className="flex items-center gap-2 text-xs text-neutral-400">
+              <Loader2 size={12} className="animate-spin" /> consultando estado…
+            </div>
+          ) : metrics.phaseState ? (
+            <>
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border ${
+                  metrics.isGate
+                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                    : metrics.phaseState === "RELEASED"
+                    ? "bg-green-500/15 text-green-700 dark:text-green-300 border-green-500/30"
+                    : "bg-brand/10 text-brand border-brand/20"
+                }`}
+              >
+                {metrics.isGate ? (
+                  <AlertTriangle size={11} />
+                ) : metrics.phaseState === "RELEASED" ? (
+                  <CheckCircle2 size={11} />
+                ) : (
+                  <Loader2 size={11} className="animate-spin" />
+                )}
+                {PHASE_HUMAN[metrics.phaseState] || metrics.phaseState}
+              </span>
+              {typeof metrics.phaseIdx === "number" && metrics.phaseState !== "RELEASED" && (
+                <div className="mt-2.5">
+                  <div className="h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-brand to-fuchsia-500 transition-all"
+                      style={{ width: `${Math.round(((metrics.phaseIdx + 1) / (metrics.phaseTotal || 14)) * 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-neutral-500 mt-1 uppercase tracking-wider">
+                    fase {metrics.phaseIdx + 1} de {metrics.phaseTotal || 14}
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border bg-neutral-100 dark:bg-neutral-900 text-neutral-500 border-neutral-200 dark:border-neutral-800">
+              Listo para tus requerimientos
             </span>
           )}
         </div>
 
-        <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-3 line-clamp-2 min-h-[2.5rem]">
-          {project.description || "Sin descripcion"}
-        </p>
-
-        {typeof progress === "number" && stage !== "completed" && (
-          <div className="mt-3">
-            <div className="h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-brand to-fuchsia-500 transition-all"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <p className="text-[10px] text-neutral-500 mt-1 uppercase tracking-wider">
-              Build {progress}%
-            </p>
-          </div>
-        )}
-
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <Metric
-            icon={ListChecks}
-            label="historias"
-            value={metrics.stories}
-            loading={metrics.loading}
-          />
-          <Metric
-            icon={Code2}
-            label="archivos"
-            value={metrics.files}
-            loading={metrics.loading}
-          />
+        <div className="mt-4 flex items-center gap-2 text-xs text-neutral-500">
+          <span className="inline-flex items-center gap-1"><ListChecks size={12} /> {metrics.stories ?? 0} historias</span>
+          <span className="text-neutral-300 dark:text-neutral-700">·</span>
+          <span className="inline-flex items-center gap-1"><Code2 size={12} /> {metrics.files ?? 0} archivos</span>
         </div>
 
         <div className="flex items-center justify-between mt-auto pt-4 border-t border-neutral-200 dark:border-neutral-800">
@@ -410,7 +408,7 @@ function ProjectCard({
             <Calendar size={11} /> {new Date(project.createdAt).toLocaleDateString()}
           </span>
           <span className="text-sm font-medium text-brand inline-flex items-center gap-1 group-hover:gap-2 transition-all">
-            Abrir <ArrowRight size={14} />
+            {metrics.isGate ? "Revisar y aprobar" : "Continuar conversación"} <ArrowRight size={14} />
           </span>
         </div>
       </div>
@@ -418,51 +416,3 @@ function ProjectCard({
   );
 }
 
-function humanStageShort(stage: string): string {
-  switch (stage) {
-    case "completed":
-      return "Completado";
-    case "failed":
-      return "Fallido";
-    case "running":
-    case "vision":
-    case "backlog":
-    case "architecture":
-    case "coding":
-      return "Generando";
-    case "queued":
-      return "En cola";
-    default:
-      return stage ? stage : "Pendiente";
-  }
-}
-
-function Metric({
-  icon: Icon,
-  label,
-  value,
-  loading,
-}: {
-  icon: typeof ListChecks;
-  label: string;
-  value?: number;
-  loading: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
-      <Icon size={13} className="text-neutral-400 shrink-0" />
-      <div className="flex flex-col leading-tight min-w-0">
-        {loading ? (
-          <Loader2 size={11} className="animate-spin text-neutral-400" />
-        ) : (
-          <span className="font-semibold text-sm tabular-nums text-neutral-800 dark:text-neutral-200">
-            {value ?? 0}
-          </span>
-        )}
-        <span className="text-[10px] uppercase tracking-wider text-neutral-500">
-          {label}
-        </span>
-      </div>
-    </div>
-  );
-}
