@@ -12,7 +12,7 @@ type Gate = {
   is_gate?: boolean; gate_n?: number; current_state?: string;
   gate_review?: {
     title?: string; summary?: string;
-    stories?: { story_key: string; title: string; dor?: { ready: boolean } }[];
+    stories?: { story_key: string; title: string; dor?: { ready: boolean }; mockup?: string }[];
     dor_summary?: { ready: number; total: number };
     adrs?: { number: number; title: string }[];
     evidence?: { checks?: { name: string; ok: boolean }[] };
@@ -261,10 +261,19 @@ function GateCard({ gate, onApprove, busy }: { gate: Gate; onApprove: () => void
       {r.stories && r.stories.length > 0 && (
         <ul className="mt-2 space-y-1">
           {r.stories.slice(0, 8).map((s) => (
-            <li key={s.story_key} className="text-xs flex items-center gap-1.5">
-              <span className="font-mono text-brand">{s.story_key}</span>
-              <span className="text-neutral-600 dark:text-neutral-300 truncate">{s.title}</span>
-              {s.dor && (s.dor.ready ? <CheckCircle2 size={11} className="text-emerald-500 shrink-0" /> : <Lock size={11} className="text-amber-500 shrink-0" />)}
+            <li key={s.story_key} className="text-xs">
+              <details>
+                <summary className="flex items-center gap-1.5 cursor-pointer list-none">
+                  <span className="font-mono text-brand">{s.story_key}</span>
+                  <span className="text-neutral-600 dark:text-neutral-300 truncate">{s.title}</span>
+                  {s.dor && (s.dor.ready ? <CheckCircle2 size={11} className="text-emerald-500 shrink-0" /> : <Lock size={11} className="text-amber-500 shrink-0" />)}
+                  {s.mockup && <span className="ml-auto text-[10px] text-neutral-400">mockup ▾</span>}
+                </summary>
+                {s.mockup && (
+                  <div className="mt-1.5 max-w-[260px] rounded-lg overflow-hidden border border-neutral-200 dark:border-neutral-800"
+                    dangerouslySetInnerHTML={{ __html: s.mockup }} />
+                )}
+              </details>
             </li>
           ))}
         </ul>

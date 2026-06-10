@@ -244,6 +244,13 @@ function StoryRow({ s }: { s: RefinementStory }) {
         </span>
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand/10 text-brand ml-auto">{s.tech_tasks.length} tareas</span>
       </summary>
+      {s.mockup && (
+        <div className="mt-3">
+          <p className="text-[10px] uppercase tracking-wider text-neutral-400 mb-1.5">Mockup de la historia</p>
+          <div className="max-w-sm rounded-lg overflow-hidden border border-neutral-200 dark:border-neutral-800"
+            dangerouslySetInnerHTML={{ __html: s.mockup }} />
+        </div>
+      )}
       <div className="mt-3 grid sm:grid-cols-3 gap-3">
         {(["backend", "frontend", "tests"] as const).map((m) => {
           const tasks = byModule(m);

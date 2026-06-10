@@ -323,6 +323,7 @@ export type RefinementStory = {
   story_key: string; title: string; priority?: string; story_points?: number;
   dor: { ready: boolean; checks: { name: string; ok: boolean }[] };
   tech_tasks: TechTask[]; origin?: string; requirement_excerpt?: string;
+  mockup?: string;
 };
 export type Refinement = {
   stories: RefinementStory[]; dor_ready: number; total: number;
