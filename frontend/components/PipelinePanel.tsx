@@ -35,10 +35,11 @@ type Evidence = {
   build_status?: string; build_summary?: string; checks?: Check[];
 };
 type Dor = { ready: boolean; checks: { name: string; ok: boolean }[] };
+type TechTask = { module: string; type: string; title: string; detail?: string };
 type Story = {
   story_key: string; title: string; description?: string;
   acceptance_criteria?: string[]; story_points?: number; priority?: string;
-  dor?: Dor;
+  dor?: Dor; tech_tasks?: TechTask[];
 };
 type GateReview = {
   title?: string; summary?: string; adrs?: Adr[]; evidence?: Evidence;
@@ -238,6 +239,22 @@ export function PipelinePanel({ projectKey }: { projectKey: string }) {
                                 {c.ok ? <CheckCircle2 size={10} /> : <Lock size={10} />} {c.name}
                               </span>
                             ))}
+                          </div>
+                        )}
+                        {s.tech_tasks && s.tech_tasks.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+                            <p className="text-[10px] uppercase tracking-wider text-neutral-400 mb-1.5">Tareas técnicas</p>
+                            <div className="space-y-1">
+                              {s.tech_tasks.map((tk, i) => (
+                                <div key={i} className="text-xs flex items-start gap-2">
+                                  <span className={`mt-0.5 text-[9px] uppercase px-1.5 py-0.5 rounded shrink-0 ${
+                                    tk.module === "backend" ? "bg-violet-500/15 text-violet-600 dark:text-violet-300"
+                                    : tk.module === "frontend" ? "bg-sky-500/15 text-sky-600 dark:text-sky-300"
+                                    : "bg-amber-500/15 text-amber-600 dark:text-amber-300"}`}>{tk.module}</span>
+                                  <span className="text-neutral-600 dark:text-neutral-300">{tk.title}</span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )}
                       </details>
