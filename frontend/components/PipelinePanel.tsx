@@ -82,8 +82,28 @@ export function PipelinePanel({ projectKey }: { projectKey: string }) {
     void load();
   }, [load]);
 
-  // Tiempo real (Taller 4 I): refresco automático mientras el ciclo avanza, para
-  // ver cambios de estado/gates sin recargar. Se detiene en RELEASED.
+  // Tiempo real por WebSocket (Taller 4 I): el backend empuja los cambios de
+  // estado del pipeline; al recibir uno, recargamos en vivo.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const base = (process.env.NEXT_PUBLIC_WS_URL || API).replace(/^http/, "ws");
+    let ws: WebSocket | null = null;
+    let closed = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const connect = () => {
+      try {
+        ws = new WebSocket(`${base}/projects/${encodeURIComponent(projectKey)}/events/ws`);
+        ws.onmessage = () => { void load(); };
+        ws.onclose = () => { if (!closed) retry = setTimeout(connect, 6000); };
+        ws.onerror = () => { try { ws?.close(); } catch { /* noop */ } };
+      } catch { if (!closed) retry = setTimeout(connect, 6000); }
+    };
+    connect();
+    return () => { closed = true; if (retry) clearTimeout(retry); try { ws?.close(); } catch { /* noop */ } };
+  }, [projectKey, load]);
+
+  // Fallback confiable: refresco automático mientras el ciclo avanza (por si el
+  // WS no está disponible). Se detiene en RELEASED.
   useEffect(() => {
     const id = setInterval(() => {
       if (view?.current_state !== "RELEASED" && !busy) void load();
