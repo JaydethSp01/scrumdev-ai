@@ -34,13 +34,16 @@ type Evidence = {
   code_files?: number; test_files?: string[]; test_count?: number;
   build_status?: string; build_summary?: string; checks?: Check[];
 };
+type Dor = { ready: boolean; checks: { name: string; ok: boolean }[] };
 type Story = {
   story_key: string; title: string; description?: string;
   acceptance_criteria?: string[]; story_points?: number; priority?: string;
+  dor?: Dor;
 };
 type GateReview = {
   title?: string; summary?: string; adrs?: Adr[]; evidence?: Evidence;
   stories?: Story[]; needs_nfr_form?: boolean;
+  dor_summary?: { ready: number; total: number; all_ready: boolean };
 };
 type PipelineView = {
   current_state: string;
@@ -185,14 +188,30 @@ export function PipelinePanel({ projectKey }: { projectKey: string }) {
                     {view.gate_review.summary}
                   </p>
                 )}
-                {/* PRODUCT BACKLOG a aprobar (gate 1): historias con criterios */}
+                {/* PRODUCT BACKLOG a aprobar (gate 1): historias con criterios + DoR */}
                 {view.gate_review?.stories && view.gate_review.stories.length > 0 && (
                   <div className="mt-3 space-y-2">
+                    {view.gate_review?.dor_summary && (
+                      <div className={`flex items-center gap-2 text-xs rounded-lg px-3 py-2 ${
+                        view.gate_review.dor_summary.all_ready
+                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                          : "bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>
+                        {view.gate_review.dor_summary.all_ready ? <CheckCircle2 size={13} /> : <Lock size={13} />}
+                        <b>Definition of Ready:</b> {view.gate_review.dor_summary.ready}/{view.gate_review.dor_summary.total} historias listas.
+                        {!view.gate_review.dor_summary.all_ready && " Sin DoR completo no se genera código."}
+                      </div>
+                    )}
                     {view.gate_review.stories.map((s) => (
                       <details key={s.story_key} className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 p-3">
                         <summary className="cursor-pointer text-sm font-medium flex items-center gap-2 flex-wrap">
                           <span className="font-mono text-xs text-brand">{s.story_key}</span>
                           <span>{s.title}</span>
+                          {s.dor && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${
+                              s.dor.ready ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/15 text-amber-700 dark:text-amber-300"}`}>
+                              {s.dor.ready ? <CheckCircle2 size={9} /> : <Lock size={9} />} DoR
+                            </span>
+                          )}
                           {s.priority && (
                             <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500">{s.priority}</span>
                           )}
@@ -211,6 +230,15 @@ export function PipelinePanel({ projectKey }: { projectKey: string }) {
                               </li>
                             ))}
                           </ul>
+                        )}
+                        {s.dor && (
+                          <div className="mt-2 pt-2 border-t border-neutral-100 dark:border-neutral-800 flex flex-wrap gap-2">
+                            {s.dor.checks.map((c, i) => (
+                              <span key={i} className={`text-[10px] inline-flex items-center gap-1 ${c.ok ? "text-emerald-600" : "text-amber-600"}`}>
+                                {c.ok ? <CheckCircle2 size={10} /> : <Lock size={10} />} {c.name}
+                              </span>
+                            ))}
+                          </div>
                         )}
                       </details>
                     ))}
