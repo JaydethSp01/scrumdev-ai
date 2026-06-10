@@ -333,8 +333,9 @@ export default function ProjectDetailPage() {
     if (search.get("just_created") === "1") {
       setShowJustCreated(true);
       const pick = search.get("pick");
-      if (pick) setAutoPick(pick); // ya eligió en el wizard -> aplicamos, sin galería
-      else setShowGallery(true);
+      // Flujo Adam: sin sector ni galería de plantillas. Si no hay pick, el PO
+      // entra directo al CHAT a escribir los requerimientos (no se abre galería).
+      if (pick) setAutoPick(pick);
     }
   }, [search]);
 
