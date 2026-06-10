@@ -55,6 +55,7 @@ import IntegrationsPanel from "@/components/IntegrationsPanel";
 import PipelinePanel from "@/components/PipelinePanel";
 import RefinementPanel from "@/components/RefinementPanel";
 import RequirementsChat from "@/components/RequirementsChat";
+import ConversationalDashboard from "@/components/conversation/ConversationalDashboard";
 import VersionsPanel from "@/components/VersionsPanel";
 import ArchitecturePanel from "@/components/ArchitecturePanel";
 import DecisionsPanel from "@/components/DecisionsPanel";
@@ -304,6 +305,7 @@ export default function ProjectDetailPage() {
   const [statsLoading, setStatsLoading] = useState(true);
   const [showJustCreated, setShowJustCreated] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [state, setState] = useState<ProjectState | null>(null);
   const [stateLoading, setStateLoading] = useState(true);
@@ -681,18 +683,27 @@ export default function ProjectDetailPage() {
               )}
             </div>
           </div>
-          <SmartButtonGroup
-            button={smartButton}
-            loading={stateLoading || smartLoading}
-            state={state}
-            onRegenerate={() => setConfirmRegenerate(true)}
-            personalization={personalization}
-            personalizationLoading={personalizationLoading}
-            onGoToPersonalization={() => setTab("personalization")}
-          />
+          {advanced && (
+            <SmartButtonGroup
+              button={smartButton}
+              loading={stateLoading || smartLoading}
+              state={state}
+              onRegenerate={() => setConfirmRegenerate(true)}
+              personalization={personalization}
+              personalizationLoading={personalizationLoading}
+              onGoToPersonalization={() => setTab("personalization")}
+            />
+          )}
         </div>
       </header>
 
+      {!advanced ? (
+        <ConversationalDashboard
+          projectKey={project.key}
+          user={user}
+          onOpenAdvanced={() => setAdvanced(true)}
+        />
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-6">
         <aside>
           <nav className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 lg:sticky lg:top-20">
@@ -834,6 +845,7 @@ export default function ProjectDetailPage() {
           {tab === "chat" && <ProjectChat projectKey={project.key} user={user} />}
         </section>
       </div>
+      )}
 
       <BuildProgressToast
         projectKey={project.key}

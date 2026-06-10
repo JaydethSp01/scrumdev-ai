@@ -347,6 +347,19 @@ export async function apiGetCodeSummary(projectKey: string): Promise<CodeSummary
   return jsonOrThrow<CodeSummary>(res);
 }
 
+// Pipeline gateado (para el chat conversacional).
+export async function apiGetPipeline(projectKey: string): Promise<Record<string, unknown>> {
+  const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/pipeline`);
+  return jsonOrThrow(res);
+}
+export async function apiApproveGate(projectKey: string, reason = "aprobado"): Promise<unknown> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/pipeline/approve-gate`,
+    { method: "POST", body: JSON.stringify({ decided_by: "po", reason }) }
+  );
+  return res.ok ? res.json() : null;
+}
+
 export type Mockup = {
   matched: boolean;
   source: "template" | "generated";
