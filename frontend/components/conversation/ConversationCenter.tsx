@@ -45,6 +45,39 @@ const SHORT_GATE: Record<string, string> = {
   PO_REVIEW: "evidencia", RELEASE_APPROVAL_PENDING: "release", PRODUCTION_DEPLOYMENT: "producción",
 };
 
+// Detalle de QUÉ está haciendo el sistema en cada fase de trabajo (para que el
+// PO nunca quede a ciegas) + tiempo estimado.
+const WORKING_DETAIL: Record<string, { detail: string; eta: string }> = {
+  BACKLOG: {
+    detail: "El PO Agent está analizando tus requerimientos y redactando las historias de usuario: título, criterios de aceptación, estimación en puntos y prioridad.",
+    eta: "~1-2 min",
+  },
+  ARCHITECTURE_INCEPTION: {
+    detail: "El Architect Agent está decidiendo la arquitectura: estilo, base de datos y autenticación (3 ADRs que tú aprobarás).",
+    eta: "~1-2 min",
+  },
+  READY_FOR_DEVELOPMENT: {
+    detail: "Agrupando las historias en sprints según sus puntos y prioridad.",
+    eta: "~30 s",
+  },
+  DEVELOPMENT: {
+    detail: "El Developer Agent está escribiendo el código real del sprint: backend, frontend y pruebas. Es el paso más largo porque genera software de verdad, no plantillas.",
+    eta: "~5-8 min",
+  },
+  CODE_REVIEW: {
+    detail: "Revisando el código contra patrones de arquitectura, políticas y seguridad.",
+    eta: "~1 min",
+  },
+  QA: {
+    detail: "El QA Agent está ejecutando las pruebas y validando los criterios de aceptación.",
+    eta: "~1-2 min",
+  },
+  STAGING_DEPLOYMENT: {
+    detail: "Publicando la aplicación en el ambiente de pruebas (staging).",
+    eta: "~2-3 min",
+  },
+};
+
 export default function ConversationCenter({
   projectKey,
   userId,
@@ -58,16 +91,38 @@ export default function ConversationCenter({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [started, setStarted] = useState(false);
-  const [meta, setMeta] = useState<{ idx: number; total: number; gate: boolean; label: string } | null>(null);
+  const [meta, setMeta] = useState<{ idx: number; total: number; gate: boolean; label: string; state: string } | null>(null);
   const lastState = useRef<string | null>(null);
   const idRef = useRef(1);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // cronómetro de la fase actual (para mostrar el tiempo transcurrido)
+  const phaseStart = useRef<number>(Date.now());
+  const [, setTickCount] = useState(0);
+  const STORAGE = `scrumdev.conv.${projectKey}`;
 
   const resetInputHeight = () => {
     if (inputRef.current) inputRef.current.style.height = "auto";
   };
+
+  // tick cada segundo mientras hay trabajo en curso (refresca el cronómetro)
+  useEffect(() => {
+    const id = setInterval(() => setTickCount((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // PERSISTENCIA del chat: guardar en localStorage para que recargar NO borre
+  // la conversación (bug crítico de flujo).
+  useEffect(() => {
+    if (typeof window === "undefined" || msgs.length === 0) return;
+    try {
+      window.localStorage.setItem(STORAGE, JSON.stringify({
+        msgs: msgs.slice(-60), started, lastState: lastState.current,
+        nextId: idRef.current, phaseStart: phaseStart.current,
+      }));
+    } catch { /* storage lleno: ignorar */ }
+  }, [msgs, started, STORAGE]);
 
   const push = useCallback((m: Omit<Msg, "id">) => {
     setMsgs((prev) => [...prev, { ...m, id: idRef.current++ }]);
@@ -85,10 +140,11 @@ export default function ConversationCenter({
       onState?.(state);
       setMeta({
         idx: p.current_index ?? 0, total: p.total ?? 14, gate: !!p.is_gate,
-        label: SHORT_GATE[state] || state.toLowerCase(),
+        label: SHORT_GATE[state] || state.toLowerCase(), state,
       });
       if (state !== lastState.current) {
         lastState.current = state;
+        phaseStart.current = Date.now();
         const label = PHASE_LABEL[state] || state;
         if (p.is_gate) {
           push({ role: "agent", content: label, gate: p });
@@ -110,9 +166,26 @@ export default function ConversationCenter({
     }
   }, [projectKey, onState, push]);
 
-  // Saludo inicial + estado actual.
+  // Restaurar conversación guardada + saludo inicial / estado actual.
   useEffect(() => {
     let cancelled = false;
+    // 1) restaurar del localStorage (recargar NO borra el chat)
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE) : null;
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (Array.isArray(saved.msgs) && saved.msgs.length > 0) {
+          setMsgs(saved.msgs);
+          idRef.current = saved.nextId || saved.msgs.length + 1;
+          setStarted(!!saved.started);
+          lastState.current = saved.lastState ?? null;
+          if (saved.phaseStart) phaseStart.current = saved.phaseStart;
+          void syncPipeline(); // refresca el gate/estado al día
+          return;
+        }
+      }
+    } catch { /* storage corrupto: seguir al flujo normal */ }
+    // 2) sin conversación guardada: detectar estado o saludar
     (async () => {
       const p = (await apiGetPipeline(projectKey).catch(() => null)) as Gate | null;
       if (cancelled) return;
@@ -134,7 +207,7 @@ export default function ConversationCenter({
       }
     })();
     return () => { cancelled = true; };
-  }, [projectKey, push, syncPipeline]);
+  }, [projectKey, push, syncPipeline, STORAGE]);
 
   // Polling de respaldo + WebSocket para tiempo real.
   useEffect(() => {
@@ -278,6 +351,33 @@ export default function ConversationCenter({
         {busy && (
           <div className="flex gap-2 items-center text-neutral-400 text-sm pl-10">
             <Loader2 size={14} className="animate-spin" /> Procesando…
+          </div>
+        )}
+        {/* Trabajo en curso: QUÉ está haciendo el equipo + ETA + cronómetro
+            (el PO nunca queda a ciegas mientras "genera"). */}
+        {started && !busy && meta && !meta.gate && WORKING_DETAIL[meta.state] && (
+          <div className="flex gap-2.5">
+            <span className="grid place-items-center w-8 h-8 rounded-full shrink-0 bg-brand/10 text-brand">
+              <Loader2 size={15} className="animate-spin" />
+            </span>
+            <div className="max-w-[80%] rounded-2xl px-4 py-3 text-sm bg-brand/5 border border-brand/15">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-medium text-brand">{PHASE_LABEL[meta.state] || meta.state}</span>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-brand/10 text-brand">
+                  {WORKING_DETAIL[meta.state].eta}
+                </span>
+                <span className="text-[11px] text-neutral-400 tabular-nums">
+                  {(() => { const s = Math.max(0, Math.floor((Date.now() - phaseStart.current) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} transcurridos`; })()}
+                </span>
+              </div>
+              <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1.5">
+                {WORKING_DETAIL[meta.state].detail}
+              </p>
+              <div className="mt-2 h-1 rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
+                <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-brand to-fuchsia-500 animate-[slide_1.6s_ease-in-out_infinite]" />
+              </div>
+              <style jsx>{`@keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }`}</style>
+            </div>
           </div>
         )}
       </div>
