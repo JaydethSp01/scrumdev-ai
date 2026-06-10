@@ -41,10 +41,14 @@ type Story = {
   acceptance_criteria?: string[]; story_points?: number; priority?: string;
   dor?: Dor; tech_tasks?: TechTask[];
 };
+type PlannerIssue = { severity: string; type: string; detail: string };
 type GateReview = {
   title?: string; summary?: string; adrs?: Adr[]; evidence?: Evidence;
   stories?: Story[]; needs_nfr_form?: boolean;
   dor_summary?: { ready: number; total: number; all_ready: boolean };
+  planner?: { ok: boolean; blockers: number; total_points: number; issues: PlannerIssue[] };
+  dod?: { done: boolean; checks: { name: string; ok: boolean }[] };
+  sprint_validation?: { stories: number; with_criteria: number; dod_done: boolean };
 };
 type PipelineView = {
   current_state: string;
@@ -307,6 +311,52 @@ export function PipelinePanel({ projectKey }: { projectKey: string }) {
                         </div>
                       </details>
                     ))}
+                  </div>
+                )}
+                {/* Planner/validador pre-código (Adam #9) */}
+                {view.gate_review?.planner && (
+                  <div className="mt-3">
+                    <div className={`flex items-center gap-2 text-xs rounded-lg px-3 py-2 ${
+                      view.gate_review.planner.ok
+                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                        : "bg-red-500/10 text-red-700 dark:text-red-300"}`}>
+                      {view.gate_review.planner.ok ? <CheckCircle2 size={13} /> : <Lock size={13} />}
+                      <b>Validación previa:</b> {view.gate_review.planner.ok ? "sin bloqueantes" : `${view.gate_review.planner.blockers} bloqueante(s)`} · {view.gate_review.planner.total_points} pts
+                    </div>
+                    {view.gate_review.planner.issues.length > 0 && (
+                      <ul className="mt-1.5 space-y-1">
+                        {view.gate_review.planner.issues.map((is, i) => (
+                          <li key={i} className="text-xs flex items-start gap-1.5">
+                            <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded shrink-0 ${
+                              is.severity === "high" ? "bg-red-500/15 text-red-600"
+                              : is.severity === "medium" ? "bg-amber-500/15 text-amber-600"
+                              : "bg-neutral-500/15 text-neutral-500"}`}>{is.type}</span>
+                            <span className="text-neutral-600 dark:text-neutral-400">{is.detail}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+                {/* Definition of Done + validación de sprint (Adam #13-14) */}
+                {view.gate_review?.dod && (
+                  <div className="mt-3 rounded-lg border border-neutral-200 dark:border-neutral-800 p-3">
+                    <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                      {view.gate_review.dod.done ? <CheckCircle2 size={14} className="text-emerald-500" /> : <Lock size={14} className="text-amber-500" />}
+                      Definition of Done
+                      {view.gate_review?.sprint_validation && (
+                        <span className="text-xs text-neutral-500 ml-auto">
+                          {view.gate_review.sprint_validation.with_criteria}/{view.gate_review.sprint_validation.stories} historias con criterios
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {view.gate_review.dod.checks.map((c, i) => (
+                        <span key={i} className={`text-[10px] inline-flex items-center gap-1 ${c.ok ? "text-emerald-600" : "text-amber-600"}`}>
+                          {c.ok ? <CheckCircle2 size={10} /> : <Lock size={10} />} {c.name}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
