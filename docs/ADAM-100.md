@@ -91,6 +91,12 @@ Evidencia: `docs/adam-e2e-evidence.json`.
 **Las 3 profundizaciones 🟡 cerradas:** E (ciclo de tests propio + resumen por módulo) ·
 mockups por historia (wireframe SVG free) · Q&A conversacional profundo (chat libre + memoria).
 
+**LOOP SCRUM POR SPRINT — verificado en vivo (jun 2026):** con 3 sprints planificados,
+cada sprint corre su propio ciclo Desarrollo → Review → QA → Sprint Review; al aprobar
+el Sprint Review N, el sistema vuelve a Desarrollo con el sprint N+1; solo el último
+pasa a release. Evidencia E2E: gates `PO_REVIEW | sprint 1/3` → aprobado →
+`sprint_loop=True` → `PO_REVIEW | sprint 2/3`. ✅
+
 Correr la prueba:
 ```bash
 python scripts/e2e_adam.py            # E2E A-I contra el Space en vivo
