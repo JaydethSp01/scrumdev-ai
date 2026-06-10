@@ -6,8 +6,8 @@ import {
   Server, Monitor, FlaskConical, Bug, Lightbulb, Plus,
 } from "lucide-react";
 import {
-  apiGetRefinement, apiAddFeedback, apiGetMockups,
-  type Refinement, type RefinementStory, type Mockup,
+  apiGetRefinement, apiAddFeedback, apiGetMockups, apiGetCodeSummary,
+  type Refinement, type RefinementStory, type Mockup, type CodeSummary,
 } from "@/lib/api";
 
 const MODULE_META: Record<string, { icon: typeof Server; label: string; cls: string }> = {
@@ -19,6 +19,7 @@ const MODULE_META: Record<string, { icon: typeof Server; label: string; cls: str
 export default function RefinementPanel({ projectKey }: { projectKey: string }) {
   const [data, setData] = useState<Refinement | null>(null);
   const [mockup, setMockup] = useState<Mockup | null>(null);
+  const [code, setCode] = useState<CodeSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [fbTitle, setFbTitle] = useState("");
   const [fbKind, setFbKind] = useState<"bug" | "improvement">("bug");
@@ -28,12 +29,14 @@ export default function RefinementPanel({ projectKey }: { projectKey: string }) 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [ref, mk] = await Promise.allSettled([
+      const [ref, mk, cs] = await Promise.allSettled([
         apiGetRefinement(projectKey),
         apiGetMockups(projectKey),
+        apiGetCodeSummary(projectKey),
       ]);
       setData(ref.status === "fulfilled" ? ref.value : null);
       setMockup(mk.status === "fulfilled" ? mk.value : null);
+      setCode(cs.status === "fulfilled" ? cs.value : null);
     } catch {
       setData(null);
     } finally {
@@ -88,6 +91,17 @@ export default function RefinementPanel({ projectKey }: { projectKey: string }) 
           <RefreshCw size={14} /> Refrescar
         </button>
       </header>
+
+      {/* Trazabilidad (Adam A): requerimiento origen */}
+      {data.requirement && (
+        <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/40 p-4">
+          <div className="text-[11px] uppercase tracking-wider text-neutral-400 mb-1">Requerimiento origen</div>
+          <p className="text-sm text-neutral-700 dark:text-neutral-300">{data.requirement}</p>
+          <p className="text-[11px] text-neutral-400 mt-2">
+            ↳ De este requerimiento se derivaron las {data.total} historias del backlog (trazabilidad req → historia → tarea → código).
+          </p>
+        </div>
+      )}
 
       {/* Mockup del backlog (Adam A): adaptado a la plantilla que matchea */}
       {mockup && (
@@ -148,7 +162,10 @@ export default function RefinementPanel({ projectKey }: { projectKey: string }) 
                 <M.icon size={13} /> {M.label}
               </div>
               <div className="text-2xl font-semibold mt-1">{data.by_module?.[m] ?? 0}</div>
-              <div className="text-[11px] text-neutral-400">tareas / módulo</div>
+              <div className="text-[11px] text-neutral-400">tareas planeadas</div>
+              {code && code.generated && (
+                <div className="text-[11px] text-emerald-600 mt-0.5">{code.by_module?.[m] ?? 0} archivos generados</div>
+              )}
             </div>
           );
         })}
@@ -239,7 +256,12 @@ function StoryRow({ s }: { s: RefinementStory }) {
               </div>
               <ul className="space-y-1">
                 {tasks.map((t, i) => (
-                  <li key={i} className="text-xs text-neutral-600 dark:text-neutral-400">• {t.title}</li>
+                  <li key={i} className="text-xs text-neutral-600 dark:text-neutral-400">
+                    • {t.title}
+                    {t.depends_on && t.depends_on.length > 0 && (
+                      <span className="text-[10px] text-neutral-400"> ↳ depende de {t.depends_on.length}</span>
+                    )}
+                  </li>
                 ))}
               </ul>
             </div>

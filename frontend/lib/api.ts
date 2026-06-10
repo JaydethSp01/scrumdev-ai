@@ -315,15 +315,19 @@ export async function apiStartLifecycle(projectKey: string): Promise<unknown> {
   return res.ok ? res.json() : null;
 }
 
-export type TechTask = { module: string; type: string; title: string; detail?: string };
+export type TechTask = {
+  id?: string; module: string; type: string; title: string;
+  detail?: string; depends_on?: string[];
+};
 export type RefinementStory = {
   story_key: string; title: string; priority?: string; story_points?: number;
   dor: { ready: boolean; checks: { name: string; ok: boolean }[] };
-  tech_tasks: TechTask[];
+  tech_tasks: TechTask[]; origin?: string; requirement_excerpt?: string;
 };
 export type Refinement = {
   stories: RefinementStory[]; dor_ready: number; total: number;
   tech_tasks_total: number; by_module: Record<string, number>;
+  requirement?: string;
 };
 
 export async function apiGetRefinement(projectKey: string): Promise<Refinement> {
@@ -331,6 +335,16 @@ export async function apiGetRefinement(projectKey: string): Promise<Refinement> 
     `${API}/projects/${encodeURIComponent(projectKey)}/refinement`
   );
   return jsonOrThrow<Refinement>(res);
+}
+
+export type CodeSummary = {
+  total_files: number; by_module: Record<string, number>; generated: boolean;
+};
+export async function apiGetCodeSummary(projectKey: string): Promise<CodeSummary> {
+  const res = await authFetch(
+    `${API}/projects/${encodeURIComponent(projectKey)}/code-summary`
+  );
+  return jsonOrThrow<CodeSummary>(res);
 }
 
 export type Mockup = {

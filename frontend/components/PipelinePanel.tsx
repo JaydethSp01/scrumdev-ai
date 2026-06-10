@@ -49,6 +49,8 @@ type GateReview = {
   planner?: { ok: boolean; blockers: number; total_points: number; issues: PlannerIssue[] };
   dod?: { done: boolean; checks: { name: string; ok: boolean }[] };
   sprint_validation?: { stories: number; with_criteria: number; dod_done: boolean };
+  auto_review?: { name: string; ok: boolean; detail?: string }[];
+  story_dod?: { story_key: string; title: string; dod: { done: boolean; checks: { name: string; ok: boolean }[] } }[];
 };
 type PipelineView = {
   current_state: string;
@@ -337,6 +339,36 @@ export function PipelinePanel({ projectKey }: { projectKey: string }) {
                       </ul>
                     )}
                   </div>
+                )}
+                {/* Revisión automática del código (Adam F) */}
+                {view.gate_review?.auto_review && view.gate_review.auto_review.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-neutral-200 dark:border-neutral-800 p-3">
+                    <p className="text-sm font-medium mb-2">Revisión automática</p>
+                    <div className="space-y-1.5">
+                      {view.gate_review.auto_review.map((c, i) => (
+                        <div key={i} className="flex items-center gap-2 text-xs">
+                          {c.ok ? <CheckCircle2 size={13} className="text-emerald-500" /> : <Lock size={13} className="text-amber-500" />}
+                          <span className="font-medium">{c.name}</span>
+                          {c.detail && <span className="text-neutral-500">— {c.detail}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* DoD por historia (Adam #14) */}
+                {view.gate_review?.story_dod && view.gate_review.story_dod.length > 0 && (
+                  <details className="mt-3 rounded-lg border border-neutral-200 dark:border-neutral-800 p-3">
+                    <summary className="cursor-pointer text-sm font-medium">DoD por historia ({view.gate_review.story_dod.length})</summary>
+                    <div className="mt-2 space-y-1.5">
+                      {view.gate_review.story_dod.map((sd) => (
+                        <div key={sd.story_key} className="flex items-center gap-2 text-xs">
+                          {sd.dod.done ? <CheckCircle2 size={12} className="text-emerald-500" /> : <Lock size={12} className="text-amber-500" />}
+                          <span className="font-mono text-brand">{sd.story_key}</span>
+                          <span className="text-neutral-600 dark:text-neutral-400 truncate">{sd.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
                 )}
                 {/* Definition of Done + validación de sprint (Adam #13-14) */}
                 {view.gate_review?.dod && (
