@@ -2,11 +2,18 @@
 
 import {
   apiCreateProject,
+  apiDeleteProject,
   apiGetProject,
   apiListProjects,
   HttpError,
   type BackendProject,
 } from "@/lib/api";
+
+export async function deleteProject(key: string): Promise<void> {
+  await apiDeleteProject(key);
+  cache.byKey.delete(key);
+  if (cache.list) cache.list = cache.list.filter((p) => p.key !== key);
+}
 
 export type Project = {
   id?: string;

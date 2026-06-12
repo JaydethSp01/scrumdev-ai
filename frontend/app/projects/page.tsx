@@ -17,9 +17,10 @@ import {
   CheckCircle2,
   AlertTriangle,
   Loader2,
+  Trash2,
 } from "lucide-react";
 import { useAuth } from "@/app/auth/_lib";
-import { listProjects, createProject, type Project } from "@/lib/projects";
+import { listProjects, createProject, deleteProject, type Project } from "@/lib/projects";
 import { apiGetBacklog, apiGetCode, apiListBuilds, apiSaveVision, apiGetPipeline, type BuildRecord } from "@/lib/api";
 import EmptyState from "@/components/EmptyState";
 import Spinner from "@/components/Spinner";
@@ -238,6 +239,9 @@ export default function ProjectsPage() {
               key={p.key}
               project={p}
               metrics={metrics[p.key] || { loading: true }}
+              onDeleted={() =>
+                setProjects((prev) => prev.filter((x) => x.key !== p.key))
+              }
             />
           ))}
         </div>
@@ -301,10 +305,33 @@ export default function ProjectsPage() {
 function ProjectCard({
   project,
   metrics,
+  onDeleted,
 }: {
   project: Project;
   metrics: ProjectMetrics;
+  onDeleted: () => void;
 }) {
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirming) {
+      setConfirming(true);
+      setTimeout(() => setConfirming(false), 4000); // se desarma solo
+      return;
+    }
+    setDeleting(true);
+    try {
+      await deleteProject(project.key);
+      onDeleted();
+    } catch {
+      setDeleting(false);
+      setConfirming(false);
+    }
+  };
+
   // Hash visual basico desde el key para diferenciar cards
   const hue = Math.abs(
     project.key.split("").reduce((a, c) => a + c.charCodeAt(0), 0)
@@ -343,6 +370,24 @@ function ProjectCard({
               {project.key}
             </p>
           </div>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            title={confirming ? "Clic de nuevo para confirmar" : "Eliminar proyecto"}
+            className={`shrink-0 p-2 rounded-lg transition text-xs font-medium ${
+              confirming
+                ? "bg-red-600 text-white"
+                : "text-neutral-400 hover:text-red-600 hover:bg-red-500/10 opacity-0 group-hover:opacity-100"
+            }`}
+          >
+            {deleting ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : confirming ? (
+              "¿Eliminar?"
+            ) : (
+              <Trash2 size={14} />
+            )}
+          </button>
         </div>
 
         <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-3 line-clamp-2 min-h-[2.5rem]">

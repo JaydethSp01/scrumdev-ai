@@ -173,9 +173,12 @@ export default function ConversationCenter({
         phaseStart.current = Date.now();
         let label = PHASE_LABEL[state] || state;
         // FEEDBACK final (taller Fase 10): al liberar, entregar la URL en el chat.
+        // HONESTIDAD: si no hay URL, NO decir "desplegado y disponible".
         const released = (p as { released_urls?: { app?: string; api?: string } }).released_urls;
-        if (state === "RELEASED" && released?.app) {
-          label = `🚀 ¡Tu producto está EN VIVO! Ábrelo aquí: ${released.app}`;
+        if (state === "RELEASED") {
+          label = released?.app
+            ? `🚀 ¡Tu producto está EN VIVO! Ábrelo aquí: ${released.app}`
+            : "Ciclo completado, pero el despliegue NO quedó publicado (el build falló antes de subir a la nube). No hay URL. Puedes pedir cambios o reintentar el despliegue desde el gate.";
         }
         if (p.is_gate) {
           push({ role: "agent", content: label, gate: p });
@@ -329,6 +332,22 @@ export default function ConversationCenter({
     }
   }, [projectKey, userId, push]);
 
+  // Reintentar el despliegue cuando staging falló (acción honesta del gate).
+  const retryDeploy = useCallback(async () => {
+    setBusy(true);
+    push({ role: "human", content: "🔄 Reintentar el despliegue." });
+    try {
+      const { apiDeployProject } = await import("@/lib/api");
+      await apiDeployProject(projectKey, { triggered_by: "po" });
+      push({ role: "agent", content: "Relancé el despliegue a staging (~5-10 min). Te muestro la URL aquí cuando esté lista — no podrás aprobar producción hasta entonces." });
+      setTimeout(() => void syncPipeline(), 5000);
+    } catch {
+      push({ role: "agent", content: "No pude relanzar el despliegue. Intenta de nuevo en un momento." });
+    } finally {
+      setBusy(false);
+    }
+  }, [projectKey, push, syncPipeline]);
+
   const approve = useCallback(async () => {
     setBusy(true);
     try {
@@ -375,6 +394,7 @@ export default function ConversationCenter({
                   onApprove={approve}
                   onRequestChanges={() => push({ role: "agent", content: "Claro — dime qué te gustaría cambiar y lo ajusto antes de continuar." })}
                   onExplain={() => m.gate && explainGate(m.gate)}
+                  onRetryDeploy={retryDeploy}
                   onReviewStories={
                     (m.gate.gate_review?.stories?.length || 0) > 0
                       ? () => setReviewStories(m.gate!.gate_review!.stories!)
@@ -483,7 +503,7 @@ export default function ConversationCenter({
   );
 }
 
-function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExplain, onReviewStories, busy }: { gate: Gate; projectKey: string; userId: string; onApprove: () => void; onRequestChanges: () => void; onExplain: () => void; onReviewStories?: () => void; busy: boolean }) {
+function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExplain, onReviewStories, onRetryDeploy, busy }: { gate: Gate; projectKey: string; userId: string; onApprove: () => void; onRequestChanges: () => void; onExplain: () => void; onReviewStories?: () => void; onRetryDeploy?: () => void; busy: boolean }) {
   const r = gate.gate_review || {};
   const nMock = (r.stories || []).filter((s) => s.mockup).length;
   const chips: string[] = [];
@@ -579,7 +599,8 @@ function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExp
       {r.needs_nfr_form && (
         <NfrInline projectKey={projectKey} userId={userId} onDone={onApprove} busy={busy} />
       )}
-      {/* Staging para VALIDAR antes de producción (taller Fase 9) */}
+      {/* Staging para VALIDAR antes de producción (taller Fase 9).
+          HONESTIDAD: sin URL no se puede aprobar; si falló, se dice claro. */}
       {r.staging && (
         <div className="mt-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 p-3">
           <p className="text-[11px] uppercase tracking-wider text-neutral-400 mb-1.5">Ambiente de pruebas (staging)</p>
@@ -595,20 +616,38 @@ function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExp
               )}
               <span className="text-[11px] text-emerald-600">Valídala y luego aprueba producción.</span>
             </div>
-          ) : r.staging.state === "error" ? (
-            <p className="text-xs text-red-600">El deploy falló: {r.staging.error || "error desconocido"}. Usa "Pedir cambios".</p>
-          ) : (
+          ) : r.staging.state === "building" ? (
             <p className="text-xs text-neutral-500 inline-flex items-center gap-1.5">
               <Loader2 size={12} className="animate-spin" /> Publicando a staging… la URL aparecerá aquí.
+              <span className="text-neutral-400">(no puedes aprobar producción hasta tener la URL)</span>
             </p>
+          ) : (
+            <div>
+              <p className="text-xs text-red-600 font-medium">
+                ❌ El despliegue a staging FALLÓ{r.staging.error ? `: ${r.staging.error}` : ""}.
+              </p>
+              <p className="text-[11px] text-neutral-500 mt-1">
+                No hay nada publicado que validar. Reintenta el despliegue o pide cambios al equipo.
+              </p>
+              <button
+                onClick={onRetryDeploy}
+                disabled={busy}
+                className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-60"
+              >
+                🔄 Reintentar despliegue
+              </button>
+            </div>
           )}
         </div>
       )}
 
       <div className="mt-3 flex items-center gap-2">
         {!r.needs_nfr_form && (
-        <button onClick={onApprove} disabled={busy}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-green-600 to-emerald-600 text-white text-sm font-medium shadow disabled:opacity-60">
+        <button
+          onClick={onApprove}
+          disabled={busy || (!!r.staging && !r.staging.url)}
+          title={r.staging && !r.staging.url ? "No puedes aprobar producción sin la URL de staging validada" : undefined}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-green-600 to-emerald-600 text-white text-sm font-medium shadow disabled:opacity-40 disabled:cursor-not-allowed">
           {busy ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />} Aprobar
         </button>
         )}

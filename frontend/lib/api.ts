@@ -350,6 +350,14 @@ export async function apiGetCodeSummary(projectKey: string): Promise<CodeSummary
   return jsonOrThrow<CodeSummary>(res);
 }
 
+// Eliminar proyecto completo (acción del PO desde la card).
+export async function apiDeleteProject(projectKey: string): Promise<void> {
+  const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`No se pudo eliminar (HTTP ${res.status})`);
+}
+
 // Pipeline gateado (para el chat conversacional).
 export async function apiGetPipeline(projectKey: string): Promise<Record<string, unknown>> {
   const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/pipeline`);
