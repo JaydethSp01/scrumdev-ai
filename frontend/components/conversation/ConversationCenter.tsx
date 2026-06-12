@@ -22,6 +22,7 @@ type Gate = {
     dod?: { done: boolean };
     planner?: { ok: boolean; blockers: number };
     needs_nfr_form?: boolean;
+    staging?: { state?: string; url?: string; api_url?: string; error?: string };
   };
 };
 type Msg = { id: number; role: "human" | "agent"; content: string; gate?: Gate };
@@ -76,10 +77,25 @@ const WORKING_DETAIL: Record<string, { detail: string; eta: string }> = {
     eta: "~1-2 min",
   },
   STAGING_DEPLOYMENT: {
-    detail: "Publicando la aplicación en el ambiente de pruebas (staging).",
-    eta: "~2-3 min",
+    detail: "Publicando tu aplicación en el ambiente de pruebas: GitHub + frontend + backend + base de datos. Al terminar verás la URL para validarla.",
+    eta: "~3-6 min",
   },
 };
+
+// Vuelve clicables las URLs dentro de los mensajes del chat.
+function linkify(text: string): React.ReactNode {
+  const parts = text.split(/(https?:\/\/[^\s]+)/g);
+  if (parts.length === 1) return text;
+  return parts.map((p, i) =>
+    /^https?:\/\//.test(p) ? (
+      <a key={i} href={p} target="_blank" rel="noopener noreferrer" className="underline font-medium break-all">
+        {p}
+      </a>
+    ) : (
+      p
+    )
+  );
+}
 
 // Umbral (segundos) tras el cual ofrecemos "Detener y regenerar" por fase.
 const STUCK_AFTER: Record<string, number> = {
@@ -155,7 +171,12 @@ export default function ConversationCenter({
       if (state !== lastState.current) {
         lastState.current = state;
         phaseStart.current = Date.now();
-        const label = PHASE_LABEL[state] || state;
+        let label = PHASE_LABEL[state] || state;
+        // FEEDBACK final (taller Fase 10): al liberar, entregar la URL en el chat.
+        const released = (p as { released_urls?: { app?: string; api?: string } }).released_urls;
+        if (state === "RELEASED" && released?.app) {
+          label = `🚀 ¡Tu producto está EN VIVO! Ábrelo aquí: ${released.app}`;
+        }
         if (p.is_gate) {
           push({ role: "agent", content: label, gate: p });
         } else {
@@ -344,7 +365,7 @@ export default function ConversationCenter({
             </span>
             <div className={`max-w-[80%] space-y-2`}>
               <div className={`rounded-2xl px-4 py-2.5 text-sm ${m.role === "agent" ? "bg-neutral-100 dark:bg-neutral-900" : "bg-brand text-white"}`}>
-                {m.content}
+                {linkify(m.content)}
               </div>
               {m.gate && (
                 <GateCard
@@ -557,6 +578,31 @@ function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExp
       {/* NFR conversacional: el agente pregunta AQUÍ y el PO responde (sin paneles) */}
       {r.needs_nfr_form && (
         <NfrInline projectKey={projectKey} userId={userId} onDone={onApprove} busy={busy} />
+      )}
+      {/* Staging para VALIDAR antes de producción (taller Fase 9) */}
+      {r.staging && (
+        <div className="mt-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 p-3">
+          <p className="text-[11px] uppercase tracking-wider text-neutral-400 mb-1.5">Ambiente de pruebas (staging)</p>
+          {r.staging.url ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <a href={r.staging.url} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand text-white text-xs font-medium hover:bg-brand-dark">
+                🔗 Abrir tu app en staging
+              </a>
+              {r.staging.api_url && (
+                <a href={r.staging.api_url} target="_blank" rel="noopener noreferrer"
+                  className="text-[11px] text-neutral-500 underline">API</a>
+              )}
+              <span className="text-[11px] text-emerald-600">Valídala y luego aprueba producción.</span>
+            </div>
+          ) : r.staging.state === "error" ? (
+            <p className="text-xs text-red-600">El deploy falló: {r.staging.error || "error desconocido"}. Usa "Pedir cambios".</p>
+          ) : (
+            <p className="text-xs text-neutral-500 inline-flex items-center gap-1.5">
+              <Loader2 size={12} className="animate-spin" /> Publicando a staging… la URL aparecerá aquí.
+            </p>
+          )}
+        </div>
       )}
 
       <div className="mt-3 flex items-center gap-2">
