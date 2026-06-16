@@ -88,9 +88,14 @@ jobs:
       - name: Ruff lint
         run: poetry run ruff check .
 
-      - name: Pytest
-        # Si todavía no hay tests, el step se considera success (-q + --ignore vacío)
-        run: poetry run pytest -q || [ $? -eq 5 ]  # exit code 5 = no tests collected
+      - name: Pytest + gate de cobertura
+        # Gate de cobertura (piso anti-regresión, 20% < 24% real). El e2e que
+        # requiere el stack de 14 puertos se auto-skipea; corre unit +
+        # integration standalone. exit code 5 = no tests collected (se tolera).
+        run: >-
+          poetry run pytest -q
+          --cov --cov-report=term-missing --cov-fail-under=20
+          || [ $? -eq 5 ]
 
   # ---------------------------------------------------------------------------
   # Frontend: lint + build

@@ -3,8 +3,8 @@ import { cn } from "@/lib/cn";
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 const VARIANTS: Record<Variant, string> = {
   primary: "bg-brand text-white hover:opacity-90 shadow-sm",
-  secondary: "border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100",
-  ghost: "text-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-900",
+  secondary: "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50",
+  ghost: "text-slate-600 hover:bg-slate-100",
   danger: "bg-rose-600 text-white hover:bg-rose-700 shadow-sm",
 };
 

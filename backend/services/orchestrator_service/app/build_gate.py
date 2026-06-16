@@ -336,26 +336,530 @@ def _ensure_auth_pages(files_rel: list[dict], app_prefix: str, title: str,
 def _theme_blocks(vision: str) -> tuple[str, str]:
     """Devuelve (font_import, theme_base) para el SECTOR de la visión, usando el
     par tipográfico curado del skill ui-ux-pro-max. Cada sector se ve distinto."""
+    primary = "#4f46e5"
     try:
         from shared.design.sector_themes import pick_theme, fonts_import_url
         th = pick_theme(vision)
         head, body = th["heading"], th["body"]
+        primary = th.get("primary", primary)
         url = fonts_import_url(th)
     except Exception:
         head, body = "Plus Jakarta Sans", "Inter"
         url = ("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800"
                "&family=Inter:wght@400;500;600;700&display=swap")
+
+    def _dk(h: str) -> str:
+        try:
+            h = h.lstrip("#"); r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+            return "#%02x%02x%02x" % tuple(max(0, int(x * 0.72)) for x in (r, g, b))
+        except Exception:
+            return h
+    pd = _dk(primary)
     font_import = f"@import url('{url}');\n"
     theme_base = (
-        "\n:root { color-scheme: light; }\n"
+        "\n:root { color-scheme: light; "
+        f"--brand: {primary}; --brand-dark: {pd}; }}\n"
         "html, body {\n"
         "  background-color: #f8fafc;\n  color: #0f172a;\n"
         f"  font-family: '{body}', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;\n"
         "  -webkit-font-smoothing: antialiased;\n}\n"
         f"h1, h2, h3, h4 {{ font-family: '{head}', '{body}', sans-serif; letter-spacing: -0.02em; }}\n"
         "* { border-color: #e2e8f0; }\n"
+        # FALLBACK del color de marca: si Tailwind no generó las utilidades `brand`\n"
+        # (p.ej. Tailwind v4 sin config JS), estas reglas evitan que el UI salga\n"
+        # invisible (blanco sobre blanco).\n"
+        ".bg-brand{background-color:var(--brand)!important}"
+        ".text-brand{color:var(--brand)!important}"
+        ".border-brand{border-color:var(--brand)!important}"
+        ".from-brand-dark{--tw-gradient-from:var(--brand-dark)}"
+        ".to-brand{--tw-gradient-to:var(--brand)}\n"
     )
     return font_import, theme_base
+
+
+_DATA_STORE_PY = '''"""Almacen generico REAL (Postgres/Neon con fallback SQLite). Guarda cualquier
+entidad como JSON -> persistencia server-side multi-dispositivo para todo CRUD."""
+import os, json
+DATABASE_URL = os.environ.get("DATABASE_URL"); _PG = bool(DATABASE_URL)
+if _PG:
+    import psycopg
+    _PH = "%s"
+else:
+    import sqlite3
+    _PH = "?"; _PATH = os.environ.get("SQLITE_PATH", "/tmp/app.db")
+def _c():
+    if _PG: return psycopg.connect(DATABASE_URL, autocommit=True)
+    return sqlite3.connect(_PATH)
+def init_db():
+    pk = "SERIAL PRIMARY KEY" if _PG else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    con = _c()
+    try:
+        cur = con.cursor()
+        cur.execute(f"CREATE TABLE IF NOT EXISTS records (id {pk}, entity TEXT, data TEXT)")
+        if not _PG: con.commit()
+    finally: con.close()
+def _ensure():
+    try: init_db()
+    except Exception: pass
+def listar(entity):
+    _ensure(); con = _c()
+    try:
+        cur = con.cursor(); cur.execute(f"SELECT id, data FROM records WHERE entity = {_PH} ORDER BY id DESC", [entity])
+        out = []
+        for r in cur.fetchall():
+            d = json.loads(r[1]) if r[1] else {}; d["id"] = r[0]; out.append(d)
+        return out
+    finally: con.close()
+def crear(entity, data):
+    _ensure(); con = _c()
+    try:
+        cur = con.cursor()
+        if _PG:
+            cur.execute(f"INSERT INTO records (entity, data) VALUES ({_PH},{_PH}) RETURNING id", [entity, json.dumps(data)]); nid = cur.fetchone()[0]
+        else:
+            cur.execute(f"INSERT INTO records (entity, data) VALUES ({_PH},{_PH})", [entity, json.dumps(data)]); con.commit(); nid = cur.lastrowid
+        return {**data, "id": nid}
+    finally: con.close()
+def actualizar(entity, rid, data):
+    _ensure(); con = _c()
+    try:
+        cur = con.cursor(); cur.execute(f"UPDATE records SET data = {_PH} WHERE id = {_PH} AND entity = {_PH}", [json.dumps(data), rid, entity])
+        if not _PG: con.commit()
+        return {**data, "id": rid}
+    finally: con.close()
+def borrar(entity, rid):
+    _ensure(); con = _c()
+    try:
+        cur = con.cursor(); cur.execute(f"DELETE FROM records WHERE id = {_PH} AND entity = {_PH}", [rid, entity])
+        if not _PG: con.commit()
+        return {"ok": True}
+    finally: con.close()
+'''
+
+_DATA_ROUTER_PY = '''"""CRUD generico server-side: /data/{entity} para cualquier entidad."""
+from fastapi import APIRouter
+from app import data_store
+router = APIRouter()
+@router.get("/data/{entity}")
+async def listar(entity: str): return data_store.listar(entity)
+@router.post("/data/{entity}")
+async def crear(entity: str, body: dict): return data_store.crear(entity, body)
+@router.put("/data/{entity}/{rid}")
+async def actualizar(entity: str, rid: int, body: dict): return data_store.actualizar(entity, rid, body)
+@router.delete("/data/{entity}/{rid}")
+async def borrar(entity: str, rid: int): return data_store.borrar(entity, rid)
+'''
+
+
+def _inject_data_backend(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """Inyecta backend generico /data/{entidad} (Postgres) en apps full-stack para
+    persistencia server-side multi-dispositivo de TODO CRUD. No rompe routers
+    existentes: solo agrega archivos + monta el router data."""
+    main = next((f for f in files_rel if (f.get("path") or "").lstrip("/") in ("main.py", "backend/main.py")), None)
+    if not main:
+        return files_rel
+    prefix = "backend/" if (main.get("path") or "").lstrip("/").startswith("backend/") else ""
+    def _get(rel):
+        return next((f for f in files_rel if (f.get("path") or "").lstrip("/") == prefix + rel), None)
+    def _put(rel, content):
+        ex = _get(rel)
+        if ex: ex["content"] = content
+        else: files_rel.append({"path": prefix + rel, "content": content})
+    if not _get("app/__init__.py"): _put("app/__init__.py", "")
+    if not _get("app/routers/__init__.py"): _put("app/routers/__init__.py", "")
+    _put("app/data_store.py", _DATA_STORE_PY)
+    _put("app/routers/data.py", _DATA_ROUTER_PY)
+    import re as _re
+    c = main.get("content") or ""
+    if "routers.data" not in c and "routers import data" not in c:
+        # Insertar el montaje JUSTO DESPUÉS de `app = FastAPI(...)` (nivel módulo,
+        # antes de funciones) — appendear al final lo metía dentro de health_check().
+        m = _re.search(r"(?m)^(\s*)app\s*=\s*FastAPI\([^\n]*\)\s*$", c)
+        block_ml = (
+            "\n# CRUD generico server-side (persistencia multi-dispositivo)\n"
+            "try:\n"
+            "    from app.routers import data as _data_router\n"
+            "    app.include_router(_data_router.router)\n"
+            "except Exception as _e:\n"
+            "    import logging; logging.getLogger('uvicorn').warning('data router: %s', _e)\n")
+        if m:
+            c = c[:m.end()] + block_ml + c[m.end():]
+        else:
+            # main one-liner con ';': montar inline tras app=FastAPI()
+            m2 = _re.search(r"app\s*=\s*FastAPI\([^)]*\)", c)
+            if m2:
+                c = c[:m2.end()] + "; from app.routers import data as _data_router; app.include_router(_data_router.router)" + c[m2.end():]
+            else:
+                c = c.rstrip() + "\n" + block_ml
+        main["content"] = c
+        report.append("backend generico /data/{entidad} inyectado (persistencia server-side)")
+    return files_rel
+
+
+def _force_light_tailwind(files_rel: list[dict], report: list[str], vision: str = "") -> list[dict]:
+    """En tailwind.config: (1) fuerza `darkMode:'class'` (CAUSA REAL del 'todo en
+    negro' — sin esto las clases `dark:` se activan con el SO oscuro y pintan todo
+    negro); (2) fija el color `brand` al COLOR DEL SECTOR (de sector_themes según
+    la visión) -> cada sector tiene SU color (salud=teal, restaurante=naranja,
+    moda=rosa…), no todos índigo. Determinista en toda app."""
+    import re as _re
+    # color del sector
+    try:
+        from shared.design.sector_themes import pick_theme
+        primary = pick_theme(vision)["primary"]
+    except Exception:
+        primary = ""
+    def _dark(hexc: str) -> str:
+        try:
+            h = hexc.lstrip("#"); r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+            return "#%02x%02x%02x" % tuple(max(0, int(x * 0.72)) for x in (r, g, b))
+        except Exception:
+            return hexc
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        if not _re.search(r"tailwind\.config\.(ts|js|mjs|cjs)$", p):
+            continue
+        c = f.get("content") or ""
+        # (1) darkMode
+        if _re.search(r"darkMode\s*:", c):
+            c = _re.sub(r"darkMode\s*:\s*[^,}]+", 'darkMode: "class"', c, count=1)
+        else:
+            m = _re.search(r"(module\.exports\s*=\s*\{|export\s+default\s*\{|=\s*\{)", c)
+            if m:
+                c = c[:m.end()] + ' darkMode: "class",' + c[m.end():]
+        # (2) brand = color del sector (sobreescribe lo que haya)
+        if primary:
+            brand_obj = f'brand: {{ DEFAULT: "{primary}", dark: "{_dark(primary)}" }}'
+            if _re.search(r"brand\s*:\s*\{[^}]*\}", c):
+                c = _re.sub(r"brand\s*:\s*\{[^}]*\}", brand_obj, c, count=1)
+            elif _re.search(r"brand\s*:\s*['\"][#0-9a-fA-F]+['\"]", c):
+                c = _re.sub(r"brand\s*:\s*['\"][#0-9a-fA-F]+['\"]", brand_obj, c, count=1)
+            elif _re.search(r"colors:\s*\{", c):
+                c = _re.sub(r"colors:\s*\{", "colors: { " + brand_obj + ",", c, count=1)
+            elif _re.search(r"extend:\s*\{", c):
+                c = _re.sub(r"extend:\s*\{", "extend: { colors: { " + brand_obj + " },", c, count=1)
+            elif _re.search(r"theme:\s*\{", c):
+                c = _re.sub(r"theme:\s*\{", "theme: { extend: { colors: { " + brand_obj + " } },", c, count=1)
+        if c != (f.get("content") or ""):
+            f["content"] = c
+            report.append(f"tailwind: darkMode=class + brand del sector ({primary or 'n/a'})")
+        return files_rel
+    return files_rel
+
+
+# Componentes del UI-kit (named exports en @/components/ui/<Nombre>). Si una
+# página los USA en JSX pero NO los importa -> ReferenceError client-side (crash).
+_KIT_COMPONENTS = [
+    "AppShell", "Sidebar", "Card", "MetricCard", "Badge", "Button", "DataTable",
+    "PageHeader", "EmptyState", "Hero", "StatCard", "ChartCard", "Avatar",
+    "ProtectedShell", "AuthGate", "HeaderUser", "LoginForm", "UsersManager",
+    "KanbanBoard", "POSBoard", "AppointmentScheduler", "CheckoutCart", "LiveMap",
+    "GenerativePattern", "FacturacionModule", "CrudTable", "DocumentUpload", "DiezmosModule",
+]
+
+
+def _kw(text: str, keywords: tuple) -> bool:
+    """Match por LÍMITE DE PALABRA (evita falsos como 'dian' dentro de 'estudiantes'
+    o 'bar' dentro de 'barrio')."""
+    import re as _re
+    return any(_re.search(r"\b" + _re.escape(k) + r"\b", text) for k in keywords)
+
+
+def _star_component_for(vision: str) -> str:
+    """Mapea el sector (de la visión) a su componente 'módulo estrella' del kit.
+    Devuelve '' si el sector no tiene módulo definido."""
+    v = (vision or "").lower()
+    if _kw(v, ("factura", "facturacion", "facturación", "contabilidad", "dian", "impuestos", "fintech", "finanzas")):
+        return "FacturacionModule"
+    if _kw(v, ("crm", "ventas", "lead", "leads", "pipeline", "oportunidades")):
+        return "KanbanBoard"
+    if _kw(v, ("restaurante", "comida", "pedidos", "menu", "menú", "pos", "retail",
+               "inventario", "almacen", "panaderia", "panadería", "pasteleria", "lavanderia",
+               "lavandería", "billar", "bar", "tomadero", "cantina", "licorera", "minimercado",
+               "abarrotes", "barrio", "cafeteria", "cafetería")):
+        return "POSBoard"
+    if _kw(v, ("salud", "clinica", "clínica", "cita", "citas", "medico", "médico", "paciente",
+               "consultorio", "belleza", "spa", "peluqueria", "iglesia", "culto", "cultos",
+               "ministerio", "parroquia", "universidad", "colegio", "clases", "academia",
+               "evento", "eventos", "reserva", "reservas")):
+        return "AppointmentScheduler"
+    if _kw(v, ("ecommerce", "tienda", "carrito", "checkout", "moda", "shop")):
+        return "CheckoutCart"
+    if _kw(v, ("logistica", "logística", "flota", "envios", "envíos", "ruta", "rutas", "tracking", "entregas", "transporte")):
+        return "LiveMap"
+    return ""
+
+
+def _pos_products_for(vision: str) -> str:
+    """Productos por defecto del POS según el negocio (el mismo POS se ACOMODA a
+    panadería, bar, lavandería, tienda de barrio, billar…). Devuelve un array JS."""
+    v = (vision or "").lower()
+    sets = {
+        ("panaderia", "pasteleria", "bakery"): [
+            ("Pan francés", 1500, "Panadería"), ("Croissant", 3500, "Panadería"),
+            ("Torta x porción", 6000, "Pastelería"), ("Galletas x6", 8000, "Pastelería"),
+            ("Café", 3000, "Bebidas"), ("Jugo natural", 4500, "Bebidas")],
+        ("bar", "tomadero", "cantina", "licorera", "discoteca"): [
+            ("Cerveza", 6000, "Cervezas"), ("Aguardiente botella", 45000, "Licores"),
+            ("Ron media", 38000, "Licores"), ("Cóctel", 18000, "Cócteles"),
+            ("Picada", 32000, "Comidas"), ("Gaseosa", 4000, "Bebidas")],
+        ("lavanderia", "laundry"): [
+            ("Lavado x kilo", 4000, "Lavado"), ("Lavado en seco", 15000, "Lavado"),
+            ("Planchado camisa", 3000, "Planchado"), ("Edredón", 20000, "Especiales"),
+            ("Tenis", 18000, "Especiales")],
+        ("billar", "billiards", "pool"): [
+            ("Hora de mesa", 12000, "Mesas"), ("Cerveza", 6000, "Bebidas"),
+            ("Gaseosa", 4000, "Bebidas"), ("Picada", 25000, "Comidas"),
+            ("Cigarrillo unidad", 1000, "Varios")],
+        ("tienda", "minimercado", "abarrotes", "barrio"): [
+            ("Arroz libra", 3200, "Granos"), ("Aceite 1L", 9500, "Despensa"),
+            ("Leche litro", 4200, "Lácteos"), ("Huevos x30", 16000, "Lácteos"),
+            ("Gaseosa", 3500, "Bebidas"), ("Jabón", 2800, "Aseo")],
+    }
+    chosen = None
+    for keys, prods in sets.items():
+        if _kw(v, keys):
+            chosen = prods
+            break
+    if not chosen:
+        return ""  # usa los productos por defecto del componente (restaurante)
+    _stk = [12, 8, 5, 20, 3, 15, 6, 0]  # stock variado (incluye bajo/agotado) -> POS descuenta
+    items = ", ".join(
+        '{ id: "p%d", name: "%s", price: %d, category: "%s", stock: %d }' % (i + 1, n, p, c, _stk[i % len(_stk)])
+        for i, (n, p, c) in enumerate(chosen)
+    )
+    return "[" + items + "]"
+
+
+def _ensure_premium_home(files_rel: list[dict], report: list[str], vision: str = "") -> list[dict]:
+    """Garantiza que el dashboard (app/page.tsx) abra con un <Hero> premium
+    (banner gradiente de marca + firma generativa). Así hasta lo generado desde
+    cero por la IA arranca al nivel de las plantillas. Determinista: extrae el
+    título del <h1>/visión, quita el <header> plano e inserta el Hero. El
+    auto-import añade el import. Si ya usa Hero, no toca nada. Solo apps (no landing)."""
+    import re as _re
+    home = next((f for f in files_rel if (f.get("path") or "").lstrip("/") in
+                 ("frontend/app/page.tsx", "app/page.tsx", "frontend/app/page.jsx", "app/page.jsx")), None)
+    if not home:
+        return files_rel
+    c = home.get("content") or ""
+    if "<Hero" in c:  # ya premium
+        return files_rel
+    # título y subtítulo: del <h1>/<p> del home, o de la visión
+    title = ""
+    mh = _re.search(r"<h1[^>]*>\s*([^<{][^<]{1,58})</h1>", c)
+    if mh:
+        title = mh.group(1).strip()
+    title = title or _title_from_vision(vision) or "Panel"
+    sub = ""
+    mp = _re.search(r"</h1>\s*<p[^>]*>\s*([^<{][^<]{1,90})</p>", c)
+    if mp:
+        sub = mp.group(1).strip()
+    sub = sub or "Resumen de tu operación de un vistazo."
+    title = title.replace('"', "'")[:58]
+    sub = sub.replace('"', "'")[:90]
+    # quitar un <header>…</header> plano inicial (lo reemplaza el Hero)
+    c2 = _re.sub(r"<header[^>]*>.*?</header>\s*", "", c, count=1, flags=_re.S)
+    # insertar el Hero tras la apertura del elemento raíz del return
+    m = _re.search(r"(return\s*\(\s*)(<(?:div|main|section)\b[^>]*>|<>)", c2)
+    if not m:
+        return files_rel
+    hero = f'\n      <Hero title="{title}" subtitle="{sub}" />'
+    # módulo ESTRELLA del sector (self-contained, sin props) -> toda app generada
+    # recibe el diferenciador de su mercado, no solo un CRUD genérico.
+    star = _star_component_for(vision)
+    star_jsx = ""
+    if star and f"<{star}" not in c2:
+        props = ""
+        if star == "POSBoard":
+            prods = _pos_products_for(vision)
+            if prods:
+                props = f" products={{{prods}}}"  # POS acomodado al negocio
+        star_jsx = (f'\n      <div className="mt-2"><h2 className="mb-3 text-lg font-semibold '
+                    f'text-slate-900">Vista rápida</h2><{star}{props} /></div>')
+    c2 = c2[:m.end()] + hero + star_jsx + c2[m.end():]
+    if c2 != c:
+        home["content"] = c2
+        report.append(f"dashboard premium: <Hero>{' + ' + star if star else ''} inyectado en el home")
+    return files_rel
+
+
+_ACTION_WORDS = ("editar", "eliminar", "borrar", "guardar", "agregar", "nuevo", "nueva",
+                 "crear", "cobrar", "emitir", "enviar", "actualizar", "añadir")
+
+
+def _lint_dead_buttons(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """VALIDACIÓN DE FUNCIONALIDAD: detecta botones de ACCIÓN sin handler (onClick/
+    type=submit/href) — botones 'muertos' que no hacen nada (la queja real del
+    usuario). Reporta cuántos hay por página para no entregar pantallas decorativas.
+    No bloquea (regex imperfecto), pero deja la evidencia en el log del gate."""
+    import re as _re
+    dead = 0
+    pages: list[str] = []
+    btn_re = _re.compile(r"<(button|Button)\b([^>]*)>(.*?)</\1>", _re.S | _re.I)
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        if not p.endswith((".tsx", ".jsx")) or "components/ui/" in p:
+            continue
+        c = f.get("content") or ""
+        page_dead = 0
+        for m in btn_re.finditer(c):
+            attrs, inner = m.group(2), m.group(3)
+            txt = _re.sub(r"<[^>]+>", "", inner).strip().lower()
+            if not any(w in txt for w in _ACTION_WORDS):
+                continue
+            wired = ("onclick" in attrs.lower() or "onsubmit" in attrs.lower()
+                     or 'type="submit"' in attrs.lower() or "href" in attrs.lower())
+            if not wired:
+                page_dead += 1
+        if page_dead:
+            dead += page_dead
+            pages.append(f"{p.split('/')[-1]}:{page_dead}")
+    if dead:
+        report.append(f"⚠ VALIDACIÓN: {dead} botón(es) de acción SIN handler (decorativos) en {', '.join(pages[:6])}")
+    else:
+        report.append("validación funcionalidad: sin botones de acción muertos")
+    return files_rel
+
+
+def _autoimport_ui_components(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """Si un .tsx USA un componente del UI-kit en JSX (`<Hero`) pero NO lo importa,
+    añade el import. Evita el crash 'X is not defined' (named import faltante) —
+    pasa tanto en código IA como al editar plantillas. Determinista, toda app."""
+    import re as _re
+    fixed = 0
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        if not p.endswith((".tsx", ".jsx")):
+            continue
+        if "components/ui/" in p or p.endswith(("/cn.ts", "/auth.ts")):  # no tocar el kit/lib en sí
+            continue
+        c = f.get("content") or ""
+        missing = []
+        for comp in _KIT_COMPONENTS:
+            used = _re.search(r"<" + comp + r"[\s/>]", c)
+            if not used:
+                continue
+            imported = _re.search(r"import\s*\{[^}]*\b" + comp + r"\b[^}]*\}", c) or \
+                _re.search(r"import\s+" + comp + r"\b", c)
+            if not imported:
+                missing.append(comp)
+        # tipo `Tone` (de Badge) usado como anotación sin importar -> "Cannot find name 'Tone'".
+        # PERO no importar si el archivo ya lo DEFINE local (type/interface Tone) -> evita
+        # "duplicate identifier".
+        needs_tone = (
+            bool(_re.search(r"\bTone\b", c))
+            and not _re.search(r"import[^\n]*\bTone\b", c)
+            and not _re.search(r"\b(type|interface|enum)\s+Tone\b", c)
+        )
+        if not missing and not needs_tone:
+            continue
+        imports = "".join(f'import {{ {comp} }} from "@/components/ui/{comp}";\n' for comp in missing)
+        if needs_tone:
+            imports += 'import type { Tone } from "@/components/ui/Badge";\n'
+            fixed += 1
+        # insertar tras "use client" si existe, si no al inicio
+        m = _re.match(r'^\s*("use client"|\'use client\');?\s*\n', c)
+        if m:
+            c = c[:m.end()] + imports + c[m.end():]
+        else:
+            c = imports + c
+        f["content"] = c
+        fixed += len(missing)
+    if fixed:
+        report.append(f"auto-import de componentes UI-kit usados sin import: {fixed}")
+    return files_rel
+
+
+def _stub_missing_routes(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """Detecta enlaces internos (href/Link/router.push) a rutas SIN página y crea
+    una página-formulario estilizada en vez de dejar un 404. Mata los 404 de los
+    botones 'Agregar/Crear/Editar' que la IA/plantilla genera apuntando a rutas
+    que no existen."""
+    import re as _re
+    app_prefix = "frontend/app" if any(
+        (f.get("path") or "").lstrip("/").startswith("frontend/app/") for f in files_rel
+    ) else "app"
+    existing_routes: set[str] = set()
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        m = _re.match(rf"{_re.escape(app_prefix)}/(.*/)?page\.(tsx|jsx)$", p)
+        if m:
+            seg = p[len(app_prefix):].rsplit("/", 1)[0]  # '' o '/x/y'
+            existing_routes.add(seg or "/")
+    # recolectar referencias a rutas internas estáticas
+    refs: set[str] = set()
+    pat = _re.compile(r"""(?:href|push|replace)\s*[=(]\s*["'`](/[a-zA-Z0-9/_-]*)["'`]""")
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        if not p.endswith((".tsx", ".jsx")):
+            continue
+        for mm in pat.finditer(f.get("content") or ""):
+            route = mm.group(1).rstrip("/")
+            if route and not route.startswith("/_") and "${" not in route:
+                refs.add(route)
+    missing = [r for r in refs if r not in existing_routes and r != "/"]
+    created = 0
+    for route in missing:
+        target = f"{app_prefix}{route}/page.tsx"
+        if any((f.get("path") or "").lstrip("/") == target for f in files_rel):
+            continue
+        segs = [s for s in route.split("/") if s]
+        last = segs[-1] if segs else "registro"
+        is_form = last.lower() in ("create", "crear", "nuevo", "new", "add", "agregar", "edit", "editar")
+        parent = "/" + "/".join(segs[:-1]) if len(segs) > 1 else "/"
+        label = (segs[-2] if is_form and len(segs) > 1 else last).replace("-", " ").capitalize()
+        files_rel.append({"path": target, "content": _route_stub_src(label, parent, is_form)})
+        created += 1
+    if created:
+        report.append(f"rutas faltantes con página (form/placeholder) en vez de 404: {created}")
+    return files_rel
+
+
+def _route_stub_src(label: str, parent: str, is_form: bool) -> str:
+    """Página stub estilizada con el UI-kit: formulario funcional (vuelve atrás al
+    guardar) o placeholder elegante. Nunca un 404 pelado."""
+    if is_form:
+        return (
+            '"use client";\n'
+            'import { useRouter } from "next/navigation";\n'
+            'import { PageHeader } from "@/components/ui/PageHeader";\n'
+            'import { Card } from "@/components/ui/Card";\n'
+            'import { Button } from "@/components/ui/Button";\n\n'
+            "export default function FormPage() {\n"
+            "  const router = useRouter();\n"
+            "  return (\n"
+            '    <div className="mx-auto max-w-2xl space-y-6">\n'
+            f'      <PageHeader title="Nuevo {label}" subtitle="Completa los datos y guarda." />\n'
+            "      <Card>\n"
+            '        <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); router.push("' + parent + '"); }}>\n'
+            "          {[\"Nombre\", \"Descripción\", \"Detalle\"].map((f) => (\n"
+            '            <div key={f} className="space-y-1">\n'
+            '              <label className="text-sm font-medium text-slate-700">{f}</label>\n'
+            '              <input className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/30" placeholder={f} />\n'
+            "            </div>\n"
+            "          ))}\n"
+            '          <div className="flex gap-2 pt-2">\n'
+            '            <Button type="submit">Guardar</Button>\n'
+            '            <Button type="button" variant="secondary" onClick={() => router.push("' + parent + '")}>Cancelar</Button>\n'
+            "          </div>\n"
+            "        </form>\n"
+            "      </Card>\n"
+            "    </div>\n"
+            "  );\n}\n"
+        )
+    return (
+        '"use client";\n'
+        'import { PageHeader } from "@/components/ui/PageHeader";\n'
+        'import { EmptyState } from "@/components/ui/EmptyState";\n\n'
+        "export default function SectionPage() {\n"
+        "  return (\n"
+        '    <div className="space-y-6">\n'
+        f'      <PageHeader title="{label}" />\n'
+        f'      <EmptyState title="{label}" description="Sección en preparación." />\n'
+        "    </div>\n"
+        "  );\n}\n"
+    )
 
 
 def _apply_theme_css(files_rel: list[dict], report: list[str], vision: str = "") -> list[dict]:
@@ -415,13 +919,31 @@ def _guess_app_title(files_rel: list[dict]) -> str:
         m = re.search(r"title:\s*['\"]([^'\"]{2,40})['\"]", c)
         if m and m.group(1).strip().lower() not in bad:
             return m.group(1).strip()
-    # 2) primer <h1> del home
+    # 2) <h1> del home, título de <Hero>, o <PageHeader title="...">
     home = next((f for f in files_rel if (f.get("path") or "").lstrip("/") in
                  ("frontend/app/page.tsx", "app/page.tsx")), None)
     if home:
-        m = re.search(r"<h1[^>]*>\s*([^<{][^<]{1,38})</h1>", home.get("content") or "")
-        if m and m.group(1).strip().lower() not in bad:
-            return m.group(1).strip()
+        c = home.get("content") or ""
+        for pat in (r"<h1[^>]*>\s*([^<{][^<]{1,38})</h1>",
+                    r"<PageHeader[^>]*\btitle=\"([^\"]{2,40})\""):
+            m = re.search(pat, c)
+            if m and m.group(1).strip().lower() not in bad:
+                return m.group(1).strip()
+    return ""
+
+
+def _title_from_vision(vision: str) -> str:
+    """Nombre de app único a partir de la visión: lo que va antes de ':' o '—',
+    o las primeras palabras significativas. 'Clínica Vida: agenda...' -> 'Clínica Vida'."""
+    v = (vision or "").strip()
+    if not v:
+        return ""
+    head = re.split(r"[:—\-\.\n]", v, 1)[0].strip()
+    words = head.split()
+    # nombre corto y propio (2-4 palabras, sin verbos genéricos de arranque)
+    if 1 <= len(words) <= 4 and len(head) <= 36:
+        if words[0].lower() not in ("plataforma", "sistema", "app", "aplicación", "una", "un", "gestor"):
+            return head
     return ""
 
 
@@ -778,7 +1300,7 @@ def _styled_stub(base: str, routes: list[tuple[str, str]] | None = None) -> str:
     elif "button" in name:
         body = (
             "export default function Stub(props: any) {\n"
-            "  const cls = props?.className ?? 'inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition';\n"
+            "  const cls = props?.className ?? 'inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition';\n"
             "  return (\n"
             "    <button onClick={props?.onClick} className={cls}>\n"
             "      {props?.children ?? props?.label ?? 'Acción'}\n"
@@ -1130,7 +1652,18 @@ async def _runtime_smoke(tmp: str, npm: str, env: dict) -> dict:
         npm, "run", "start", "--", "-p", port, cwd=tmp, env=env,
         stdout=_aio.subprocess.DEVNULL, stderr=_aio.subprocess.DEVNULL)
     try:
-        await _aio.sleep(9)
+        # esperar a que `next start` LIGUE el puerto (no un sleep fijo: 9s a veces
+        # no alcanza -> ERR_CONNECTION_REFUSED y el smoke no clickea nada).
+        import socket as _sock
+        for _ in range(35):
+            await _aio.sleep(1)
+            _s = _sock.socket()
+            _s.settimeout(0.5)
+            try:
+                _s.connect(("127.0.0.1", int(port))); _s.close(); break
+            except Exception:
+                _s.close()
+        await _aio.sleep(2)  # margen para que Next termine de compilar la 1a ruta
         from playwright.async_api import async_playwright
         errs: list[str] = []
         async with async_playwright() as pw:
@@ -1147,23 +1680,72 @@ async def _runtime_smoke(tmp: str, npm: str, env: dict) -> dict:
                     raise
             pg = await br.new_page(viewport={"width": 1280, "height": 800})
             pg.on("pageerror", lambda e: errs.append(str(e)[:160]))
+            # Contador de peticiones de red: un botón que dispara un fetch/XHR
+            # (aunque 404 porque el backend NO corre en el smoke) SÍ está vivo —
+            # tiene handler. En el deploy real (Render) el backend existe. Sin
+            # esto, toda app con botones que llaman a la API se marca "muerta"
+            # (falso negativo que bloqueaba el deploy de apps válidas).
+            _net = {"n": 0}
+            pg.on("request", lambda r: _net.__setitem__("n", _net["n"] + 1))
             shot_b64 = None
+            dead = 0; clicked = 0
             try:
-                await pg.goto(f"http://localhost:{port}/", wait_until="domcontentloaded", timeout=30000)
+                base = f"http://localhost:{port}"
+                await pg.goto(base + "/", wait_until="domcontentloaded", timeout=30000)
                 await pg.wait_for_timeout(6000)
                 text = (await pg.locator("body").inner_text()).strip()
                 import base64 as _b64
                 png = await pg.screenshot(full_page=False)
                 shot_b64 = _b64.b64encode(png).decode()
+                # AGENTE FUNCIONAL: login + recorrer rutas + CLICKEAR botones de
+                # acción y verificar que respondan (modal/fila/navegación). Corre
+                # en localhost (donde el navegador SÍ funciona) ANTES de desplegar.
+                try:
+                    b1 = await pg.query_selector("text=Usar superadmin de demo")
+                    if b1:
+                        await b1.click(); await pg.wait_for_timeout(400)
+                        await pg.click("button:has-text('Entrar')"); await pg.wait_for_timeout(2000)
+                    hrefs = await pg.evaluate(
+                        "()=>Array.from(document.querySelectorAll('aside a[href],nav a[href]'))"
+                        ".map(a=>a.getAttribute('href')).filter(h=>h&&h.startsWith('/')&&h!=='/login')")
+                    import re as _re2
+                    for h in list(dict.fromkeys(hrefs))[:8]:
+                        await pg.goto(base + h, wait_until="domcontentloaded", timeout=20000)
+                        await pg.wait_for_timeout(1200)
+                        for el in (await pg.query_selector_all("button"))[:6]:
+                            t = ((await el.inner_text()) or "").strip()
+                            if not _re2.search("nuevo|nueva|agregar|editar|eliminar|cobrar|emitir|guardar|crear", t, _re2.I):
+                                continue
+                            bu = pg.url; br_ = await pg.evaluate("()=>document.querySelectorAll('tbody tr,form,[role=dialog]').length")
+                            _nreq0 = _net["n"]
+                            try: await el.click(timeout=3500); await pg.wait_for_timeout(700)
+                            except Exception: continue
+                            au = pg.url; ar_ = await pg.evaluate("()=>document.querySelectorAll('tbody tr,form,[role=dialog]').length")
+                            clicked += 1
+                            _fired = _net["n"] > _nreq0  # el click disparó una petición de red
+                            if au == bu and ar_ == br_ and not _fired: dead += 1
+                            else: await pg.keyboard.press("Escape"); await pg.wait_for_timeout(200)
+                            if clicked >= 10: break
+                        if clicked >= 10: break
+                except Exception as _fe:
+                    errs.append("func:" + str(_fe)[:80])
             except Exception as e:
                 text = ""; errs.append("goto:" + str(e)[:120])
             await br.close()
         app_err = ("Application error" in text) or ("client-side exception" in text)
-        ok = (len(text) > 15) and (not app_err)
-        return {"ok": ok, "skipped": False,
-                "reason": ("render ok" if ok else "pantalla en blanco / client-side error"),
-                "log": (text[:200] + " || " + " | ".join(errs[:4])),
-                "screenshot": shot_b64}
+        render_ok = (len(text) > 15) and (not app_err)
+        # ok = render + no MUCHOS botones muertos. Umbral de 3 para tolerar casos
+        # borde del detector (botón que muestra toast en vez de modal); 3+ muertos
+        # = pantalla claramente decorativa -> bloquea el deploy.
+        ok = render_ok and (dead < 3)
+        reason = "render ok" if render_ok else "pantalla en blanco / client-side error"
+        if render_ok and dead:
+            reason = f"{dead}/{clicked} botones NO responden (muertos)"
+        elif render_ok and clicked:
+            reason = f"render + {clicked} botones OK"
+        return {"ok": ok, "skipped": False, "reason": reason,
+                "log": (text[:160] + f" || clicked={clicked} dead={dead} || " + " | ".join(errs[:4])),
+                "screenshot": shot_b64, "dead_buttons": dead, "clicked": clicked}
     finally:
         try: proc.terminate()
         except Exception: pass
@@ -1222,6 +1804,61 @@ async def _visual_judge_and_fix(files_rel: list[dict], screenshot_b64: str,
     return files_rel, changed
 
 
+# ---- Cache de node_modules entre builds/deploys (la instalación npm es el paso
+# MÁS lento; las apps generadas comparten casi las mismas deps). Cacheamos por
+# hash de dependencias y restauramos con hardlinks (cp -al) -> casi instantáneo.
+_NM_CACHE_BASE = "/tmp/sd_nm_cache"
+
+
+def _deps_key(files_rel: list[dict]) -> str | None:
+    import hashlib, json as _json
+    pkg = next((f for f in files_rel if (f.get("path") or "").lstrip("/").endswith("package.json")), None)
+    if not pkg:
+        return None
+    try:
+        d = _json.loads(pkg.get("content") or "{}")
+        deps = {**(d.get("dependencies") or {}), **(d.get("devDependencies") or {})}
+        return hashlib.sha1(repr(sorted(deps.items())).encode()).hexdigest()[:16]
+    except Exception:
+        return None
+
+
+def _pkg_hash(files_rel: list[dict]) -> str:
+    import hashlib
+    pkg = next((f for f in files_rel if (f.get("path") or "").lstrip("/").endswith("package.json")), None)
+    return hashlib.sha1((pkg.get("content") if pkg else "").encode()).hexdigest() if pkg else ""
+
+
+async def _restore_node_modules(tmp: str, key: str) -> bool:
+    """Restaura node_modules cacheado con hardlinks (instantáneo). True si hubo hit."""
+    src = os.path.join(_NM_CACHE_BASE, key, "node_modules")
+    if not os.path.isdir(src):
+        return False
+    dst = os.path.join(tmp, "node_modules")
+    try:
+        # cp -a (copia REAL, no hardlinks): los hardlinks comparten inodos con el
+        # cache -> npm install/postinstall en builds paralelos los corrompía entre
+        # sí. La copia es un poco más lenta pero aislada y segura.
+        rc, _ = await _run(["cp", "-a", src, dst], tmp, _node_env(), timeout=180)
+        return rc == 0
+    except Exception:
+        return False
+
+
+async def _save_node_modules(tmp: str, key: str) -> None:
+    src = os.path.join(tmp, "node_modules")
+    if not os.path.isdir(src):
+        return
+    base = os.path.join(_NM_CACHE_BASE, key)
+    if os.path.isdir(os.path.join(base, "node_modules")):
+        return
+    try:
+        os.makedirs(base, exist_ok=True)
+        await _run(["cp", "-al", src, os.path.join(base, "node_modules")], tmp, _node_env(), timeout=180)
+    except Exception:
+        pass
+
+
 async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
                               vision: str = "", is_landing: bool = False,
                               with_auth: bool | None = None) -> dict:
@@ -1245,8 +1882,16 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
         # auth ON por defecto en apps-dashboard (login + roles + superadmin
         # sembrado). El caller puede desactivarlo (with_auth=False).
         _auth = True if with_auth is None else with_auth
-        files_rel = _apply_app_shell(files_rel, _pre, with_auth=_auth)  # shell determinista (sidebar+header+marca[+auth])
+        _title = _title_from_vision(vision)  # nombre único por proyecto (de la visión)
+        files_rel = _apply_app_shell(files_rel, _pre, title=_title, with_auth=_auth)  # shell determinista (sidebar+header+marca[+auth])
     files_rel = _apply_theme_css(files_rel, _pre, vision=vision)  # fuentes del SECTOR + modo claro (mata "todo en negro")
+    files_rel = _force_light_tailwind(files_rel, _pre, vision=vision)  # darkMode:'class' + brand del SECTOR (color único por mercado)
+    if not is_landing:
+        files_rel = _ensure_premium_home(files_rel, _pre, vision=vision)  # Hero premium en el dashboard generado
+    files_rel = _autoimport_ui_components(files_rel, _pre)  # componente UI-kit usado sin import -> añade import (anti-crash)
+    files_rel = _lint_dead_buttons(files_rel, _pre)  # valida funcionalidad: botones de acción sin handler
+    if not is_landing:
+        files_rel = _stub_missing_routes(files_rel, _pre)  # rutas faltantes -> form/placeholder, no 404
     files_rel = _fix_root_layout(files_rel, _pre)  # root layout html/body server
     files_rel = _fix_next_router(files_rel, _pre)   # App Router: next/router -> next/navigation
     files_rel = _ensure_use_client(files_rel, _pre)  # hooks de cliente -> "use client"
@@ -1267,17 +1912,29 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     env = _node_env()
     all_fixes: list[str] = list(_pre)
     log_tail = ""
-    for attempt in range(1, max_attempts + 1):
-        tmp = tempfile.mkdtemp(prefix="scrumdev_fe_")
-        try:
-            _write_tree(tmp, files_rel)
-            rc_i, log_i = await _run([npm, "install", "--no-audit", "--no-fund",
-                                      "--prefer-offline"], tmp, env, timeout=240)
-            if rc_i != 0:
-                log_tail = log_i[-1500:]
-                # install fallando rara vez se arregla con autofix; abortar
-                return {"ok": False, "stage": "install", "files": files_rel,
-                        "log": log_tail, "fixes": all_fixes, "attempts": attempt}
+    # UN solo dir + UNA instalación (con cache de node_modules). Los reintentos
+    # solo reescriben el código y RECOMPILAN -> recortamos ~3 npm install lentos.
+    tmp = tempfile.mkdtemp(prefix="scrumdev_fe_")
+    try:
+        _write_tree(tmp, files_rel)
+        key = _deps_key(files_rel)
+        restored = await _restore_node_modules(tmp, key) if key else False
+        # Tras restaurar del cache, igual corremos `npm install --prefer-offline`:
+        # es RÁPIDO (los paquetes ya están en disco, no descarga) y GARANTIZA la
+        # integridad (repara .bin/symlinks/postinstall) — más seguro que saltar el
+        # install, que en el filesystem del Space (Docker) puede dejar node_modules
+        # incompleto si el hardlink falló. Velocidad del cache + fiabilidad.
+        if restored:
+            logger.info("node_modules_cache_hit", key=key)
+        rc_i, log_i = await _run([npm, "install", "--no-audit", "--no-fund",
+                                  "--prefer-offline"], tmp, env, timeout=240)
+        if rc_i != 0:
+            return {"ok": False, "stage": "install", "files": files_rel,
+                    "log": log_i[-1500:], "fixes": all_fixes, "attempts": 1}
+        if key and not restored:
+            await _save_node_modules(tmp, key)
+        last_pkg = _pkg_hash(files_rel)
+        for attempt in range(1, max_attempts + 1):
             rc_b, log_b = await _run([npm, "run", "build"], tmp, env, timeout=300)
             if rc_b == 0:
                 # BUILD OK -> SMOKE de runtime (navegador real). Que compile NO
@@ -1313,6 +1970,7 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
                 if attempt < max_attempts:
                     files_rel = _harden_data_access(files_rel, all_fixes)
                     files_rel = _force_dynamic_pages(files_rel, all_fixes)
+                    _write_tree(tmp, files_rel)  # reflejar fixes (node_modules persiste)
                     continue
                 # último intento agotado: NO desplegar app rota
                 return {"ok": False, "stage": "runtime", "files": files_rel,
@@ -1323,10 +1981,60 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
             files_rel, fixes = _apply_frontend_autofix(files_rel, log_tail)
             all_fixes.extend(fixes)
             logger.warning("frontend_build_failed_retry", attempt=attempt, fixes=fixes)
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+            if attempt < max_attempts:
+                _write_tree(tmp, files_rel)  # reflejar autofix antes de recompilar
+                new_pkg = _pkg_hash(files_rel)
+                if new_pkg != last_pkg:  # solo reinstalar si cambió package.json
+                    await _run([npm, "install", "--no-audit", "--no-fund",
+                                "--prefer-offline"], tmp, env, timeout=180)
+                    last_pkg = new_pkg
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     return {"ok": False, "stage": "build", "files": files_rel, "log": log_tail,
             "fixes": all_fixes, "attempts": max_attempts}
+
+
+def _fix_python_escaped(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """La IA a veces emite .py con secuencias de escape LITERALES (`\\n`, `\\t`,
+    `\\"`) en vez de saltos/comillas reales: el archivo entero queda en una sola
+    línea física con `\\n` literal -> `SyntaxError: unexpected character after
+    line continuation character`. Des-escapa de forma conservadora: solo si el
+    archivo NO parsea, casi no tiene saltos reales, y tras des-escapar SÍ parsea."""
+    import ast as _ast
+    fixed = 0
+    for f in files_rel:
+        rel = (f.get("path") or "").lstrip("/")
+        if not rel.endswith(".py"):
+            continue
+        c = f.get("content") or ""
+        if "\\n" not in c:
+            continue
+        try:
+            _ast.parse(c)
+            continue  # ya es válido, no tocar
+        except SyntaxError:
+            pass
+        # heurística: hay muchos más "\n" literales que saltos reales
+        real_nl = c.count("\n")
+        lit_nl = c.count("\\n")
+        if lit_nl < 2 or real_nl > lit_nl:
+            continue
+        new = (
+            c.replace("\\r\\n", "\n")
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .replace('\\"', '"')
+            .replace("\\'", "'")
+        )
+        try:
+            _ast.parse(new)
+            f["content"] = new
+            fixed += 1
+        except SyntaxError:
+            pass
+    if fixed:
+        report.append(f"python con escapes literales des-escapado en {fixed} archivo(s)")
+    return files_rel
 
 
 def _fix_python_oneliners(files_rel: list[dict], report: list[str]) -> list[dict]:
@@ -1335,6 +2043,7 @@ def _fix_python_oneliners(files_rel: list[dict], report: list[str]) -> list[dict
     ';' a nivel superior y re-indenta los bloques. Solo actúa si el archivo NO
     compila tal cual (para no romper código ya válido)."""
     import ast as _ast
+    _fix_python_escaped(files_rel, report)
     fixed = 0
     for f in files_rel:
         rel = (f.get("path") or "").lstrip("/")
@@ -1509,8 +2218,10 @@ async def run_build_gate(files: list[dict], stack: str, vision: str = "") -> tup
             }
             tier_files = res.get("files", tier_files)
         elif tier.framework == "fastapi":
+            _br: list[str] = []
+            tier_files = _inject_data_backend(tier_files, _br)  # /data/{entidad} server-side
             res = build_gate_backend(tier_files)
-            report["tiers"]["backend"] = {"ok": res["ok"], "errors": res.get("errors", [])}
+            report["tiers"]["backend"] = {"ok": res["ok"], "errors": res.get("errors", []), "fixes": _br}
         # re-prefijar al path completo
         for f in tier_files:
             rel = (f.get("path") or "").lstrip("/")

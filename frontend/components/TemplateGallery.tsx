@@ -8,6 +8,34 @@ import { apiGetTemplates, TemplateCard, TemplatesResponse } from "@/lib/api";
  * le mostramos las plantillas que matchean su sector con una IMAGEN de preview, y
  * elige una (rápido) o "desde cero" (a medida, tarda más). Guía visual total.
  */
+// Miniatura con fallback VISIBLE: si no hay preview_url o la imagen falla, en vez
+// de ocultarla (card en blanco) muestra un placeholder con el nombre y el color de
+// marca de la plantilla — siempre se ve algo intencional.
+function TemplateThumb({ src, name, brand }: { src?: string; name: string; brand: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) {
+    return (
+      <div
+        className="flex h-full w-full items-center justify-center px-4 text-center"
+        style={{ background: `linear-gradient(135deg, ${brand}26, ${brand}0d)` }}
+      >
+        <span className="text-xl font-bold leading-tight tracking-tight" style={{ color: brand }}>
+          {name}
+        </span>
+      </div>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={name}
+      onError={() => setFailed(true)}
+      className="h-full w-full object-cover transition group-hover:scale-[1.02]"
+    />
+  );
+}
+
 export default function TemplateGallery({
   projectKey,
   onPick,
@@ -100,15 +128,7 @@ export default function TemplateGallery({
               className="relative aspect-[16/10] w-full overflow-hidden bg-neutral-100 dark:bg-neutral-800"
               style={{ backgroundColor: t.brand_color + "14" }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={t.preview_url}
-                alt={t.name}
-                className="h-full w-full object-cover transition group-hover:scale-[1.02]"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = "none";
-                }}
-              />
+              <TemplateThumb src={t.preview_url} name={t.name} brand={t.brand_color} />
               <span
                 className="absolute left-3 top-3 rounded-full px-2.5 py-0.5 text-xs font-semibold text-white"
                 style={{ backgroundColor: t.brand_color }}

@@ -1,3 +1,13 @@
+---
+title: ScrumDev AI API
+emoji: 🚀
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # ScrumDev AI
 
 > **Genera tu sistema completo desde una idea con agentes IA.**

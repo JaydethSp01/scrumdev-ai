@@ -58,11 +58,13 @@ def test_llm_factory_register():
     assert get_llm("fake").name == "fake"
 
 
-def test_pipeline_has_14_phases_and_4_gates():
+def test_pipeline_has_14_phases_and_6_gates():
+    # El ciclo gateado del taller tiene 6 aprobaciones humanas:
+    # 1 Backlog, 2 NFR, 3 Arquitectura, 4 Sprint Review, 5 Release, 6 Producción.
     from services.orchestrator_service.app.project_pipeline import PHASES, build_pipeline_view
     assert len(PHASES) == 14
     gates = [p.get("gate_n") for p in PHASES if p.get("human_gate")]
-    assert sorted(g for g in gates if g) == [1, 2, 3, 4]
+    assert sorted(g for g in gates if g) == [1, 2, 3, 4, 5, 6]
     view = build_pipeline_view("BACKLOG")
     assert view["current_index"] == 0
     assert view["phases"][0]["status"] == "current"
@@ -99,7 +101,7 @@ def test_deploy_validator_creates_missing_css():
 
 
 def test_blueprint_picks_stack_and_splits_tiers():
-    from shared.stacks.stack_blueprints import pick_stack, split_by_tier, get_blueprint
+    from shared.stacks.stack_blueprints import pick_stack, split_by_tier
     assert pick_stack({"type": "saas_crud", "is_static": False}) == "nextjs-fastapi-postgres"
     assert pick_stack({"type": "landing", "is_static": True}) == "nextjs-static"
     files = [

@@ -53,13 +53,13 @@ export function UsersManager() {
         {/* alta de usuario */}
         <form onSubmit={addUser} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="text-base font-semibold text-slate-900">Crear usuario</h3>
-          <input className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 outline-none"
+          <input aria-label="Nombre" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 outline-none"
             placeholder="Nombre" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <input className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 outline-none"
+          <input aria-label="Correo" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 outline-none"
             placeholder="Correo" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <input className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 outline-none"
-            placeholder="Contraseña" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-          <select className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 outline-none"
+          <input aria-label="Contraseña" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 outline-none"
+            placeholder="Contraseña" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+          <select aria-label="Rol" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 outline-none"
             value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
             {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
@@ -69,9 +69,9 @@ export function UsersManager() {
         {/* alta de rol */}
         <form onSubmit={addRole} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="text-base font-semibold text-slate-900">Crear rol</h3>
-          <input className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 outline-none"
+          <input aria-label="Nombre del rol" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 outline-none"
             placeholder="Nombre del rol" value={roleForm.name} onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })} />
-          <input className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 outline-none"
+          <input aria-label="Permisos separados por coma" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/30 outline-none"
             placeholder="Permisos (coma): read, write" value={roleForm.permissions} onChange={(e) => setRoleForm({ ...roleForm, permissions: e.target.value })} />
           <button className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">Agregar rol</button>
           <div className="pt-2 text-xs text-slate-500">

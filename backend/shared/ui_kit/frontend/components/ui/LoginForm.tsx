@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { login, DEFAULT_ADMIN, seedAuth } from "@/lib/auth";
+import { GenerativePattern } from "@/components/ui/GenerativePattern";
 
 /** Pantalla de login branded (gradiente del color de marca). Muestra las
  *  credenciales del superadmin sembrado para que el demo entre de una. */
@@ -34,15 +35,16 @@ export function LoginForm({ appName = "Panel" }: { appName?: string }) {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       {/* panel branded */}
-      <div className="hidden flex-col justify-between bg-brand bg-gradient-to-br from-brand-dark to-brand p-12 text-white lg:flex">
-        <div className="text-2xl font-black tracking-tight">{appName}</div>
-        <div>
+      <div className="relative hidden flex-col justify-between overflow-hidden bg-brand bg-gradient-to-br from-brand-dark to-brand p-12 text-white lg:flex">
+        <GenerativePattern seed={appName} />
+        <div className="relative text-2xl font-black tracking-tight">{appName}</div>
+        <div className="relative">
           <h2 className="text-4xl font-bold leading-tight">Bienvenido de nuevo</h2>
           <p className="mt-3 max-w-sm text-white/80">
             Gestiona tu operación desde un panel rápido, seguro y con control de roles.
           </p>
         </div>
-        <p className="text-sm text-white/60">Generado con ScrumDev AI</p>
+        <p className="relative text-sm text-white/60">Generado con ScrumDev AI</p>
       </div>
       {/* formulario */}
       <div className="grid place-items-center bg-slate-50 p-6">

@@ -45,6 +45,7 @@ numpy = ">=2.0"
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"
 pytest-asyncio = "^0.24.0"
+pytest-cov = "^6.0.0"
 ruff = "^0.7.0"
 black = "^24.10.0"
 mypy = "^1.13.0"
@@ -58,6 +59,21 @@ build-backend = "poetry.core.masonry.api"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+
+# Cobertura: el gate (--cov-fail-under) se aplica en CI (ci.yml) para no
+# bloquear corridas locales ad-hoc de un solo archivo. Aquí solo el scope.
+[tool.coverage.run]
+source = ["services", "shared", "temporal"]
+omit = [
+    "*/__pycache__/*",
+    "*/tests/*",
+    "*/migrations/*",
+    "*/alembic/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
 
 [tool.ruff]
 line-length = 100

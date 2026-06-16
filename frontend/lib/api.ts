@@ -350,6 +350,7 @@ export async function apiGetCodeSummary(projectKey: string): Promise<CodeSummary
   return jsonOrThrow<CodeSummary>(res);
 }
 
+
 // Eliminar proyecto completo (acción del PO desde la card).
 export async function apiDeleteProject(projectKey: string): Promise<void> {
   const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}`, {
@@ -1306,4 +1307,47 @@ export async function createSprint(
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
   return jsonOrThrow(res);
+}
+
+// ===== Auditoría de acciones de agentes (panel profundo por agente) =====
+export type AgentRunArtifact = {
+  type?: string;
+  count?: number;
+  build_id?: string;
+  sprint?: number | null;
+  target?: string;
+  // tolera campos extra del backend
+  [k: string]: unknown;
+};
+export type AgentRun = {
+  id: string;
+  agent: string;
+  role: string;
+  phase: string;
+  action: string;
+  summary: string;
+  input_summary?: string;
+  output_summary?: string;
+  artifacts?: AgentRunArtifact[];
+  status: "running" | "done" | "failed";
+  started_at: string;
+  ended_at?: string;
+  duration_ms?: number;
+};
+
+// Devuelve las ejecuciones de los agentes para auditoría. Degrada elegante:
+// si el endpoint aún no existe (404) o el backend falla, devuelve [] en vez de romper.
+export async function apiGetAgentRuns(projectKey: string): Promise<AgentRun[]> {
+  try {
+    const res = await authFetch(
+      `${API}/projects/${encodeURIComponent(projectKey)}/agent-runs`
+    );
+    if (res.status === 404) return [];
+    if (!res.ok) return [];
+    const data = await res.json() as { runs?: AgentRun[] } | AgentRun[];
+    if (Array.isArray(data)) return data;
+    return data.runs || [];
+  } catch {
+    return [];
+  }
 }

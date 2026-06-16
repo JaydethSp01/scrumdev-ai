@@ -89,7 +89,10 @@ DO $$ BEGIN
     ALTER TABLE chat_messages ADD CONSTRAINT chk_chat_messages_role CHECK (role IN ('user','assistant','system'));
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_human_decisions_status') THEN
-    ALTER TABLE human_decisions ADD CONSTRAINT chk_human_decisions_status CHECK (status IN ('pending','approved','rejected'));
+    -- 'superseded': el loop de sprints marca asi la aprobacion vieja del Sprint
+    -- Review para pedir una FRESCA en el siguiente sprint. Sin este valor el
+    -- UPDATE viola el check y el avance de sprint revienta (deploy nunca llega).
+    ALTER TABLE human_decisions ADD CONSTRAINT chk_human_decisions_status CHECK (status IN ('pending','approved','rejected','superseded'));
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_backlog_items_priority') THEN
     ALTER TABLE backlog_items ADD CONSTRAINT chk_backlog_items_priority CHECK (priority IN ('low','medium','high','critical'));

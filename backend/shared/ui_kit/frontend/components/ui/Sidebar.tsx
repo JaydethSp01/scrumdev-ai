@@ -26,7 +26,7 @@ export function Sidebar({
         </span>
         <span className="truncate">{title}</span>
       </div>
-      <nav className="flex-1 space-y-1 px-3 py-3">
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-3">
         {items.map((it) => {
           const active = pathname === it.href || (it.href !== "/" && pathname?.startsWith(it.href));
           return (

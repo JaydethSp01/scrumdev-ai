@@ -38,6 +38,14 @@ THEMES: dict[str, dict] = {
     "farmacia":    {"primary": "#16a34a", "accent": "#0ea5e9", "heading": "Plus Jakarta Sans", "body": "Inter"},
     "taller":      {"primary": "#475569", "accent": "#f97316", "heading": "Space Grotesk", "body": "Inter"},
     "contabilidad":{"primary": "#059669", "accent": "#6366f1", "heading": "Space Grotesk", "body": "Inter"},
+    "manufactura": {"primary": "#475569", "accent": "#f59e0b", "heading": "Space Grotesk", "body": "Inter"},
+    "iglesia":     {"primary": "#7c3aed", "accent": "#f59e0b", "heading": "Cormorant Garamond", "body": "Inter"},
+    "universidad": {"primary": "#1d4ed8", "accent": "#0d9488", "heading": "Lora", "body": "Inter"},
+    "panaderia":   {"primary": "#d97706", "accent": "#dc2626", "heading": "Playfair Display", "body": "Karla"},
+    "billar":      {"primary": "#15803d", "accent": "#ca8a04", "heading": "Barlow Condensed", "body": "Barlow"},
+    "bar":         {"primary": "#9333ea", "accent": "#f59e0b", "heading": "Barlow Condensed", "body": "Barlow"},
+    "lavanderia":  {"primary": "#0284c7", "accent": "#06b6d4", "heading": "Plus Jakarta Sans", "body": "Inter"},
+    "tienda":      {"primary": "#4f46e5", "accent": "#f97316", "heading": "Plus Jakarta Sans", "body": "Inter"},
 }
 
 # alias de palabras clave -> sector canónico (para matchear visión en inglés/es)
@@ -55,9 +63,21 @@ _ALIASES = {
     "travel": "turismo", "viajes": "turismo", "agencia de viajes": "turismo",
     "events": "eventos", "boda": "eventos", "wedding": "eventos",
     "voluntarios": "ong", "nonprofit": "ong",
-    "mechanic": "taller", "mecanico": "taller", "lavanderia": "taller",
+    "mechanic": "taller", "mecanico": "taller",
+    "laundry": "lavanderia",
+    "iglesia": "iglesia", "church": "iglesia", "templo": "iglesia", "parroquia": "iglesia",
+    "culto": "iglesia", "ministerio": "iglesia",
+    "universidad": "universidad", "college": "universidad", "facultad": "universidad",
+    "panaderia": "panaderia", "bakery": "panaderia", "pasteleria": "panaderia",
+    "billar": "billar", "billiards": "billar", "pool": "billar",
+    "bar": "bar", "tomadero": "bar", "cantina": "bar", "discoteca": "bar", "licorera": "bar",
+    "tienda de barrio": "tienda", "minimercado": "tienda", "abarrotes": "tienda",
     "gastos": "contabilidad", "accounting": "contabilidad",
     "mascotas": "veterinaria", "pet": "veterinaria",
+    "produccion": "manufactura", "fabrica": "manufactura", "planta": "manufactura",
+    "peluqueria": "belleza", "barberia": "belleza", "salon": "belleza",
+    "colegio": "educacion", "universidad": "educacion", "academia": "educacion",
+    "propiedades": "inmobiliaria", "bienes raices": "inmobiliaria",
 }
 
 DEFAULT_THEME = {"primary": "#4f46e5", "accent": "#06b6d4", "heading": "Plus Jakarta Sans", "body": "Inter"}
@@ -67,16 +87,27 @@ _HEAD_W = "600;700;800"
 _BODY_W = "400;500;600;700"
 
 
+import re as _re
+
+
+def _wb(needle: str, hay: str) -> bool:
+    """Match por límite de palabra: evita 'bar' dentro de 'barrio' o 'dian' en
+    'estudiantes'. Para frases con espacio, usa substring normal."""
+    if " " in needle:
+        return needle in hay
+    return bool(_re.search(r"\b" + _re.escape(needle) + r"\b", hay))
+
+
 def pick_theme(text: str) -> dict:
     """Elige el tema del sector a partir de la visión/clasificación (texto libre)."""
     t = (text or "").lower()
-    # match directo por sector canónico
+    # match directo por sector canónico (límite de palabra)
     for sector, theme in THEMES.items():
-        if sector in t:
+        if _wb(sector, t):
             return {**theme, "sector": sector}
     # match por alias
     for alias, sector in _ALIASES.items():
-        if alias in t:
+        if _wb(alias, t):
             return {**THEMES[sector], "sector": sector}
     return {**DEFAULT_THEME, "sector": "default"}
 

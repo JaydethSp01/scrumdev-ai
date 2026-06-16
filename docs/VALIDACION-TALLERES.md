@@ -108,13 +108,43 @@ equivalente* (documentadas), no de comportamiento.
 
 ---
 
-## Lo que NO está (honesto) y por qué no rompe la visión
-1. **Temporal real** — sustituido por el orquestador propio (mismo comportamiento observable: estado durable, gates, reintentos). Free tier.
-2. **RabbitMQ/Redis activos en prod** — el bus tiene implementación RabbitMQ con fallback in-process; en el Space corre el fallback (un solo proceso, no lo necesita).
-3. **Jira activo** — connector completo y probado, **apagado a pedido del cliente** para centrar el demo en la plataforma.
-4. **Dominio propio** — subdominios https de Vercel/HF.
+## Gaps reales cerrados (jun 2026) — auditoría archivo-contra-código
 
-Ninguno de los 4 cambia lo que el PO ve o decide: el ciclo gateado, los agentes,
-el chat, el feedback constante y el despliegue supervisado funcionan de punta a
-punta — que es la visión declarada del taller ("acelerar el ciclo de vida del
+Auditoría senior de los 7 talleres. Se cerraron los 3 gaps de fidelidad que sí valían:
+
+1. **Temporal ahora es motor real (no fallback disfrazado).** Se eliminó el
+   `temporal_dispatcher.py` (código muerto que etiquetaba "temporal" un
+   `asyncio.create_task`). El path vivo `temporal_client.start_workflow` arranca
+   un workflow **durable real** (`client.start_workflow(SoftwareDeliveryWorkflow.run, …)`
+   + `await handle.result()`); `_execute_crew` reporta `via="temporal"` solo si
+   hubo handle. Cubierto por `tests/unit/test_temporal_path.py` (workflow real,
+   deshabilitado→None, broker caído→fallback honesto). Con `TEMPORAL_ENABLED=false`
+   (default) cae a HTTP directo, etiquetado honestamente.
+2. **CI/CD despliega de verdad.** `cd-prod.yml` / `cd-staging.yml` ya no tienen el
+   placeholder comentado: hacen deploy real → **HF Space** (backend+ML, git-sync vía
+   `HF_TOKEN`) + **Vercel** (deploy hook). Corren solo si el secret existe; si no,
+   emiten warning sin fallar.
+3. **Gate de cobertura.** `pytest-cov` agregado; `ci.yml` corre
+   `pytest --cov --cov-fail-under=20` (piso anti-regresión; cobertura real 23.6%).
+   Suite local: **56 passed**.
+
+## Equivalencias justificadas y aceptadas (NO son fallas)
+
+Decisiones deliberadas que cumplen la **visión** del taller con tecnología equivalente:
+
+| Texto del taller | En el proyecto | Por qué |
+|---|---|---|
+| Memoria ChromaDB | **pgvector + embeddings** (`ProjectMemory`, sentence-transformers) | RAG real; un Postgres ya en stack |
+| CrewAI como runtime | CrewAI implementado, pero **runtime default = Claude Code** | Costo ≈ 0 (plan, no API por token) + mejor calidad de código generado |
+| Frontend con `src/`, `lib/ws/`, `types/` | `app/` en raíz, WS en hook, tipos co-ubicados | Convención; funcionalmente idéntico |
+| Dockerfile por servicio | **Dockerfile genérico** (servicio por env var) | 1 imagen, menos mantenimiento |
+| Evento `created_at` | `occurred_at` | Cosmético |
+| Prod multi-contenedor docker-compose | **HF Space all-in-one** (Render free hacía OOM con el ML) | Free tier; el `docker-compose.full.yml` existe y es válido |
+
+## Diferido a pedido del cliente
+- **Jira** — connector completo y probado, **apagado** para centrar el demo en la plataforma. Se reactiva cableando `JIRA_*`.
+
+Ninguna de estas decisiones cambia lo que el PO ve o decide: el ciclo gateado, los
+agentes, el chat, el feedback constante y el despliegue supervisado funcionan de
+punta a punta — la visión declarada del taller ("acelerar el ciclo de vida del
 software manteniendo al humano dentro del proceso de decisión").

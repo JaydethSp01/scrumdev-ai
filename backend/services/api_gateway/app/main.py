@@ -434,6 +434,14 @@ async def use_template_gw(project_key: str, req: dict) -> dict:
     )
 
 
+@app.post("/templates/match")
+async def templates_match_gw(req: dict) -> dict:
+    # rankea plantillas para una visión SIN proyecto (preview pre-creación) -> LLM, timeout amplio
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/templates/match", req, timeout=45.0,
+    )
+
+
 # --- Gestion de tareas por el PO (CRUD estilo Azure DevOps) ---
 
 
@@ -784,6 +792,88 @@ async def gw_approve_gate(project_key: str, req: AdvancePayload) -> dict:
     return await _proxy_post(
         f"{settings.orchestrator_service_url}/projects/{project_key}/pipeline/approve-gate",
         req.model_dump(), timeout=60.0,
+    )
+
+
+@app.delete("/projects/{project_key}")
+async def gw_delete_project(project_key: str) -> dict:
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.delete(
+                f"{settings.orchestrator_service_url}/projects/{project_key}"
+            )
+            r.raise_for_status()
+            return r.json()
+    except httpx.HTTPStatusError as exc:
+        try:
+            detail = exc.response.json().get("detail", exc.response.text)
+        except Exception:
+            detail = exc.response.text
+        raise HTTPException(status_code=exc.response.status_code, detail=detail)
+    except Exception as exc:
+        logger.error("proxy_delete_failed", project=project_key, error=str(exc))
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/projects/{project_key}/pipeline/autorun")
+async def gw_pipeline_autorun(project_key: str, req: AdvancePayload) -> dict:
+    """CRÍTICO: inicia el ciclo de vida gateado. Sin este proxy, el botón del
+    chat daba 404 silencioso y la generación nunca arrancaba."""
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/pipeline/autorun",
+        req.model_dump(), timeout=60.0,
+    )
+
+
+@app.get("/projects/{project_key}/refinement")
+async def gw_refinement(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/refinement", timeout=30.0
+    )
+
+
+@app.get("/projects/{project_key}/planner")
+async def gw_planner(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/planner", timeout=30.0
+    )
+
+
+@app.get("/projects/{project_key}/agent-runs")
+async def gw_agent_runs(project_key: str) -> dict:
+    # Trazabilidad por agente (panel AgentTracePanel del frontend). Sin este
+    # proxy el gateway devolvía 404 y la trazabilidad llegaba vacía al usuario.
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/agent-runs", timeout=30.0
+    )
+
+
+@app.get("/projects/{project_key}/mockups")
+async def gw_mockups(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/mockups", timeout=60.0
+    )
+
+
+@app.get("/projects/{project_key}/code-summary")
+async def gw_code_summary(project_key: str) -> dict:
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/code-summary", timeout=30.0
+    )
+
+
+class FeedbackPayload(BaseModel):
+    title: str
+    description: str = ""
+    kind: str = "bug"
+
+
+@app.post("/projects/{project_key}/feedback")
+async def gw_feedback(project_key: str, req: FeedbackPayload) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/feedback",
+        req.model_dump(), timeout=30.0,
     )
 
 

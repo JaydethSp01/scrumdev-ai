@@ -5,7 +5,7 @@ import { MessageSquare, Workflow, Bot, Gavel } from "lucide-react";
 import type { AuthUser } from "@/app/auth/_lib";
 import ConversationCenter from "@/components/conversation/ConversationCenter";
 import LiveContextPanel from "@/components/conversation/LiveContextPanel";
-import AgentsLivePanel from "@/components/conversation/AgentsLivePanel";
+import AgentTracePanel from "@/components/conversation/AgentTracePanel";
 import DecisionsPanel from "@/components/DecisionsPanel";
 
 type Panel = "flujos" | "agentes" | "decisiones";
@@ -58,7 +58,7 @@ export default function ConversationalDashboard({
       {/* Derecha: contexto en vivo, solo-lectura (WebSocket) */}
       <aside className="w-[300px] xl:w-[340px] shrink-0 overflow-y-auto p-4 bg-neutral-50/50 dark:bg-neutral-900/30 hidden lg:block">
         {panel === "flujos" && <LiveContextPanel projectKey={projectKey} />}
-        {panel === "agentes" && <AgentsLivePanel projectKey={projectKey} />}
+        {panel === "agentes" && <AgentTracePanel projectKey={projectKey} />}
         {panel === "decisiones" && <DecisionsPanel projectKey={projectKey} user={user} />}
       </aside>
     </div>

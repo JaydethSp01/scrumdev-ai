@@ -8,6 +8,7 @@ pantalla en blanco. Lo pobre se reescribe con un prompt fuerte + ejemplo.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 
 from services.agent_runtime_service.app.runtime.claude_code_runtime import run_claude_code
@@ -25,18 +26,18 @@ export default function Dashboard() {
   return (
     <div className="p-8 space-y-8">
       <header><h1 className="text-3xl font-bold tracking-tight">Panel de control</h1>
-        <p className="text-neutral-500 mt-1">Resumen general</p></header>
+        <p className="text-slate-500 mt-1">Resumen general</p></header>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {data.metricas.map((m,i)=>(
-          <div key={i} className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-            <p className="text-sm text-neutral-500">{m.label}</p>
+          <div key={i} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm text-slate-500">{m.label}</p>
             <p className="text-3xl font-bold mt-1">{m.valor}</p></div>))}
       </div>
-      <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="font-semibold mb-4">Registros</h2>
-        <table className="w-full text-sm"><thead><tr className="text-left text-neutral-500">
+        <table className="w-full text-sm"><thead><tr className="text-left text-slate-500">
           <th className="py-2">Nombre</th><th className="py-2">Valor</th></tr></thead>
-          <tbody>{data.items.map((it)=>(<tr key={it.id} className="border-t border-neutral-100 dark:border-neutral-800">
+          <tbody>{data.items.map((it)=>(<tr key={it.id} className="border-t border-slate-100">
             <td className="py-3">{it.nombre}</td><td className="py-3">{it.valor}</td></tr>))}</tbody>
         </table>
       </div>
@@ -88,45 +89,53 @@ async def enforce_quality(
     """Mide cada page y regenera las pobres hasta el umbral. Devuelve (files, report)."""
     report: list[str] = []
     entities = ", ".join(classification.get("entities") or []) or "registros"
-    for f in files:
+    # Las páginas son INDEPENDIENTES -> regenerarlas en PARALELO (antes era en
+    # serie: N páginas × M rondas × ~30-90s = los "8-15 min"). Semáforo para no
+    # saturar el SDK.
+    sem = asyncio.Semaphore(4)
+    pages = [f for f in files if _is_page(f.get("path") or "")]
+
+    async def _process(f: dict) -> None:
         path = f.get("path") or ""
-        if not _is_page(path):
-            continue
-        for _round in range(max_rounds):
-            score, issues = page_quality(f.get("content") or "")
-            if score >= threshold:
-                break
-            logger.info("quality_low_regen", project=project_key, path=path,
-                        score=score, issues=issues)
-            prompt = (
-                f"Eres un dev frontend senior. Genera el archivo `{path}` de una app "
-                f"web (dominio: {vision[:200]}; entidades: {entities}).\n\n"
-                f"PROBLEMAS de la versión actual: {', '.join(issues)}.\n\n"
-                "REQUISITOS OBLIGATORIOS:\n"
-                "- Arranca CON datos mock inline (useState con array/objeto real, "
-                "NUNCA useState(null)). Datos realistas del dominio, 4-8 registros.\n"
-                "- Diseño profesional Tailwind: header con título, grid de tarjetas "
-                "(rounded-2xl, shadow, border), tabla/lista estilizada, responsive "
-                "(sm/md/lg), dark mode.\n"
-                "- 'use client' en la primera línea. Sin imports a componentes que "
-                "no existan (escribe el JSX inline o usa tags básicos estilizados).\n"
-                "- Mínimo 60 líneas, completo y ejecutable.\n\n"
-                f"EJEMPLO de la calidad esperada:\n{EXAMPLE_PAGE}\n\n"
-                f"Devuelve SOLO el código de {path}, sin ``` ni explicaciones."
-            )
-            try:
-                new = await run_claude_code(prompt, max_turns=1, kind="ui")
-                new = re.sub(r"^```[a-zA-Z]*\n", "", (new or "").strip())
-                new = re.sub(r"\n```$", "", new)
-                ns, _ = page_quality(new)
-                if new and ns > score and "export default" in new:
-                    f["content"] = new
-                    report.append(f"page regenerada: {path} ({score}->{ns})")
-                else:
+        async with sem:
+            for _round in range(max_rounds):
+                score, issues = page_quality(f.get("content") or "")
+                if score >= threshold:
                     break
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("quality_regen_failed", path=path, error=str(exc)[:120])
-                break
+                logger.info("quality_low_regen", project=project_key, path=path,
+                            score=score, issues=issues)
+                prompt = (
+                    f"Eres un dev frontend senior. Genera el archivo `{path}` de una app "
+                    f"web (dominio: {vision[:200]}; entidades: {entities}).\n\n"
+                    f"PROBLEMAS de la versión actual: {', '.join(issues)}.\n\n"
+                    "REQUISITOS OBLIGATORIOS:\n"
+                    "- Arranca CON datos mock inline (useState con array/objeto real, "
+                    "NUNCA useState(null)). Datos realistas del dominio, 4-8 registros.\n"
+                    "- Diseño profesional Tailwind MODO CLARO: header con título, grid de "
+                    "tarjetas (rounded-2xl, shadow, border), tabla/lista estilizada, "
+                    "responsive (sm/md/lg). PROHIBIDO clases `dark:`.\n"
+                    "- 'use client' en la primera línea. Sin imports a componentes que "
+                    "no existan (escribe el JSX inline o usa tags básicos estilizados).\n"
+                    "- Mínimo 60 líneas, completo y ejecutable.\n\n"
+                    f"EJEMPLO de la calidad esperada:\n{EXAMPLE_PAGE}\n\n"
+                    f"Devuelve SOLO el código de {path}, sin ``` ni explicaciones."
+                )
+                try:
+                    new = await run_claude_code(prompt, max_turns=1, kind="ui")
+                    new = re.sub(r"^```[a-zA-Z]*\n", "", (new or "").strip())
+                    new = re.sub(r"\n```$", "", new)
+                    ns, _ = page_quality(new)
+                    if new and ns > score and "export default" in new:
+                        f["content"] = new
+                        report.append(f"page regenerada: {path} ({score}->{ns})")
+                    else:
+                        break
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("quality_regen_failed", path=path, error=str(exc)[:120])
+                    break
+
+    if pages:
+        await asyncio.gather(*[_process(f) for f in pages], return_exceptions=True)
     if not report:
         report.append("calidad OK (todas las páginas pasan el umbral)")
     return files, report

@@ -115,16 +115,7 @@ export default function RefinementPanel({ projectKey }: { projectKey: string }) 
                 Diseño de referencia basado en la plantilla <b>{mockup.template.name}</b>
                 {typeof mockup.template.confidence === "number" && ` (match ${mockup.template.confidence}%)`}.
               </p>
-              {mockup.template.preview_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={mockup.template.preview_url}
-                  alt={`Mockup ${mockup.template.name}`}
-                  className="w-full max-w-2xl rounded-xl border border-neutral-200 dark:border-neutral-800"
-                />
-              ) : (
-                <WireframePlaceholder label={mockup.template.name} />
-              )}
+              <MockupImage src={mockup.template.preview_url} label={mockup.template.name} />
             </>
           ) : (
             <>
@@ -204,6 +195,23 @@ export default function RefinementPanel({ projectKey }: { projectKey: string }) 
         {fbMsg && <p className="text-xs text-emerald-600 mt-2">{fbMsg}</p>}
       </div>
     </div>
+  );
+}
+
+// Imagen de mockup con fallback: si no hay URL o la imagen falla al cargar
+// (p.ej. el preview.png de la plantilla no existe en el repo → 404), muestra el
+// wireframe en vez de un card en blanco.
+function MockupImage({ src, label }: { src?: string; label: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) return <WireframePlaceholder label={label} />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={`Mockup ${label}`}
+      onError={() => setFailed(true)}
+      className="w-full max-w-2xl rounded-xl border border-neutral-200 dark:border-neutral-800"
+    />
   );
 }
 

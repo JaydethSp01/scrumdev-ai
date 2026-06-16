@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import asyncio
 import httpx
 
 from shared.config.settings import settings
@@ -229,25 +230,39 @@ async def deploy_split(project_key: str, files: list[dict]) -> dict:
     backend_url = None
     backend_res = None
 
-    if bp.needs_backend:
+    # PARALELO: la URL del backend (Render) es PREDECIBLE, así que el frontend NO
+    # necesita esperar a que el backend termine — solo su URL. Lanzamos la cadena
+    # backend (Neon -> Render) y el frontend (Vercel) en paralelo -> el deploy del
+    # backend sale de la ruta crítica (recorta ~30-60s del wall-clock).
+    async def _backend_chain() -> dict | None:
+        nonlocal db_url
         api_repo = f"{base}{bp.tier('backend').repo_suffix}"
-        backend_url = render_url_for(api_repo)
-        # 1. Neon
         neon = await _provision_neon(conn, base)
         if neon and neon.get("ok"):
             db_url = neon.get("connection_uri")
         result["neon"] = {"ok": bool(db_url)}
-        # 2. Backend -> Render (con DATABASE_URL; CORS abierto, se afina luego)
-        backend_res = await _deploy_backend(
+        return await _deploy_backend(
             conn, owner, api_repo, buckets.get("backend", []), db_url, None,
         )
-        result["tiers"]["backend"] = backend_res
 
-    # 3. Frontend -> Vercel (con NEXT_PUBLIC_API_URL = backend ya conocido)
-    frontend_res = await _deploy_frontend(
-        conn, owner, web_repo, buckets.get("frontend", []),
-        backend_url if bp.needs_backend else None,
-    )
+    if bp.needs_backend:
+        backend_url = render_url_for(f"{base}{bp.tier('backend').repo_suffix}")
+        # return_exceptions: un fallo en un tier NO debe tumbar al otro (objetivo
+        # "tiers independientes"). Capturamos y degradamos en vez de propagar.
+        backend_res, frontend_res = await asyncio.gather(
+            _backend_chain(),
+            _deploy_frontend(conn, owner, web_repo, buckets.get("frontend", []), backend_url),
+            return_exceptions=True,
+        )
+        if isinstance(backend_res, BaseException):
+            backend_res = {"tier": "backend", "error": "backend_failed", "detail": str(backend_res)[:200]}
+        if isinstance(frontend_res, BaseException):
+            frontend_res = {"tier": "frontend", "error": "frontend_failed", "detail": str(frontend_res)[:200]}
+        result["tiers"]["backend"] = backend_res
+    else:
+        frontend_res = await _deploy_frontend(
+            conn, owner, web_repo, buckets.get("frontend", []), None,
+        )
     result["tiers"]["frontend"] = frontend_res
 
     # 4. Afinar CORS del backend con la URL real del frontend (best-effort)

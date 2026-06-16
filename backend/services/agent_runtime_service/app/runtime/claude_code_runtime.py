@@ -9,6 +9,7 @@ Requisitos:
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Optional
 
@@ -84,10 +85,17 @@ async def run_claude_code(
         last = None
         for attempt in range(3):  # Claude es obligatorio para UI
             try:
-                return await _run_claude_sdk(prompt, system_prompt, max_turns, image_paths)
+                # timeout duro: si el SDK se cuelga, no dejar la corrutina (ni el
+                # build entero) colgada indefinidamente -> aborta y reintenta.
+                return await asyncio.wait_for(
+                    _run_claude_sdk(prompt, system_prompt, max_turns, image_paths),
+                    timeout=180,
+                )
             except BaseException as exc:  # noqa: BLE001
                 last = exc
                 logger.warning("claude_ui_retry", attempt=attempt, error=str(exc)[:160])
+                if attempt < 2:  # backoff exponencial: no martillear un SDK rate-limited
+                    await asyncio.sleep(2 ** attempt)
         # agotados los reintentos: usar OpenAI como ÚLTIMO recurso (mejor algo que nada)
         logger.error("claude_ui_exhausted_openai_fallback", error=str(last)[:160])
         return await _run_via_api(prompt, system_prompt, image_paths, "openai")

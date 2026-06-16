@@ -2,7 +2,7 @@
 # CD STAGING
 # Trigger: merge a `develop` o tags `staging-*`
 # Acción:   build & push de imágenes a GHCR con tag `:staging`
-# Deploy:   step TODO comentado (SSH al VPS de staging)
+# Deploy:   REAL -> HF Space staging (backend+ML) + Vercel staging hook (frontend)
 # =============================================================================
 name: CD Staging
 
@@ -87,28 +87,33 @@ jobs:
           cache-to:   type=gha,scope=frontend,mode=max
 
       # -----------------------------------------------------------------------
-      # TODO: Deploy real al VPS de staging.
-      # Requiere los siguientes secrets en el repo:
-      #   STAGING_HOST       (ip / hostname del VPS)
-      #   STAGING_USER       (usuario SSH)
-      #   STAGING_SSH_KEY    (clave privada SSH, contenido completo)
-      #   STAGING_DEPLOY_PATH (ruta absoluta donde vive el repo en el VPS)
-      #
-      # Descomentar cuando estén configurados:
-      #
-      # - name: Deploy via SSH
-      #   uses: appleboy/ssh-action@v1.2.0
-      #   with:
-      #     host:     ${{ secrets.STAGING_HOST }}
-      #     username: ${{ secrets.STAGING_USER }}
-      #     key:      ${{ secrets.STAGING_SSH_KEY }}
-      #     script: |
-      #       cd ${{ secrets.STAGING_DEPLOY_PATH }}
-      #       export IMAGE_TAG=staging
-      #       export BACKEND_IMAGE=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}
-      #       export FRONTEND_IMAGE=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
-      #       bash scripts/deploy.sh staging
+      # DEPLOY REAL a staging. Mismo mecanismo que prod pero al Space de staging.
+      #   Backend+ML -> HF Space (git-sync). Secret HF_TOKEN_STAGING (o HF_TOKEN);
+      #                 var HF_SPACE_ID_STAGING (default jaydethsp01/scrumdevai-api-staging).
+      #   Frontend   -> Vercel preview hook. Secret VERCEL_STAGING_HOOK_URL.
+      # Corren SOLO si su secret existe; si no, se omiten sin fallar.
       # -----------------------------------------------------------------------
-      - name: Deploy placeholder
+      - name: Deploy backend+ML a HF Space (staging)
+        if: ${{ secrets.HF_TOKEN_STAGING != '' || secrets.HF_TOKEN != '' }}
+        env:
+          HF_TOKEN:    ${{ secrets.HF_TOKEN_STAGING || secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ vars.HF_SPACE_ID_STAGING || 'jaydethsp01/scrumdevai-api-staging' }}
         run: |
-          echo "Imagenes pusheadas. Configura los secrets de SSH y descomenta el step de deploy."
+          set -euo pipefail
+          echo "Desplegando staging -> $HF_SPACE_ID"
+          git config user.email "ci@scrumdev.ai"
+          git config user.name  "scrumdev-ci"
+          git push --force "https://ci:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE_ID}.git" \
+            HEAD:refs/heads/main
+
+      - name: Deploy frontend a Vercel (staging hook)
+        if: ${{ secrets.VERCEL_STAGING_HOOK_URL != '' }}
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "${{ secrets.VERCEL_STAGING_HOOK_URL }}")
+          echo "Vercel staging hook -> HTTP $code"
+          test "$code" -ge 200 && test "$code" -lt 300
+
+      - name: Aviso si no hay secrets de deploy
+        if: ${{ secrets.HF_TOKEN_STAGING == '' && secrets.HF_TOKEN == '' && secrets.VERCEL_STAGING_HOOK_URL == '' }}
+        run: echo "::warning::Imágenes pusheadas pero SIN deploy automático a staging (faltan secrets HF_TOKEN/VERCEL_STAGING_HOOK_URL)."

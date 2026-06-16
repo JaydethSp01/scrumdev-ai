@@ -31,6 +31,30 @@ DEV_SYSTEM = (
 )
 
 
+def _normalize_escaped_content(files: list) -> None:
+    """Repara archivos cuyo `content` quedó con escapes LITERALES (`\\n`, `\\t`,
+    `\\"`) por doble-escape del LLM: todo el archivo en una sola línea física con
+    `\\n` literal. Conservador: solo si casi no hay saltos reales pero sí muchos
+    `\\n` literales (no toca código legítimo que use `\\n` dentro de strings)."""
+    for f in files:
+        if not isinstance(f, dict):
+            continue
+        c = f.get("content")
+        if not isinstance(c, str) or "\\n" not in c:
+            continue
+        real_nl = c.count("\n")
+        lit_nl = c.count("\\n")
+        if lit_nl < 2 or real_nl > lit_nl:
+            continue
+        f["content"] = (
+            c.replace("\\r\\n", "\n")
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .replace('\\"', '"')
+            .replace("\\'", "'")
+        )
+
+
 def _extract_json(raw: str) -> Any:
     cleaned = raw.strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
@@ -86,7 +110,7 @@ async def generate_code_for_story(
         "    {\n"
         '      "path": "relative/path/file.py",\n'
         '      "language": "python|typescript|javascript|sql|yaml|json|markdown|bash",\n'
-        '      "content": "<codigo real con \\n escapado>"\n'
+        '      "content": "<codigo real; usa saltos de linea normales del JSON, NO dobles-escapes>"\n'
         "    }\n"
         "  ],\n"
         '  "follow_up": "Notas para QA o siguientes pasos"\n'
@@ -100,6 +124,7 @@ async def generate_code_for_story(
     files = data.get("files", [])
     if not isinstance(files, list):
         raise ValueError("files must be a list")
+    _normalize_escaped_content(files)
     logger.info(
         "code_generated", project=project_key, story=story_title, files=len(files)
     )

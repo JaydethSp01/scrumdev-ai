@@ -22,7 +22,7 @@ type Gate = {
     dod?: { done: boolean };
     planner?: { ok: boolean; blockers: number };
     needs_nfr_form?: boolean;
-    staging?: { state?: string; url?: string; api_url?: string; error?: string };
+    staging?: { state?: string; url?: string; api_url?: string; error?: string; phase_label?: string; phase_pct?: number };
   };
 };
 type Msg = { id: number; role: "human" | "agent"; content: string; gate?: Gate };
@@ -616,11 +616,22 @@ function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExp
               )}
               <span className="text-[11px] text-emerald-600">Valídala y luego aprueba producción.</span>
             </div>
-          ) : r.staging.state === "building" ? (
-            <p className="text-xs text-neutral-500 inline-flex items-center gap-1.5">
-              <Loader2 size={12} className="animate-spin" /> Publicando a staging… la URL aparecerá aquí.
-              <span className="text-neutral-400">(no puedes aprobar producción hasta tener la URL)</span>
-            </p>
+          ) : r.staging.state === "building" || r.staging.state === "verifying" || r.staging.state === "validando_e2e" ? (
+            <div>
+              <p className="text-xs text-neutral-600 dark:text-neutral-300 inline-flex items-center gap-1.5 font-medium">
+                <Loader2 size={12} className="animate-spin text-brand" />
+                {r.staging.phase_label || "Publicando a staging… la URL aparecerá aquí."}
+              </p>
+              {typeof r.staging.phase_pct === "number" && (
+                <div className="mt-2 h-1.5 w-full rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
+                  <div className="h-full bg-brand transition-all duration-500"
+                    style={{ width: `${Math.max(5, Math.min(100, r.staging.phase_pct))}%` }} />
+                </div>
+              )}
+              <p className="text-[11px] text-neutral-400 mt-1.5">
+                El agente validador sube a Git solo cuando el build pasa sin errores. No puedes aprobar producción hasta tener la URL.
+              </p>
+            </div>
           ) : (
             <div>
               <p className="text-xs text-red-600 font-medium">

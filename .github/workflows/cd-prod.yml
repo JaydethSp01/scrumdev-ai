@@ -2,7 +2,7 @@
 # CD PROD
 # Trigger: tags semver `v*.*.*`
 # Acción:  build & push de imágenes con tag de versión + `latest` + GitHub Release
-# Deploy:  step TODO comentado (SSH al VPS de producción)
+# Deploy:  REAL -> Hugging Face Space (backend+ML, git-sync) + Vercel hook (frontend)
 # =============================================================================
 name: CD Prod
 
@@ -129,24 +129,39 @@ jobs:
             ```
 
       # -----------------------------------------------------------------------
-      # TODO: Deploy real al VPS de prod.
-      # Secrets requeridos:
-      #   PROD_HOST, PROD_USER, PROD_SSH_KEY, PROD_DEPLOY_PATH
-      #
-      # - name: Deploy via SSH
-      #   uses: appleboy/ssh-action@v1.2.0
-      #   with:
-      #     host:     ${{ secrets.PROD_HOST }}
-      #     username: ${{ secrets.PROD_USER }}
-      #     key:      ${{ secrets.PROD_SSH_KEY }}
-      #     script: |
-      #       cd ${{ secrets.PROD_DEPLOY_PATH }}
-      #       export IMAGE_TAG=${{ steps.resolve-version.outputs.version }}
-      #       export BACKEND_IMAGE=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}
-      #       export FRONTEND_IMAGE=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
-      #       bash scripts/deploy.sh prod
+      # DEPLOY REAL a producción. Mecanismo real del proyecto:
+      #   - Backend + ML  -> Hugging Face Space (git-sync). Secret: HF_TOKEN
+      #                      (opcional var HF_SPACE_ID, default jaydethsp01/scrumdevai-api).
+      #   - Frontend      -> Vercel (deploy hook). Secret: VERCEL_DEPLOY_HOOK_URL
+      # Los steps corren SOLO si su secret está configurado; si no, se omiten
+      # limpiamente (no fallan), para no romper el pipeline en forks/sin secrets.
       # -----------------------------------------------------------------------
-      - name: Deploy placeholder
+      - name: Deploy backend + ML al Hugging Face Space
+        if: ${{ secrets.HF_TOKEN != '' }}
+        env:
+          HF_TOKEN:    ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ vars.HF_SPACE_ID || 'jaydethsp01/scrumdevai-api' }}
         run: |
-          echo "Release ${{ steps.resolve-version.outputs.version }} publicado."
-          echo "Configura los secrets PROD_* y descomenta el step de deploy via SSH."
+          set -euo pipefail
+          echo "Desplegando $HF_SPACE_ID (release ${{ steps.resolve-version.outputs.version }})"
+          git config user.email "ci@scrumdev.ai"
+          git config user.name  "scrumdev-ci"
+          # push del árbol actual al remoto del Space -> HF rebuildea automáticamente
+          git push --force "https://ci:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE_ID}.git" \
+            HEAD:refs/heads/main
+          echo "Backend desplegado al Space; HF inicia el build."
+
+      - name: Deploy frontend a Vercel (deploy hook)
+        if: ${{ secrets.VERCEL_DEPLOY_HOOK_URL != '' }}
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/vercel_hook.json -w "%{http_code}" \
+            -X POST "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}")
+          echo "Vercel deploy hook -> HTTP $code"; cat /tmp/vercel_hook.json || true
+          test "$code" -ge 200 && test "$code" -lt 300
+
+      - name: Aviso si no hay secrets de deploy
+        if: ${{ secrets.HF_TOKEN == '' && secrets.VERCEL_DEPLOY_HOOK_URL == '' }}
+        run: |
+          echo "::warning::Release ${{ steps.resolve-version.outputs.version }} publicado pero SIN deploy automático."
+          echo "Configura HF_TOKEN (backend) y/o VERCEL_DEPLOY_HOOK_URL (frontend) en Settings > Secrets."

@@ -7,7 +7,7 @@ export type Column<T> = {
   render?: (row: T) => React.ReactNode;
 };
 
-/** Tabla estilizada: thead bg-neutral-50, filas con hover, render custom por celda
+/** Tabla estilizada: thead bg-slate-50, filas con hover, render custom por celda
  *  (para badges de color, formato de moneda, etc.). Estado vacío amable. */
 export function DataTable<T extends Record<string, any>>({
   columns,
@@ -19,16 +19,16 @@ export function DataTable<T extends Record<string, any>>({
   empty?: string;
 }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-neutral-50 dark:bg-neutral-800/50">
+          <thead className="bg-slate-50">
             <tr>
               {columns.map((c) => (
                 <th
                   key={String(c.key)}
                   className={cn(
-                    "px-4 py-3 font-semibold text-neutral-500",
+                    "px-4 py-3 font-semibold text-slate-500",
                     c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : "text-left"
                   )}
                 >
@@ -40,7 +40,7 @@ export function DataTable<T extends Record<string, any>>({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="px-4 py-10 text-center text-neutral-500">
+                <td colSpan={columns.length} className="px-4 py-10 text-center text-slate-500">
                   {empty}
                 </td>
               </tr>
@@ -48,7 +48,7 @@ export function DataTable<T extends Record<string, any>>({
               rows.map((row, i) => (
                 <tr
                   key={i}
-                  className="border-t border-neutral-100 transition hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-800/40"
+                  className="border-t border-slate-100 transition hover:bg-slate-50"
                 >
                   {columns.map((c) => (
                     <td

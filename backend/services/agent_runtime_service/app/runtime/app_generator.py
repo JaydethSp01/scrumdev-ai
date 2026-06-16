@@ -115,47 +115,35 @@ TODO bajo `frontend/`. Sin backend ni DB.
 # datos quiere app-shell con sidebar; un landing quiere hero + secciones. Usar
 # el brief equivocado = layout feo. Por eso es consciente del stack. ──────────
 _DESIGN_BRIEF_APP = (
-    "=================== BRIEF DE DISEÑO (calidad agencia, OBLIGATORIO) ===================\n"
-    "Construye una UI de PRODUCTO que compita con Linear/Vercel/Stripe. NUNCA HTML plano.\n\n"
-    "**UI-KIT YA DISPONIBLE (úsalo, NO reinventes estos componentes):**\n"
-    "El proyecto YA incluye un design-system pulido en `@/components/ui/*` + `@/lib/cn`.\n"
-    "COMPÓN tus páginas con él (importa y usa, no copies su estilo a mano):\n"
-    "  • `import { AppShell } from '@/components/ui/AppShell'` — envuelve CADA página:\n"
-    "    `<AppShell items={NAV} title=\"Marca\" action={<Button>Nuevo</Button>}>…</AppShell>`\n"
-    "    NAV es `[{href:'/',label:'Inicio'}, {href:'/productos',label:'Productos'}, …]`.\n"
-    "    Trae sidebar fijo con activo resaltado + header + drawer móvil. NO hagas tu propio shell.\n"
-    "  • `import { MetricCard, Card } from '@/components/ui/Card'` — MetricCard: {label,value,hint,delta,icon}.\n"
-    "  • `import { DataTable } from '@/components/ui/DataTable'` — columns:[{key,header,align,render}], rows.\n"
-    "    Usa `render` para badges/moneda: `render:(r)=> <Badge tone={r.ok?'success':'warning'}>{r.estado}</Badge>`.\n"
-    "  • `import { Badge } from '@/components/ui/Badge'` — tone: success|warning|danger|info|brand|neutral. NADA de emojis.\n"
-    "  • `import { Button } from '@/components/ui/Button'` — variant: primary|secondary|ghost|danger.\n"
-    "  • `import { PageHeader } from '@/components/ui/PageHeader'` — {title,subtitle,action}.\n"
-    "  • `import { EmptyState } from '@/components/ui/EmptyState'` — estados vacíos amables.\n"
-    "  • Iconos: `lucide-react`. El color de marca es la clase `brand` (bg-brand, text-brand) — YA en tailwind.\n"
-    "El dashboard (`app/page.tsx`): <AppShell> + <PageHeader> + grid de <MetricCard> + <Card><DataTable/></Card>.\n"
-    "Cada entidad: <AppShell> + <PageHeader action=Nuevo> + <DataTable> con badges. Coherencia TOTAL entre páginas.\n\n"
-    "SISTEMA DE DISEÑO (aplícalo idéntico en TODAS las páginas, coherencia total):\n"
-    "• LAYOUT: app shell con SIDEBAR fijo (w-64) + área principal. El sidebar lista "
-    "TODAS las secciones con su icono lucide; resalta la activa (bg-brand/10 text-brand, "
-    "usePathname). Arriba un HEADER (h-16) con título de sección + acción primaria a la derecha.\n"
-    "• COLOR: define UNA paleta de marca coherente con el dominio (un color primario fuerte "
-    "+ neutrales). Fondo de la app gris muy claro (bg-neutral-50), tarjetas blancas. "
-    "CONTRASTE AA SIEMPRE: texto principal text-neutral-900, secundario text-neutral-500. "
-    "Soporta dark mode con `dark:` (dark:bg-neutral-950, dark:text-neutral-100). "
-    "PROHIBIDO texto gris claro sobre fondo oscuro (ilegible).\n"
-    "• TARJETAS: rounded-2xl, border border-neutral-200, bg-white, shadow-sm, p-5/p-6, "
-    "hover:shadow-md transition. Las métricas: label pequeño text-neutral-500 + número grande "
-    "text-3xl font-bold.\n"
-    "• TABLAS: thead con bg-neutral-50 y th text-left font-semibold text-neutral-500; "
-    "filas con border-t y hover:bg-neutral-50; badges de estado con color (verde/amarillo/rojo).\n"
-    "• TIPOGRAFÍA: títulos text-2xl/3xl font-bold tracking-tight; jerarquía clara; espaciado "
-    "generoso (space-y-6, gap-4/6). Iconos lucide-react en todo (no emojis).\n"
-    "• RESPONSIVE de verdad: grids con grid-cols-1 sm:grid-cols-2 lg:grid-cols-3/4; en móvil "
-    "el sidebar colapsa. Nada de anchos fijos que desborden.\n"
-    "• FEEDBACK: botones con estados hover/active; formularios con labels y validación; "
-    "confirmación antes de borrar; estados vacíos con mensaje amable (no pantallas en blanco).\n"
-    "El DASHBOARD de entrada debe verse impactante: fila de tarjetas-métrica + tabla/lista "
-    "principal con datos. Cada página de entidad: header + tabla CRUD estilizada + botón 'Nuevo'.\n"
+    "=================== BRIEF DE DISEÑO (nivel mercado 2026, OBLIGATORIO) ===================\n"
+    "Construye una UI de PRODUCTO que compita con Linear/Vercel/Stripe/Pipedrive. NUNCA HTML plano.\n\n"
+    "**UI-KIT PREMIUM YA DISPONIBLE en `@/components/ui/*` (impórtalos por nombre, NO los recrees):**\n"
+    "El layout YA envuelve todo en el app-shell (sidebar branded + header + auth) — TÚ solo escribes el\n"
+    "contenido de cada `app/**/page.tsx`. NO hagas tu propio shell/sidebar/layout.\n"
+    "  • `Hero` {title,subtitle,action} — banner gradiente de marca. Úsalo arriba del dashboard (app/page.tsx).\n"
+    "  • `StatCard` {label,value,icon,trend:{value,positive}} — KPI con chip de icono y pill de tendencia.\n"
+    "  • `ChartCard` {title,subtitle,data:[{label,value}]} — gráfico de barras.\n"
+    "  • `Card` {className,children}. `Badge` {tone:success|warning|danger|info|brand|neutral}. `Avatar` {name}.\n"
+    "  • `DataTable` {columns:[{key,header,align,render}],rows,empty} — usa render para Avatar/Badge/moneda.\n"
+    "  • `PageHeader` {title,subtitle,action}. `Button` {variant:primary|secondary|ghost|danger}. `EmptyState`.\n"
+    "  • **MÓDULO ESTRELLA del sector** (impórtalo y dale su PROPIA página, p.ej. app/pipeline o app/pos):\n"
+    "      CRM→`KanbanBoard`, restaurante/retail→`POSBoard`, salud→`AppointmentScheduler`,\n"
+    "      ecommerce→`CheckoutCart`, logística→`LiveMap`. Funcionan sin props (traen datos demo).\n"
+    "  • Iconos SOLO de `lucide-react` (NUNCA emojis). Color de marca = clase `brand` (bg-brand/text-brand/from-brand-dark).\n\n"
+    "ESTRUCTURA premium:\n"
+    "  • `app/page.tsx` (dashboard): `<Hero>` + grid de 4 `<StatCard>` + fila con `<ChartCard className='lg:col-span-2'>`\n"
+    "    y un `<Card>` de desglose (barras `bg-brand`) + un `<Card className='!p-0'>` con lista/`DataTable` reciente.\n"
+    "  • Cada entidad: `<PageHeader action={<Button>+ Nuevo</Button>}>` + `<Card className='!p-0'><DataTable/></Card>`\n"
+    "    con columna de acciones (Button ghost 'Editar' + danger 'Eliminar'). Botón Nuevo → router.push('/<ent>/create').\n\n"
+    "REGLAS DE ESTILO (duras):\n"
+    "• **MODO CLARO SIEMPRE. PROHIBIDO usar clases `dark:`** (rompe el diseño con SO en oscuro).\n"
+    "  Fondos `bg-white`/`bg-slate-50`, texto `text-slate-900` (títulos) y `text-slate-500` (secundario). Contraste AA.\n"
+    "• Color SOLO vía clase `brand` (bg-brand, text-brand, border-brand, from-brand-dark, to-brand). NO hardcodees azul/rosa.\n"
+    "• Tarjetas `rounded-2xl border border-slate-200 bg-white shadow-sm hover:shadow-md transition`. Spacing generoso (space-y-6, gap-4/6).\n"
+    "• `cursor-pointer` en todo clickeable; transiciones 150-300ms; títulos text-2xl/3xl font-bold tracking-tight.\n"
+    "• Responsive real: grids grid-cols-1 sm:grid-cols-2 lg:grid-cols-4. Sin anchos fijos que desborden.\n"
+    "• DATOS inline (useState con MOCK de 4-8 registros reales del dominio); los números de las StatCard cuadran con las listas.\n"
+    "  Los botones Editar/Eliminar son <Button> con onClick (no enlaces a rutas inexistentes).\n"
     "====================================================================================="
 )
 
@@ -367,16 +355,32 @@ def _sector_design_note(classification: dict, vision: str) -> str:
     except Exception:
         th = {"primary": "#4f46e5", "accent": "#06b6d4", "heading": "Plus Jakarta Sans",
               "body": "Inter", "sector": "default"}
+    # módulo estrella sugerido por sector (paridad con el producto líder)
+    haylow = hay.lower()
+    star = ""
+    if any(k in haylow for k in ("crm", "venta", "lead", "pipeline", "oportunidad")):
+        star = "KanbanBoard (pipeline de deals) en una página /pipeline"
+    elif any(k in haylow for k in ("restaurante", "comida", "pedido", "menu", "pos", "retail", "inventario", "tienda física")):
+        star = "POSBoard (punto de venta) en una página /pos"
+    elif any(k in haylow for k in ("salud", "clinic", "cita", "medic", "paciente", "consultorio")):
+        star = "AppointmentScheduler (agendador de citas) en una página /agenda"
+    elif any(k in haylow for k in ("ecommerce", "tienda", "carrito", "checkout", "moda", "shop")):
+        star = "CheckoutCart (carrito y pago) en una página /checkout"
+    elif any(k in haylow for k in ("logist", "flota", "envio", "ruta", "tracking", "entrega")):
+        star = "LiveMap (mapa en vivo de flota) en una página /mapa"
+    star_line = (f"- MÓDULO ESTRELLA del sector: incluye **{star}** (impórtalo de @/components/ui, "
+                 "funciona sin props). Es el diferenciador que iguala al producto líder.\n") if star else ""
     return (
         "### DISEÑO DEL SECTOR (coherencia visual 1A):\n"
         f"- Sector: **{th['sector']}**. Color de marca (clase `brand`): {th['primary']}; "
         f"acento: {th['accent']}. Tipografía: títulos **{th['heading']}**, cuerpo **{th['body']}** "
         "(ya cargadas vía globals.css — NO las re-importes).\n"
+        f"{star_line}"
         "- Usa `bg-brand`/`text-brand`/`border-brand` para acciones y realces; badges de estado con "
         "tonos semánticos (success/warning/danger). Tarjetas `rounded-2xl border shadow-sm`.\n"
         "- REGLAS PRO (skill ui-ux-pro-max): NADA de emojis como iconos (usa lucide-react); "
         "`cursor-pointer` en todo clickeable; transiciones 150-300ms; contraste de texto AA "
-        "(slate-900 títulos, slate-600 secundario); foco visible. NO uses modo oscuro.\n"
+        "(slate-900 títulos, slate-600 secundario); foco visible. **PROHIBIDO modo oscuro / clases dark:**.\n"
     )
 
 
@@ -589,6 +593,61 @@ async def _fetch_blueprint_and_exemplars(classification: dict, vision: str) -> t
     return blueprint, exemplars, blueprint["stack"]
 
 
+def _module_of(path: str) -> str:
+    """Clasifica un archivo en su módulo/componente (Adam E)."""
+    p = (path or "").lower()
+    if "test" in p or ".spec." in p or "__tests__" in p:
+        return "tests"
+    if p.startswith("backend/") or p.endswith(".py"):
+        return "backend"
+    if p.startswith("frontend/") or p.endswith((".tsx", ".ts", ".jsx", ".js", ".css")):
+        return "frontend"
+    return "servicios"
+
+
+def _module_summary(files: list[dict]) -> dict:
+    out = {"backend": 0, "frontend": 0, "tests": 0, "servicios": 0}
+    for f in files:
+        if isinstance(f, dict):
+            out[_module_of(f.get("path", ""))] += 1
+    return out
+
+
+async def _generate_tests_module(
+    files: list[dict], backlog: list[dict], stack_id: str, project_key: str
+) -> list[dict]:
+    """CICLO del módulo TESTS (Adam E/#12): ciclo de generación PROPIO para las
+    pruebas, con el código ya generado como contexto. unit + integración + test
+    cases derivados de los criterios de aceptación. Best-effort."""
+    code_paths = [f.get("path") for f in files if isinstance(f, dict) and f.get("path")]
+    backend_paths = [p for p in code_paths if _module_of(p) == "backend"]
+    if not backend_paths:
+        return []  # sin backend no hay endpoints que probar (landing estática)
+    crit = "\n".join(
+        f"- {b.get('story_key','S?')}: {b.get('title','')}" for b in backlog[:12]
+    )
+    prompt = (
+        f"Proyecto **{project_key}**. Genera el MÓDULO DE PRUEBAS para el código "
+        "ya generado (ciclo independiente de tests).\n\n"
+        f"Archivos backend existentes:\n" + "\n".join(backend_paths[:40]) + "\n\n"
+        f"Historias y criterios a cubrir:\n{crit}\n\n"
+        "Genera pruebas con pytest para los endpoints FastAPI (httpx/TestClient): "
+        "1 archivo `backend/tests/test_<entidad>.py` por entidad con casos de éxito y "
+        "validación, derivados de los criterios. Incluye `backend/tests/__init__.py` y "
+        "`backend/tests/conftest.py`. Cada archivo completo y ejecutable.\n\n"
+        'Responde SOLO JSON: {"files":[{"path":"backend/tests/test_x.py","content":"..."}]}'
+    )
+    raw = await run_claude_code(prompt, system_prompt=APP_GENERATOR_SYSTEM, max_turns=1, kind="code")
+    data = _extract_json(raw)
+    new = data.get("files", []) if isinstance(data, dict) else []
+    existing = {f.get("path") for f in files if isinstance(f, dict)}
+    return [
+        f for f in new
+        if isinstance(f, dict) and f.get("path") and f["path"] not in existing
+        and _module_of(f["path"]) == "tests"
+    ]
+
+
 async def generate_full_app(
     project_key: str,
     vision: str,
@@ -730,10 +789,23 @@ async def generate_full_app(
     except Exception as exc:  # noqa: BLE001
         logger.warning("design_review_skipped", project=project_key, error=str(exc)[:160])
 
+    # CICLO DE MÓDULO: TESTS (Adam E) — ciclo de generación propio, después de que
+    # el código (backend/frontend) está listo. Best-effort: nunca rompe el build.
+    try:
+        test_files = await _generate_tests_module(files, backlog, stack_id, project_key)
+        if test_files:
+            files = files + test_files
+            logger.info("tests_module_generated", project=project_key, tests=len(test_files))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("tests_module_skipped", project=project_key, error=str(exc)[:160])
+
     data["files"] = files
     data["stack"] = stack_id
     data["classification"] = classification
     data["blueprint"] = blueprint
+    # Resumen por módulo/componente (Adam E): backend / frontend / tests / servicios
+    data["modules"] = _module_summary(files)
+    logger.info("modules_summary", project=project_key, modules=data["modules"])
 
     logger.info(
         "full_app_generated",

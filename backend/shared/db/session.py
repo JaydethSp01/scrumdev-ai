@@ -69,6 +69,32 @@ async def init_db() -> None:
     engine = _get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await _ensure_constraints()
+
+
+async def _ensure_constraints() -> None:
+    """Asegura constraints que create_all NO actualiza (raw DDL idempotente).
+
+    El check de human_decisions.status DEBE permitir 'superseded' (el loop de
+    sprints lo usa para invalidar la aprobacion vieja del Sprint Review). Una
+    migracion vieja lo creo SIN ese valor -> el avance de sprint reventaba y el
+    deploy nunca se generaba. Esto lo corrige en cada arranque (idempotente), asi
+    prod queda al dia al redesplegar sin tocar la DB a mano. Best-effort."""
+    from sqlalchemy import text
+
+    try:
+        engine = _get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(text(
+                "ALTER TABLE human_decisions DROP CONSTRAINT IF EXISTS chk_human_decisions_status"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE human_decisions ADD CONSTRAINT chk_human_decisions_status "
+                "CHECK (status IN ('pending','approved','rejected','superseded'))"
+            ))
+    except Exception as exc:  # noqa: BLE001 - nunca bloquear el arranque
+        import logging
+        logging.getLogger("db.init").warning("ensure_constraints failed: %s", exc)
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

@@ -12,6 +12,7 @@ Hace dos cosas:
 """
 from __future__ import annotations
 
+import asyncio
 import re
 
 from services.agent_runtime_service.app.runtime.claude_code_runtime import run_claude_code
@@ -29,7 +30,7 @@ DESIGN_PRINCIPLES = """PRINCIPIOS DE DISEÑO WEB (obligatorios):
 7. Accesibilidad (a11y): contraste AA, alt en imágenes, navegación por teclado,
    labels/aria para lectores de pantalla, foco visible.
 + RESPONSIVE: usar grid/flex con breakpoints (sm/md/lg), nunca anchos fijos que rompan en móvil.
-+ ESTÉTICA: Tailwind con rounded-xl/2xl, shadow, spacing generoso, dark mode (dark:),
++ ESTÉTICA: Tailwind con rounded-xl/2xl, shadow, spacing generoso, MODO CLARO (sin dark:),
   paleta coherente, tipografía jerarquizada. NUNCA HTML plano sin clases."""
 
 
@@ -106,7 +107,10 @@ async def review_and_fix_design(
         return files, report
 
     logger.info("design_review_start", project=project_key, poor=len(poor))
-    for f, problems in poor:
+    # PARALELO (los archivos son independientes) con semáforo para no saturar el SDK.
+    sem = asyncio.Semaphore(4)
+
+    async def _fix(f: dict, problems: list[str]) -> None:
         path = f.get("path")
         original = f.get("content") or ""
         prompt = (
@@ -120,18 +124,20 @@ async def review_and_fix_design(
             f"'use client' si estaba. Devuelve SOLO el código del archivo {path}, "
             f"sin explicaciones ni ```.\n\nARCHIVO ACTUAL:\n{original[:4000]}"
         )
-        try:
-            new = await run_claude_code(prompt, max_turns=1, kind="ui")
-            new = _strip_fences(new)
-            # solo aceptar si mejora y conserva los exports clave
-            if new and len(new) > len(original) * 0.5 and "export" in new:
-                new_score, _ = _design_score(new)
-                old_score, _ = _design_score(original)
-                if new_score >= old_score:
-                    f["content"] = new
-                    report.append(f"rediseñado: {path} ({old_score}->{new_score})")
-        except Exception as exc:  # noqa: BLE001 -> nunca romper la generación
-            logger.warning("design_fix_failed", path=path, error=str(exc)[:120])
+        async with sem:
+            try:
+                new = await run_claude_code(prompt, max_turns=1, kind="ui")
+                new = _strip_fences(new)
+                if new and len(new) > len(original) * 0.5 and "export" in new:
+                    new_score, _ = _design_score(new)
+                    old_score, _ = _design_score(original)
+                    if new_score >= old_score:
+                        f["content"] = new
+                        report.append(f"rediseñado: {path} ({old_score}->{new_score})")
+            except Exception as exc:  # noqa: BLE001 -> nunca romper la generación
+                logger.warning("design_fix_failed", path=path, error=str(exc)[:120])
+
+    await asyncio.gather(*[_fix(f, pr) for f, pr in poor], return_exceptions=True)
     if not report:
         report.append("design review: sin cambios aplicados")
     logger.info("design_review_done", project=project_key, fixed=len(report))
