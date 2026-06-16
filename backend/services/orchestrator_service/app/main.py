@@ -1310,7 +1310,7 @@ async def delete_project(project_key: str) -> dict:
         "backlog_items", "code_artifacts", "build_runs", "project_versions",
         "project_visions", "project_assets", "brand_kits", "human_decisions",
         "nfr_captures", "architecture_decisions", "sprints", "chat_messages",
-        "chat_sessions", "workflow_runs", "notifications",
+        "chat_sessions", "workflow_runs", "notifications", "agent_runs",
     ]
     deleted = 0
     async for session in get_session():
@@ -1320,12 +1320,17 @@ async def delete_project(project_key: str) -> dict:
         if not proj:
             raise HTTPException(status_code=404, detail="project not found")
         for t in tables:
+            # SAVEPOINT por tabla: si una falla (tabla sin project_key/inexistente)
+            # el rollback es SOLO de ese savepoint y la transacción sigue viva.
+            # Sin esto, un DELETE fallido aborta toda la transacción -> el commit
+            # final revienta con 500 (bug: la card "eliminar proyecto" no borraba).
             try:
-                r = await session.execute(
-                    _text(f"DELETE FROM {t} WHERE project_key = :k"), {"k": project_key}
-                )
-                deleted += r.rowcount or 0
-            except Exception:  # noqa: BLE001 — tabla sin project_key o inexistente
+                async with session.begin_nested():
+                    r = await session.execute(
+                        _text(f"DELETE FROM {t} WHERE project_key = :k"), {"k": project_key}
+                    )
+                    deleted += r.rowcount or 0
+            except Exception:  # noqa: BLE001
                 pass
         await session.delete(proj)
         await session.commit()
