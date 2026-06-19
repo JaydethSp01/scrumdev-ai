@@ -5,6 +5,7 @@ import {
   X, Cpu, ShoppingBag, Building2, Code2, FlaskConical, ShieldCheck,
   CalendarRange, Rocket, Bot, ArrowDown, CheckCircle2, Loader2, AlertTriangle,
   FileCode2, FileText, Layers, ChevronRight, Activity, ExternalLink,
+  Image as ImageIcon,
 } from "lucide-react";
 import {
   apiGetOrchestration, apiGetCode, apiGetRefinement,
@@ -394,11 +395,12 @@ function ArtifactFiles({ projectKey }: { projectKey: string }) {
   );
 }
 
-// ── Ver historias generadas (PO) ─────────────────────────────────────────────
+// ── Ver historias + MOCKUPS generados (PO) ───────────────────────────────────
 function ArtifactStories({ projectKey }: { projectKey: string }) {
   const [stories, setStories] = useState<RefinementStory[] | null>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [openMock, setOpenMock] = useState<Record<string, boolean>>({});
   const toggle = async () => {
     setOpen((v) => !v);
     if (stories === null && !loading) {
@@ -407,26 +409,44 @@ function ArtifactStories({ projectKey }: { projectKey: string }) {
       catch { setStories([]); } finally { setLoading(false); }
     }
   };
+  const nMock = (stories || []).filter((s) => s.mockup).length;
   return (
     <div>
       <button onClick={toggle} className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-violet-600 hover:underline">
-        <FileText size={13} /> {open ? "Ocultar" : "Ver"} historias de usuario {stories && <span className="text-slate-400">({stories.length})</span>}
+        <FileText size={13} /> {open ? "Ocultar" : "Ver"} historias{nMock > 0 ? " + mockups" : ""}
+        {stories && <span className="text-slate-400">({stories.length})</span>}
         {loading && <Loader2 size={11} className="animate-spin" />}
       </button>
       {open && stories && (
-        <ul className="mt-2 space-y-1 max-h-56 overflow-y-auto">
+        <ul className="mt-2 space-y-1.5 max-h-72 overflow-y-auto pr-0.5">
           {stories.length === 0 && <li className="text-[11px] text-slate-400">Aún no hay historias.</li>}
-          {stories.map((s, i) => (
-            <li key={s.story_key || i} className="rounded-lg border border-slate-200 px-2.5 py-1.5">
-              <div className="flex items-center gap-1.5">
-                <span className="font-mono text-[10px] text-violet-600">{s.story_key}</span>
-                <span className="text-[12px] text-slate-700 truncate">{s.title}</span>
-                {typeof s.story_points === "number" && (
-                  <span className="ml-auto text-[10px] px-1.5 py-px rounded bg-violet-500/10 text-violet-600 font-medium">{s.story_points} pts</span>
+          {stories.map((s, i) => {
+            const k = s.story_key || String(i);
+            const mockOpen = !!openMock[k];
+            return (
+              <li key={k} className="rounded-lg border border-slate-200 px-2.5 py-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono text-[10px] text-violet-600">{s.story_key}</span>
+                  <span className="text-[12px] text-slate-700 truncate">{s.title}</span>
+                  {typeof s.story_points === "number" && (
+                    <span className="ml-auto text-[10px] px-1.5 py-px rounded bg-violet-500/10 text-violet-600 font-medium">{s.story_points} pts</span>
+                  )}
+                </div>
+                {s.mockup && (
+                  <>
+                    <button onClick={() => setOpenMock((o) => ({ ...o, [k]: !o[k] }))}
+                      className="mt-1 inline-flex items-center gap-1 text-[10.5px] font-medium text-sky-600 hover:underline">
+                      <ImageIcon size={11} /> {mockOpen ? "ocultar" : "ver"} mockup
+                    </button>
+                    {mockOpen && (
+                      <div className="mt-1.5 max-w-[280px] rounded-md overflow-hidden border border-slate-200 bg-slate-50"
+                        dangerouslySetInnerHTML={{ __html: s.mockup }} />
+                    )}
+                  </>
                 )}
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
