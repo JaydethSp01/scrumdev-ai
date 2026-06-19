@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bot, Send, Loader2, Paperclip, ShieldCheck,
-  CheckCircle2, Lock, HelpCircle,
+  CheckCircle2, Lock, HelpCircle, FlaskConical, FileCode2,
 } from "lucide-react";
 import http from "@/lib/http";
-import { API, apiVisionFromDocument, apiStartLifecycle, apiGetPipeline, apiApproveGate, apiAssistant } from "@/lib/api";
+import { API, apiVisionFromDocument, apiStartLifecycle, apiGetPipeline, apiApproveGate, apiAssistant, apiGetCode, type CodeFile } from "@/lib/api";
 
 import BacklogReview, { type ReviewStory } from "@/components/conversation/BacklogReview";
 import NfrInline from "@/components/conversation/NfrInline";
@@ -503,6 +503,55 @@ export default function ConversationCenter({
   );
 }
 
+// Visor de las PRUEBAS reales que ejecutó el QA — en la card de aprobar evidencia,
+// para que el PO vea QUÉ se validó (no solo "Pruebas incluidas").
+function EvidenceTests({ projectKey }: { projectKey: string }) {
+  const [tests, setTests] = useState<CodeFile[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const [sel, setSel] = useState<CodeFile | null>(null);
+  const [loading, setLoading] = useState(false);
+  const toggle = async () => {
+    setOpen((v) => !v);
+    if (tests === null && !loading) {
+      setLoading(true);
+      try {
+        const all = await apiGetCode(projectKey);
+        setTests(all.filter((f) => /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.|test_/i.test(f.file_path)));
+      } catch { setTests([]); } finally { setLoading(false); }
+    }
+  };
+  return (
+    <div className="mt-2">
+      <button onClick={toggle} className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-amber-600 dark:text-amber-400 hover:underline">
+        <FlaskConical size={13} /> {open ? "Ocultar" : "Ver"} las pruebas que se ejecutaron {tests && <span className="text-neutral-400">({tests.length})</span>}
+        {loading && <Loader2 size={11} className="animate-spin" />}
+      </button>
+      {open && tests && (
+        tests.length === 0 ? (
+          <p className="mt-1 text-[11px] text-neutral-500">Aún no hay archivos de prueba generados.</p>
+        ) : (
+          <div className="mt-2 grid grid-cols-1 sm:grid-cols-[minmax(0,13rem)_1fr] gap-2">
+            <ul className="max-h-56 overflow-y-auto rounded-lg border border-neutral-200 dark:border-neutral-800 divide-y divide-neutral-100 dark:divide-neutral-800 bg-white dark:bg-neutral-950">
+              {tests.map((f) => (
+                <li key={f.id || f.file_path}>
+                  <button onClick={() => setSel(f)}
+                    className={`w-full text-left flex items-center gap-1.5 px-2 py-1 text-[11px] font-mono truncate hover:bg-neutral-50 dark:hover:bg-neutral-900 ${sel?.file_path === f.file_path ? "text-amber-600" : "text-neutral-600 dark:text-neutral-300"}`}>
+                    <FileCode2 size={11} className="shrink-0 text-amber-400" />
+                    <span className="truncate">{f.file_path}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <pre className="max-h-56 overflow-auto rounded-lg bg-neutral-900 text-neutral-100 text-[11px] leading-relaxed p-2.5">
+              {sel ? (sel.content || "").slice(0, 6000) : <span className="text-neutral-500">Elige una prueba para ver qué valida →</span>}
+            </pre>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExplain, onReviewStories, onRetryDeploy, busy }: { gate: Gate; projectKey: string; userId: string; onApprove: () => void; onRequestChanges: () => void; onExplain: () => void; onReviewStories?: () => void; onRetryDeploy?: () => void; busy: boolean }) {
   const r = gate.gate_review || {};
   const nMock = (r.stories || []).filter((s) => s.mockup).length;
@@ -587,13 +636,17 @@ function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExp
         </p>
       )}
       {r.evidence?.checks && (
-        <ul className="mt-2 space-y-1">
-          {r.evidence.checks.map((c, i) => (
-            <li key={i} className="text-xs flex items-center gap-1.5">
-              {c.ok ? <CheckCircle2 size={11} className="text-emerald-500" /> : <Lock size={11} className="text-amber-500" />} {c.name}
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="mt-2 space-y-1">
+            {r.evidence.checks.map((c, i) => (
+              <li key={i} className="text-xs flex items-center gap-1.5">
+                {c.ok ? <CheckCircle2 size={11} className="text-emerald-500" /> : <Lock size={11} className="text-amber-500" />} {c.name}
+              </li>
+            ))}
+          </ul>
+          {/* Ver las PRUEBAS reales que validó el QA, antes de aprobar */}
+          <EvidenceTests projectKey={projectKey} />
+        </>
       )}
       {/* NFR conversacional: el agente pregunta AQUÍ y el PO responde (sin paneles) */}
       {r.needs_nfr_form && (
