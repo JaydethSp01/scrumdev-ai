@@ -25,6 +25,24 @@ class AgentExecutor:
         if not primary_input:
             raise ValueError("inputs.story o inputs.requirements o inputs.message es obligatorio")
 
+        # MEMORIA SEMANTICA (RAG real): antes de correr el crew, recuperamos del
+        # memory_service (pgvector + embeddings) las piezas mas SIMILARES del
+        # historico de este cliente y se las damos al agente como contexto. Asi
+        # el agente "recuerda" decisiones previas entre ejecuciones.
+        from services.agent_runtime_service.app.memory.vector_store import store
+
+        project_key = inputs.get("project_key") or inputs.get("correlation_id")
+        ns = f"client:{project_key}" if project_key else None
+        if ns:
+            recalled = await store.search(ns, str(primary_input), top_k=4)
+            if recalled:
+                ctx = "\n".join(f"- {r[:300]}" for r in recalled if r)
+                primary_input = (
+                    "### Contexto previo del cliente (memoria semantica, usar como "
+                    f"referencia; NO repetir literal):\n{ctx}\n\n### Tarea actual:\n{primary_input}"
+                )
+                logger.info("crew_memory_recall", crew=crew_name, items=len(recalled))
+
         provider = (settings.scrumdev_ai_provider or "claude_code").lower()
         logger.info("crew_kickoff_start", crew=crew_name, provider=provider)
 
@@ -32,6 +50,11 @@ class AgentExecutor:
             result = await self._run_with_claude_code(crew_name, primary_input)
         else:
             result = await self._run_with_crewai(crew_name, primary_input)
+
+        # Persistir el resultado en la memoria semantica del cliente (best-effort).
+        if ns and result:
+            await store.save(ns, f"[{crew_name}] {str(result)[:1500]}",
+                             {"crew": crew_name, "project_key": project_key})
 
         logger.info("crew_kickoff_done", crew=crew_name, provider=provider)
         return result

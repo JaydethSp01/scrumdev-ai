@@ -1,30 +1,60 @@
-"""Memoria semantica minima en fase 1: backed by in-memory dict.
+"""Memoria semantica del runtime de agentes — REAL (pgvector + embeddings).
 
-CrewAI ya integra ChromaDB internamente cuando se habilita memory=True en el Crew.
-Aqui exponemos una capa simple para guardar contexto que el orchestrator puede
-consultar sin levantar ChromaDB explicito. Fase 2 puede reemplazar por Chroma.
+Antes esto era un dict en memoria con scoring por palabras (placeholder de fase 1).
+Ahora delega al `memory_service`, que persiste con EMBEDDINGS reales (OpenAI
+text-embedding-3-small / MiniLM-L6 via sentence-transformers) y recupera por
+SIMILITUD COSENO en pgvector. Es la misma memoria semantica que usa la capa de
+personalizacion del cliente; aqui la exponemos con la interfaz save/search que
+un Crew con `memory=True` consumiria.
+
+Cae elegante a [] si el memory_service no esta disponible (nunca rompe un flujo).
 """
 from __future__ import annotations
 
-from collections import defaultdict
+import httpx
+
+from shared.config.settings import settings
+from shared.observability import get_logger
+
+logger = get_logger(__name__)
 
 
-class InMemoryVectorStore:
-    def __init__(self) -> None:
-        self._docs: dict[str, list[str]] = defaultdict(list)
+class SemanticVectorStore:
+    """Memoria semantica real respaldada por el memory_service (pgvector + embeddings)."""
 
-    def save(self, namespace: str, content: str) -> None:
-        self._docs[namespace].append(content)
+    async def save(self, namespace: str, content: str, metadata: dict | None = None) -> bool:
+        """Guarda una pieza de contexto en la memoria vectorial del namespace."""
+        if not content:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await client.post(
+                    f"{settings.memory_service_url}/memory/save",
+                    json={"namespace": namespace, "content": content, "metadata": metadata or {}},
+                )
+            return True
+        except Exception as exc:  # noqa: BLE001 - best effort, nunca rompe el flujo
+            logger.warning("vector_store_save_failed", namespace=namespace, error=str(exc)[:160])
+            return False
 
-    def search(self, namespace: str, query: str, top_k: int = 5) -> list[str]:
-        docs = self._docs.get(namespace, [])
-        query_lower = query.lower()
-        scored = sorted(
-            docs,
-            key=lambda d: sum(1 for word in query_lower.split() if word in d.lower()),
-            reverse=True,
-        )
-        return scored[:top_k]
+    async def search(self, namespace: str, query: str, top_k: int = 5) -> list[str]:
+        """Recupera los top_k contenidos mas SIMILARES (coseno sobre embeddings)."""
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.post(
+                    f"{settings.memory_service_url}/memory/search",
+                    json={"namespace": namespace, "query": query, "top_k": top_k},
+                )
+                r.raise_for_status()
+                items = r.json().get("results", []) or []
+                return [
+                    (it.get("content") if isinstance(it, dict) else str(it)) or ""
+                    for it in items
+                ]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("vector_store_search_failed", namespace=namespace, error=str(exc)[:160])
+            return []
 
 
-store = InMemoryVectorStore()
+# Instancia global del runtime de agentes (memoria semantica real).
+store = SemanticVectorStore()
