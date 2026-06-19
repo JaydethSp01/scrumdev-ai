@@ -1798,6 +1798,62 @@ async def list_agent_runs(project_key: str) -> dict:
     return {"runs": []}
 
 
+@app.get("/projects/{project_key}/orchestration")
+async def get_orchestration(project_key: str) -> dict:
+    """Vista de ORQUESTACIÓN para el studio en vivo: el orquestador (máquina de
+    estados) llama a cada agente; aquí van los pasos cronológicos (con handoff:
+    la salida de uno alimenta al siguiente), el agente activo, y el debug del
+    despliegue (dónde se quedó). Una sola llamada para la UI animada."""
+    from services.orchestrator_service.app.project_pipeline import (
+        _PHASE_BY_STATE, build_pipeline_view,
+    )
+    steps: list[dict] = []
+    state = "BACKLOG"
+    async for session in get_session():
+        proj = (await session.execute(
+            select(_Project).where(_Project.key == project_key)
+        )).scalar_one_or_none()
+        state = (proj.workflow_state if proj else None) or "BACKLOG"
+        rows = (await session.execute(
+            select(AgentRun).where(AgentRun.project_key == project_key)
+            .order_by(AgentRun.started_at.asc())
+        )).scalars().all()
+        prev_agent = None
+        for r in rows:
+            steps.append({
+                "id": r.id, "agent": r.agent_name, "role": r.role,
+                "phase": r.phase, "action": r.action,
+                "input_summary": r.input_summary, "output_summary": r.output_summary,
+                "artifacts": r.artifacts or [], "status": r.status,
+                "handoff_from": prev_agent,  # quién le pasó la posta
+                "started_at": r.started_at.isoformat() if r.started_at else None,
+                "ended_at": r.ended_at.isoformat() if r.ended_at else None,
+                "duration_ms": r.duration_ms,
+            })
+            prev_agent = r.agent_name
+        break
+    active = next((s["agent"] for s in reversed(steps) if s["status"] == "running"), None)
+    ds = _DEPLOY_STATUS.get(project_key) or {}
+    deploy = {
+        "state": ds.get("state"), "phase_label": ds.get("phase_label"),
+        "phase_pct": ds.get("phase_pct"), "url": ds.get("vercel_url"),
+        "api_url": ds.get("render_url"), "git_url": ds.get("git_url"),
+        "error": ds.get("error"),
+        "e2e_fails": ds.get("e2e_fails") or [],
+    } if ds else None
+    meta = _PHASE_BY_STATE.get(state, {})
+    return {
+        "current_state": state,
+        "current_actor": meta.get("actor"),
+        "current_label": meta.get("label"),
+        "is_gate": bool(meta.get("human_gate")),
+        "active_agent": active,
+        "steps": steps,
+        "deploy": deploy,
+        "pipeline": build_pipeline_view(state),
+    }
+
+
 # Anti-doble-disparo de acciones de fase (ver _run_phase_action).
 _PHASE_ACTION_GUARD: dict[str, float] = {}
 _phase_action_lock = asyncio.Lock()

@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ShoppingBag, Building2, Code2, FlaskConical, ShieldCheck, Bot,
   ChevronDown, CheckCircle2, AlertTriangle, XCircle, Loader2,
-  ArrowRight, FileText, Clock, FolderOpen, FileCode2,
+  ArrowRight, FileText, Clock, FolderOpen, FileCode2, Cpu,
 } from "lucide-react";
 import {
   API, apiGetAgentRuns, apiGetCode,
   type AgentRun, type AgentRunArtifact, type CodeFile,
 } from "@/lib/api";
+import OrchestrationStudio from "@/components/conversation/OrchestrationStudio";
 
 // Texto legible para un artefacto producido por un agente.
 function artifactLabel(a: AgentRunArtifact): string {
@@ -118,6 +119,7 @@ export default function AgentTracePanel({ projectKey }: { projectKey: string }) 
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [studioOpen, setStudioOpen] = useState(false);
   // Drill-down: archivos REALES que generó el Developer Agent (lazy-load).
   const [files, setFiles] = useState<CodeFile[] | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
@@ -207,6 +209,27 @@ export default function AgentTracePanel({ projectKey }: { projectKey: string }) 
           {total} {total === 1 ? "ejecución" : "ejecuciones"}
         </span>
       </div>
+
+      {/* Entrada al studio de ORQUESTACIÓN en vivo (animado): ver cómo el
+          orquestador llama a cada agente, cómo se pasan la info, sus archivos
+          y el debug del despliegue. */}
+      <button
+        onClick={() => setStudioOpen(true)}
+        className="group w-full mb-3 flex items-center gap-2.5 rounded-xl p-3 text-left text-white bg-gradient-to-r from-slate-900 to-indigo-900 hover:to-indigo-800 transition shadow-sm overflow-hidden relative"
+      >
+        <span className="absolute -right-6 -top-8 w-24 h-24 rounded-full bg-brand/30 blur-2xl group-hover:bg-brand/40 transition" />
+        <span className="relative grid place-items-center w-8 h-8 rounded-lg bg-white/10 ring-1 ring-white/20">
+          <Cpu size={16} className="text-brand-300" />
+        </span>
+        <span className="relative min-w-0 flex-1">
+          <span className="block text-[12.5px] font-semibold leading-tight">Ver orquestación en vivo</span>
+          <span className="block text-[10.5px] text-white/55 truncate">cómo trabaja cada agente · archivos · debug del deploy</span>
+        </span>
+        <ArrowRight size={15} className="relative text-white/60 group-hover:translate-x-0.5 transition" />
+      </button>
+      {studioOpen && (
+        <OrchestrationStudio projectKey={projectKey} onClose={() => setStudioOpen(false)} />
+      )}
 
       {loaded && total === 0 && (
         <div className="rounded-xl border border-dashed border-neutral-300 dark:border-neutral-700 p-3 mb-3 text-[11px] text-neutral-500 flex items-center gap-2">

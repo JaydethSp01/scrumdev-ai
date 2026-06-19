@@ -849,6 +849,15 @@ async def gw_agent_runs(project_key: str) -> dict:
     )
 
 
+@app.get("/projects/{project_key}/orchestration")
+async def gw_orchestration(project_key: str) -> dict:
+    # Vista de orquestación en vivo (OrchestrationStudio): pasos + handoffs +
+    # agente activo + debug del despliegue, en una sola llamada.
+    return await _proxy_get(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/orchestration", timeout=30.0
+    )
+
+
 @app.get("/projects/{project_key}/mockups")
 async def gw_mockups(project_key: str) -> dict:
     return await _proxy_get(

@@ -1351,3 +1351,50 @@ export async function apiGetAgentRuns(projectKey: string): Promise<AgentRun[]> {
     return [];
   }
 }
+
+// ── Orquestación en vivo (OrchestrationStudio) ───────────────────────────────
+export type OrchestrationStep = {
+  id: string;
+  agent: string;
+  role: string;
+  phase: string;
+  action: string;
+  input_summary?: string | null;
+  output_summary?: string | null;
+  artifacts?: AgentRunArtifact[];
+  status: "running" | "done" | "failed";
+  handoff_from?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  duration_ms?: number | null;
+};
+export type OrchestrationDeploy = {
+  state?: string | null;
+  phase_label?: string | null;
+  phase_pct?: number | null;
+  url?: string | null;
+  api_url?: string | null;
+  git_url?: string | null;
+  error?: string | null;
+  e2e_fails?: string[];
+};
+export type Orchestration = {
+  current_state: string;
+  current_actor?: string | null;
+  current_label?: string | null;
+  is_gate?: boolean;
+  active_agent?: string | null;
+  steps: OrchestrationStep[];
+  deploy?: OrchestrationDeploy | null;
+};
+export async function apiGetOrchestration(projectKey: string): Promise<Orchestration | null> {
+  try {
+    const res = await authFetch(
+      `${API}/projects/${encodeURIComponent(projectKey)}/orchestration`
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as Orchestration;
+  } catch {
+    return null;
+  }
+}
