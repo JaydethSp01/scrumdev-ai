@@ -51,13 +51,21 @@ async def _run_via_api(
 
 def _ensure_bin_in_env() -> None:
     """Si el usuario especifico CLAUDE_CODE_BIN, anade su directorio al PATH."""
-    if not settings.claude_code_bin:
-        return
-    bin_path = settings.claude_code_bin
-    bin_dir = os.path.dirname(bin_path) or "."
-    current_path = os.environ.get("PATH", "")
-    if bin_dir not in current_path.split(os.pathsep):
-        os.environ["PATH"] = bin_dir + os.pathsep + current_path
+    if settings.claude_code_bin:
+        bin_path = settings.claude_code_bin
+        bin_dir = os.path.dirname(bin_path) or "."
+        current_path = os.environ.get("PATH", "")
+        if bin_dir not in current_path.split(os.pathsep):
+            os.environ["PATH"] = bin_dir + os.pathsep + current_path
+
+    # PRECEDENCIA DE CREDENCIALES (bug prod): el CLI de Claude Code PREFIERE
+    # ANTHROPIC_API_KEY sobre el token del plan (CLAUDE_CODE_OAUTH_TOKEN). Si el
+    # entorno arrastra una ANTHROPIC_API_KEY invalida/placeholder, el CLI la usa y
+    # falla con 401 ("error result"), cayendo a OpenAI. Cuando vamos por el plan
+    # headless (hay OAuth token), eliminamos ANTHROPIC_API_KEY para forzar el token.
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") and os.environ.get("ANTHROPIC_API_KEY"):
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        logger.info("anthropic_api_key_removed_for_oauth_plan")
 
 
 async def run_claude_code(
