@@ -136,14 +136,19 @@ async def run_smart_build(project_key: str, triggered_by: str, force_regenerate:
     return build_id
 
 
-async def execute_smart_build(project_key: str, build_id: str, action: str) -> None:
-    """Ejecuta el action escogido. Llamado en background task."""
+async def execute_smart_build(
+    project_key: str, build_id: str, action: str, backlog_only: bool = False
+) -> None:
+    """Ejecuta el action escogido. Llamado en background task. Si backlog_only,
+    la fase de backlog SOLO genera el backlog y se detiene en el gate (flujo
+    gateado del Taller 3: arquitectura y código son fases posteriores)."""
     from services.orchestrator_service.app.build_pipeline import run_build_pipeline
 
     summary: dict = {}
     try:
         if action == "generate_backlog" or action == "regenerate":
-            await run_build_pipeline(project_key, "smart", max_stories_to_code=3)
+            await run_build_pipeline(project_key, "smart", max_stories_to_code=3,
+                                     backlog_only=backlog_only)
             # run_build_pipeline crea su propio BuildRun, eliminamos el placeholder
             async for session in get_session():
                 placeholder = await session.get(BuildRun, build_id)

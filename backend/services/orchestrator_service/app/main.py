@@ -1765,6 +1765,34 @@ async def _record_agent_run(
         pass
 
 
+async def _update_agent_run(project_key: str, agent_name: str, action: str, **fields) -> bool:
+    """Actualiza la ejecucion MAS RECIENTE de un agente (p.ej. pasar 'running' ->
+    'done' con el conteo real al terminar). Calcula duration_ms. Devuelve True si
+    actualizo algo. Best-effort: nunca rompe el flujo."""
+    try:
+        async with _record_lock:
+            async for session in get_session():
+                row = (await session.execute(
+                    select(AgentRun).where(
+                        AgentRun.project_key == project_key,
+                        AgentRun.agent_name == agent_name,
+                        AgentRun.action == action,
+                    ).order_by(AgentRun.started_at.desc()).limit(1)
+                )).scalar_one_or_none()
+                if row is None:
+                    return False
+                for k, v in fields.items():
+                    setattr(row, k, v)
+                row.ended_at = fields.get("ended_at") or datetime.now(timezone.utc)
+                if row.started_at and row.ended_at:
+                    row.duration_ms = int((row.ended_at - row.started_at).total_seconds() * 1000)
+                await session.commit()
+                return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("update_agent_run_failed", project=project_key, agent=agent_name, error=str(exc)[:160])
+    return False
+
+
 @app.get("/projects/{project_key}/agent-runs")
 async def list_agent_runs(project_key: str) -> dict:
     """Trazabilidad: todas las ejecuciones de agentes del proyecto (orden cronologico)."""
@@ -1891,16 +1919,26 @@ async def _run_phase_action(project_key: str, phase: str, action: str, triggered
     try:
         logger.info("phase_action_start", project=project_key, phase=phase, action=action)
         if action == "generate_backlog":
+            # Marcar al PO Agent como TRABAJANDO ya (status=running) para que se
+            # vea en vivo en el panel/studio mientras genera; el watchdog lo pasa
+            # a 'done' con el conteo real al terminar.
+            await _record_agent_run(
+                project_key, "PO Agent", "Product Owner", phase, action,
+                input_summary="Visión del producto",
+                output_summary="Analizando requerimientos y redactando las historias…",
+                status="running",
+            )
             # disparar smart-build que genera backlog si no existe
             try:
                 bid = await run_smart_build(project_key, triggered_by, False)
-                _spawn_bg(execute_smart_build(project_key, bid, "generate_backlog"))
+                # FLUJO GATEADO (Taller 3): SOLO el backlog; arquitectura y código
+                # son fases posteriores (propose_architecture / generate_code).
+                _spawn_bg(execute_smart_build(project_key, bid, "generate_backlog", backlog_only=True))
             except Exception as exc:  # noqa: BLE001
                 # NUNCA silencioso: si el arranque falla, debe quedar rastro.
                 logger.error("generate_backlog_start_failed", project=project_key, error=str(exc)[:200])
-            # El registro del PO Agent se hace en _auto_run_until_gate DESPUÉS de
-            # que la generación async termine (así el summary trae el conteo real
-            # de historias, no 0 por correr antes de tiempo).
+            # El paso a 'done' con el conteo real se hace en _auto_run_until_gate
+            # cuando la generación async termina (no aquí, que daría 0 historias).
         elif action == "plan_sprints":
             # planificar sprints automaticamente
             try:
@@ -2165,13 +2203,21 @@ async def _auto_run_until_gate(project_key: str, triggered_by: str, max_steps: i
             if n == 0:
                 logger.error("backlog_generation_stuck", project=project_key)
                 return  # no avanzar a un gate vacío; el PO puede reintentar
-        # Trazabilidad del PO Agent con el conteo REAL (ya terminó la generación).
-        await _record_agent_run(
-            project_key, "PO Agent", "Product Owner", "BACKLOG", "generate_backlog",
-            input_summary="Visión del producto",
+        # El PO ya terminó: pasamos su registro 'running' a 'done' con el conteo
+        # REAL. Si por algún motivo no existía el running, lo creamos.
+        updated = await _update_agent_run(
+            project_key, "PO Agent", "generate_backlog",
+            status="done",
             output_summary=f"Generó {n} historias de backlog priorizadas",
             artifacts=[{"type": "backlog", "count": n}],
         )
+        if not updated:
+            await _record_agent_run(
+                project_key, "PO Agent", "Product Owner", "BACKLOG", "generate_backlog",
+                input_summary="Visión del producto",
+                output_summary=f"Generó {n} historias de backlog priorizadas",
+                artifacts=[{"type": "backlog", "count": n}],
+            )
 
     for _ in range(max_steps):
         async for session in get_session():

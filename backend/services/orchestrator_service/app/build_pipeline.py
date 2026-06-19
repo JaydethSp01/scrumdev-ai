@@ -186,8 +186,12 @@ async def run_build_pipeline(
     triggered_by: str,
     stack: str | None = None,
     max_stories_to_code: int = 5,
+    backlog_only: bool = False,
 ) -> BuildRun:
-    """Ejecuta el pipeline completo. Retorna el BuildRun final."""
+    """Ejecuta el pipeline. Si backlog_only=True (FLUJO GATEADO del Taller 3),
+    SOLO genera el backlog y se detiene — la arquitectura y el código corren en
+    sus propias fases (propose_architecture / generate_code) tras la aprobacion
+    del PO. Esto evita hacer todo a la vez (lento y contra el proceso)."""
     async for session in get_session():
         run = BuildRun(
             project_key=project_key,
@@ -241,6 +245,23 @@ async def run_build_pipeline(
         stories_raw = backlog_resp.get("stories", [])
         saved_items = await _save_backlog(project_key, stories_raw)
         summary["backlog_count"] = len(saved_items)
+
+        # FLUJO GATEADO (Taller 3): con el backlog listo, paramos aquí y dejamos
+        # que el PO lo apruebe. Arquitectura y código son fases POSTERIORES.
+        if backlog_only:
+            await _update_build(
+                build_id, stage="completed", progress_percent=100,
+                summary=summary, completed_at=datetime.now(timezone.utc),
+            )
+            await event_bus.publish(DomainEvent(
+                event_type="BUILD_PIPELINE_COMPLETED",
+                source_service="orchestrator-service",
+                correlation_id=build_id, project_key=project_key,
+                payload={"stage": "backlog_only", "backlog_count": len(saved_items)},
+            ))
+            async for session in get_session():
+                return await session.get(BuildRun, build_id) or run
+            return run
 
         await _update_build(build_id, stage="architecture", progress_percent=35)
         nfr_block = (
