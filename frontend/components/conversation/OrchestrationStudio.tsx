@@ -96,20 +96,22 @@ export default function OrchestrationStudio({
   }, [steps]);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-stretch justify-center bg-slate-950/70 backdrop-blur-sm p-0 sm:p-4 md:p-6 animate-[fade_.2s_ease]">
+    <div className="fixed inset-0 z-[100] flex items-stretch justify-center bg-slate-950/75 backdrop-blur-md p-0 sm:p-3 md:p-4 animate-[fade_.2s_ease]">
       <style jsx global>{`
         @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
         @keyframes rise { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: none } }
         @keyframes flowline { 0% { background-position: 0 0 } 100% { background-position: 0 18px } }
-        @keyframes glow { 0%,100% { box-shadow: 0 0 0 0 rgba(91,108,255,.45) } 50% { box-shadow: 0 0 0 8px rgba(91,108,255,0) } }
-        .os-flowline { background-image: linear-gradient(180deg, currentColor 50%, transparent 50%); background-size: 2px 10px; animation: flowline 1s linear infinite; }
+        @keyframes glow { 0%,100% { box-shadow: 0 0 0 0 rgba(91,108,255,.5) } 50% { box-shadow: 0 0 0 9px rgba(91,108,255,0) } }
+        .os-flowline { background-image: linear-gradient(180deg, currentColor 55%, transparent 55%); background-size: 2px 11px; animation: flowline 1s linear infinite; }
         .os-glow { animation: glow 1.8s ease-in-out infinite; }
+        .os-grid { background-image: radial-gradient(circle at 1px 1px, rgba(91,108,255,.07) 1px, transparent 0); background-size: 22px 22px; }
       `}</style>
 
-      <div className="relative w-full max-w-6xl h-full sm:h-[92vh] rounded-none sm:rounded-2xl overflow-hidden bg-white shadow-2xl ring-1 ring-slate-200 flex flex-col">
+      <div className="relative w-full max-w-[95rem] h-full sm:h-[96vh] rounded-none sm:rounded-3xl overflow-hidden bg-white shadow-[0_30px_90px_-20px_rgba(15,23,42,.6)] ring-1 ring-slate-200 flex flex-col">
         {/* ── Header ── */}
-        <header className="relative shrink-0 px-5 py-4 bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950 text-white overflow-hidden">
-          <div className="absolute -right-10 -top-16 w-56 h-56 rounded-full bg-brand/30 blur-3xl" />
+        <header className="relative shrink-0 px-6 py-5 bg-gradient-to-br from-indigo-950 via-slate-900 to-brand-900 text-white overflow-hidden">
+          <div className="absolute -right-10 -top-16 w-64 h-64 rounded-full bg-brand/40 blur-3xl" />
+          <div className="absolute left-1/3 -bottom-20 w-72 h-40 rounded-full bg-violet-500/20 blur-3xl" />
           <div className="relative flex items-center gap-3">
             <span className="grid place-items-center w-10 h-10 rounded-xl bg-white/10 ring-1 ring-white/20">
               <Cpu size={20} className="text-brand-300" />
@@ -135,9 +137,9 @@ export default function OrchestrationStudio({
           </div>
         </header>
 
-        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[230px_1fr]">
+        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[270px_1fr]">
           {/* ── Rail del equipo ── */}
-          <aside className="hidden lg:flex flex-col gap-1.5 p-4 border-r border-slate-200 bg-slate-50/70 overflow-y-auto">
+          <aside className="hidden lg:flex flex-col gap-1.5 p-4 border-r border-slate-200 bg-gradient-to-b from-slate-50 to-white overflow-y-auto">
             <p className="text-[10px] uppercase tracking-wider text-slate-400 mb-1 flex items-center gap-1.5">
               <Activity size={11} /> Equipo
             </p>
@@ -179,21 +181,26 @@ export default function OrchestrationStudio({
           </aside>
 
           {/* ── Registro de orquestación (flujo) ── */}
-          <main className="min-h-0 overflow-y-auto p-4 sm:p-6 bg-white">
+          <main className="min-h-0 overflow-y-auto p-5 sm:p-7 bg-gradient-to-b from-slate-50/60 to-white os-grid">
             {/* Debug del despliegue (cuando aplica) */}
             {deploy && deploy.state && (
               <DeployDebug deploy={deploy} />
             )}
 
-            <p className="text-[10px] uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
-              <ChevronRight size={11} /> Registro de orquestación · cómo se pasan la información
+            <p className="text-[10.5px] uppercase tracking-[0.14em] text-slate-400 mb-4 flex items-center gap-1.5 font-medium">
+              <Activity size={12} className="text-brand" /> Registro de orquestación · cómo se pasan la información
             </p>
 
             {loaded && steps.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-400">
-                <Bot size={26} className="mx-auto mb-2 opacity-60" />
-                Aún no hay actividad de agentes. Cuando inicies el ciclo verás aquí, paso a paso,
-                cómo el orquestador llama a cada agente y cómo se pasan el trabajo.
+              <div className="mx-auto max-w-md mt-8 rounded-3xl border border-slate-200 bg-white/80 p-10 text-center shadow-sm">
+                <span className="mx-auto mb-3 grid place-items-center w-14 h-14 rounded-2xl bg-gradient-to-br from-brand to-brand-dark text-white os-glow">
+                  <Cpu size={26} />
+                </span>
+                <p className="text-[15px] font-semibold text-slate-700">El equipo aún no arranca</p>
+                <p className="mt-1.5 text-[12.5px] text-slate-400 leading-relaxed">
+                  Cuando inicies el ciclo verás aquí, paso a paso y en vivo, cómo el orquestador
+                  llama a cada agente y cómo se pasan el trabajo entre ellos.
+                </p>
               </div>
             )}
 
@@ -275,6 +282,7 @@ function StepCard({
   const failed = step.status === "failed";
   const isDev = /develop/i.test(step.agent + step.role);
   const isPO = /product owner|^po/i.test(step.agent + " " + step.role);
+  const isQA = /\bqa\b|quality|test/i.test(step.agent + " " + step.role);
 
   return (
     <li className="relative pl-10" style={{ animation: `rise .35s ease both`, animationDelay: `${Math.min(index, 12) * 45}ms` }}>
@@ -287,8 +295,8 @@ function StepCard({
         <Icon size={16} />
       </span>
 
-      <div className={`mb-4 rounded-xl border bg-white transition ${open ? "border-slate-300 shadow-sm" : "border-slate-200"}`}>
-        <button onClick={onToggle} className="w-full text-left px-3.5 py-3 flex items-start gap-2">
+      <div className={`mb-4 rounded-2xl border transition ${open ? `border-transparent ring-1 ${th.ring} ${th.soft} shadow-sm` : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm"}`}>
+        <button onClick={onToggle} className="w-full text-left px-4 py-3.5 flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="text-[13px] font-semibold">{step.agent.replace(/ Agent$/i, "")}</span>
@@ -346,6 +354,7 @@ function StepCard({
             {/* drill-in de lo generado */}
             {isDev && <ArtifactFiles projectKey={projectKey} />}
             {isPO && <ArtifactStories projectKey={projectKey} />}
+            {isQA && <ArtifactTests projectKey={projectKey} />}
           </div>
         )}
       </div>
@@ -373,23 +382,71 @@ function ArtifactFiles({ projectKey }: { projectKey: string }) {
         {loading && <Loader2 size={11} className="animate-spin" />}
       </button>
       {open && files && (
-        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <ul className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
+        <div className="mt-2 grid grid-cols-1 lg:grid-cols-[minmax(0,18rem)_1fr] gap-2.5">
+          <ul className="max-h-[28rem] overflow-y-auto rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
             {files.length === 0 && <li className="text-[11px] text-slate-400 p-2">Aún no hay archivos.</li>}
             {files.map((f) => (
               <li key={f.id || f.file_path}>
                 <button onClick={() => setSel(f)}
-                  className={`w-full text-left flex items-center gap-1.5 px-2 py-1 text-[11px] font-mono truncate hover:bg-slate-50 ${sel?.file_path === f.file_path ? "bg-emerald-50 text-emerald-700" : "text-slate-600"}`}>
-                  <FileCode2 size={11} className="shrink-0 text-slate-400" />
+                  className={`w-full text-left flex items-center gap-1.5 px-2.5 py-1.5 text-[11.5px] font-mono truncate hover:bg-slate-50 ${sel?.file_path === f.file_path ? "bg-emerald-50 text-emerald-700" : "text-slate-600"}`}>
+                  <FileCode2 size={12} className="shrink-0 text-slate-400" />
                   <span className="truncate">{f.file_path}</span>
                 </button>
               </li>
             ))}
           </ul>
-          <pre className="max-h-48 overflow-auto rounded-lg bg-slate-900 text-slate-100 text-[10.5px] leading-relaxed p-2.5">
-            {sel ? (sel.content || "").slice(0, 4000) : <span className="text-slate-500">Elige un archivo para ver su contenido →</span>}
+          <pre className="max-h-[28rem] overflow-auto rounded-xl bg-slate-900 text-slate-100 text-[11.5px] leading-relaxed p-3.5 ring-1 ring-black/20">
+            {sel ? (sel.content || "").slice(0, 8000) : <span className="text-slate-500">Elige un archivo de la izquierda para ver su código →</span>}
           </pre>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Ver PRUEBAS que ejecutó el QA (los tests reales) ─────────────────────────
+function ArtifactTests({ projectKey }: { projectKey: string }) {
+  const [tests, setTests] = useState<CodeFile[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const [sel, setSel] = useState<CodeFile | null>(null);
+  const [loading, setLoading] = useState(false);
+  const toggle = async () => {
+    setOpen((v) => !v);
+    if (tests === null && !loading) {
+      setLoading(true);
+      try {
+        const all = await apiGetCode(projectKey);
+        setTests(all.filter((f) => /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.|test_/i.test(f.file_path)));
+      } catch { setTests([]); } finally { setLoading(false); }
+    }
+  };
+  return (
+    <div>
+      <button onClick={toggle} className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-amber-600 hover:underline">
+        <FlaskConical size={13} /> {open ? "Ocultar" : "Ver"} pruebas ejecutadas {tests && <span className="text-slate-400">({tests.length})</span>}
+        {loading && <Loader2 size={11} className="animate-spin" />}
+      </button>
+      {open && tests && (
+        <>
+          <p className="mt-1 text-[10.5px] text-slate-400">Estas son las pruebas que el QA corrió para validar la evidencia. Abre una para ver qué verifica.</p>
+          <div className="mt-1.5 grid grid-cols-1 lg:grid-cols-[minmax(0,18rem)_1fr] gap-2.5">
+            <ul className="max-h-[26rem] overflow-y-auto rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
+              {tests.length === 0 && <li className="text-[11px] text-slate-400 p-2">No se encontraron archivos de prueba.</li>}
+              {tests.map((f) => (
+                <li key={f.id || f.file_path}>
+                  <button onClick={() => setSel(f)}
+                    className={`w-full text-left flex items-center gap-1.5 px-2.5 py-1.5 text-[11.5px] font-mono truncate hover:bg-slate-50 ${sel?.file_path === f.file_path ? "bg-amber-50 text-amber-700" : "text-slate-600"}`}>
+                    <FlaskConical size={12} className="shrink-0 text-amber-400" />
+                    <span className="truncate">{f.file_path}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <pre className="max-h-[26rem] overflow-auto rounded-xl bg-slate-900 text-slate-100 text-[11.5px] leading-relaxed p-3.5 ring-1 ring-black/20">
+              {sel ? (sel.content || "").slice(0, 8000) : <span className="text-slate-500">Elige una prueba para ver qué valida →</span>}
+            </pre>
+          </div>
+        </>
       )}
     </div>
   );

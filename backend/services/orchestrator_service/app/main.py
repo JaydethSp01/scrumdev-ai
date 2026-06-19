@@ -1976,11 +1976,17 @@ async def _run_phase_action(project_key: str, phase: str, action: str, triggered
                 bid = run.id
                 break
             _spawn_bg(_run_generate_full_app(project_key, triggered_by, True, bid))
+            # Descripcion CON SENTIDO: que se vea QUE features esta construyendo el
+            # Developer (titulos reales de las historias), no "historia 1 del sprint".
+            _titles = [str(s.title).strip() for s in stories if getattr(s, "title", None)][:4]
+            _feat = ", ".join(_titles) if _titles else "las historias del sprint"
+            _more = "…" if len(stories) > 4 else ""
             await _record_agent_run(
                 project_key, "Developer Agent", "Developer", phase, action,
-                input_summary=f"Historias del sprint {sp_num or 1}",
-                output_summary="Generó el código del sprint activo",
-                artifacts=[{"type": "build", "build_id": bid, "sprint": sp_num}],
+                input_summary=f"Sprint {sp_num or 1} — historias a implementar: {_feat}{_more}",
+                output_summary=f"Implementando código de: {_feat}{_more}",
+                artifacts=[{"type": "build", "build_id": bid, "sprint": sp_num,
+                            "features": _titles}],
                 status="running",
             )
         elif action == "run_policy_check":

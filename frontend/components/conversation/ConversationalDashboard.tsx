@@ -26,7 +26,7 @@ export default function ConversationalDashboard({
   const [panel, setPanel] = useState<Panel>("flujos");
 
   return (
-    <div className="flex h-[calc(100vh-150px)] min-h-[560px] rounded-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden bg-white dark:bg-neutral-950">
+    <div className="flex h-[calc(100vh-124px)] min-h-[600px] rounded-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden bg-white dark:bg-neutral-950 shadow-sm">
       {/* Riel izquierdo mínimo: el chat es el protagonista */}
       <nav className="w-14 sm:w-40 shrink-0 border-r border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/50 flex flex-col py-2">
         <div className="flex items-center gap-2.5 px-3 sm:px-4 py-2.5 text-sm text-brand font-semibold">
@@ -56,7 +56,7 @@ export default function ConversationalDashboard({
       </div>
 
       {/* Derecha: contexto en vivo, solo-lectura (WebSocket) */}
-      <aside className="w-[300px] xl:w-[340px] shrink-0 overflow-y-auto p-4 bg-neutral-50/50 dark:bg-neutral-900/30 hidden lg:block">
+      <aside className="w-[340px] xl:w-[400px] shrink-0 overflow-y-auto p-5 bg-neutral-50/50 dark:bg-neutral-900/30 hidden lg:block">
         {panel === "flujos" && <LiveContextPanel projectKey={projectKey} />}
         {panel === "agentes" && <AgentTracePanel projectKey={projectKey} />}
         {panel === "decisiones" && <DecisionsPanel projectKey={projectKey} user={user} />}

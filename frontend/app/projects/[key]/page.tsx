@@ -622,7 +622,7 @@ export default function ProjectDetailPage() {
   const stageLabel = humanStage(stage);
 
   return (
-    <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <main className={`mx-auto px-4 sm:px-6 py-6 ${!advanced ? "max-w-[1600px]" : "max-w-7xl"}`}>
       {showJustCreated && (
         <div className="mb-5 flex items-start gap-3 px-4 py-3 rounded-xl border border-brand/30 bg-gradient-to-r from-brand/10 to-transparent">
           <span className="grid place-items-center w-9 h-9 rounded-lg bg-gradient-to-br from-brand to-brand-dark text-white shrink-0">
