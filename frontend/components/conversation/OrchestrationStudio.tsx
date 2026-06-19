@@ -15,13 +15,13 @@ import {
 // ── Identidad por agente ─────────────────────────────────────────────────────
 type Theme = { icon: typeof Bot; grad: string; ring: string; text: string; soft: string };
 const THEMES: Record<string, Theme> = {
-  po:        { icon: ShoppingBag,  grad: "from-violet-500 to-fuchsia-500", ring: "ring-violet-400/40",  text: "text-violet-600",  soft: "bg-violet-500/10" },
-  architect: { icon: Building2,    grad: "from-sky-500 to-cyan-500",       ring: "ring-sky-400/40",     text: "text-sky-600",     soft: "bg-sky-500/10" },
-  scrum:     { icon: CalendarRange,grad: "from-amber-500 to-orange-500",   ring: "ring-amber-400/40",   text: "text-amber-600",   soft: "bg-amber-500/10" },
-  developer: { icon: Code2,        grad: "from-emerald-500 to-teal-500",   ring: "ring-emerald-400/40", text: "text-emerald-600", soft: "bg-emerald-500/10" },
-  review:    { icon: ShieldCheck,  grad: "from-rose-500 to-pink-500",      ring: "ring-rose-400/40",    text: "text-rose-600",    soft: "bg-rose-500/10" },
-  qa:        { icon: FlaskConical, grad: "from-yellow-500 to-amber-500",   ring: "ring-yellow-400/40",  text: "text-yellow-600",  soft: "bg-yellow-500/10" },
-  devops:    { icon: Rocket,       grad: "from-indigo-500 to-blue-500",    ring: "ring-indigo-400/40",  text: "text-indigo-600",  soft: "bg-indigo-500/10" },
+  po:        { icon: ShoppingBag,  grad: "from-violet-500 to-fuchsia-500", ring: "ring-violet-400/40",  text: "text-violet-400",  soft: "bg-violet-500/10" },
+  architect: { icon: Building2,    grad: "from-sky-500 to-cyan-500",       ring: "ring-sky-400/40",     text: "text-sky-400",     soft: "bg-sky-500/10" },
+  scrum:     { icon: CalendarRange,grad: "from-amber-500 to-orange-500",   ring: "ring-amber-400/40",   text: "text-amber-400",   soft: "bg-amber-500/10" },
+  developer: { icon: Code2,        grad: "from-emerald-500 to-teal-500",   ring: "ring-emerald-400/40", text: "text-emerald-400", soft: "bg-emerald-500/10" },
+  review:    { icon: ShieldCheck,  grad: "from-rose-500 to-pink-500",      ring: "ring-rose-400/40",    text: "text-rose-400",    soft: "bg-rose-500/10" },
+  qa:        { icon: FlaskConical, grad: "from-yellow-500 to-amber-500",   ring: "ring-yellow-400/40",  text: "text-yellow-400",  soft: "bg-yellow-500/10" },
+  devops:    { icon: Rocket,       grad: "from-indigo-500 to-blue-500",    ring: "ring-indigo-400/40",  text: "text-indigo-400",  soft: "bg-indigo-500/10" },
   default:   { icon: Bot,          grad: "from-brand to-brand-dark",       ring: "ring-brand/40",       text: "text-brand",       soft: "bg-brand/10" },
 };
 function themeOf(agent: string, role = ""): Theme {
@@ -107,7 +107,7 @@ export default function OrchestrationStudio({
         .os-grid { background-image: radial-gradient(circle at 1px 1px, rgba(91,108,255,.07) 1px, transparent 0); background-size: 22px 22px; }
       `}</style>
 
-      <div className="relative w-full max-w-[95rem] h-full sm:h-[96vh] rounded-none sm:rounded-3xl overflow-hidden bg-white shadow-[0_30px_90px_-20px_rgba(15,23,42,.6)] ring-1 ring-slate-200 flex flex-col">
+      <div className="relative w-full max-w-[95rem] h-full sm:h-[96vh] rounded-none sm:rounded-3xl overflow-hidden bg-neutral-950 shadow-[0_30px_90px_-20px_rgba(0,0,0,.7)] ring-1 ring-neutral-800 flex flex-col">
         {/* ── Header ── */}
         <header className="relative shrink-0 px-6 py-5 bg-gradient-to-br from-indigo-950 via-slate-900 to-brand-900 text-white overflow-hidden">
           <div className="absolute -right-10 -top-16 w-64 h-64 rounded-full bg-brand/40 blur-3xl" />
@@ -139,8 +139,8 @@ export default function OrchestrationStudio({
 
         <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[270px_1fr]">
           {/* ── Rail del equipo ── */}
-          <aside className="hidden lg:flex flex-col gap-1.5 p-4 border-r border-slate-200 bg-gradient-to-b from-slate-50 to-white overflow-y-auto">
-            <p className="text-[10px] uppercase tracking-wider text-slate-400 mb-1 flex items-center gap-1.5">
+          <aside className="hidden lg:flex flex-col gap-1.5 p-4 border-r border-neutral-800 bg-gradient-to-b from-neutral-900 to-neutral-950 overflow-y-auto">
+            <p className="text-[10px] uppercase tracking-wider text-neutral-500 mb-1 flex items-center gap-1.5">
               <Activity size={11} /> Equipo
             </p>
             <div className="flex items-center gap-2.5 px-2 py-2 rounded-xl bg-slate-900 text-white">
@@ -150,9 +150,9 @@ export default function OrchestrationStudio({
                 <div className="text-[10px] text-white/50">máquina de estados</div>
               </div>
             </div>
-            <div className="ml-3.5 my-0.5 h-3 w-px text-slate-300 os-flowline" />
+            <div className="ml-3.5 my-0.5 h-3 w-px text-neutral-600 os-flowline" />
             {team.length === 0 && (
-              <p className="text-[11px] text-slate-400 px-2">Aún no hay agentes en acción. Inicia el ciclo.</p>
+              <p className="text-[11px] text-neutral-500 px-2">Aún no hay agentes en acción. Inicia el ciclo.</p>
             )}
             {team.map((m) => {
               const th = themeOf(m.agent, m.role);
@@ -164,13 +164,13 @@ export default function OrchestrationStudio({
                     const s = [...steps].reverse().find((x) => x.agent === m.agent);
                     if (s) setOpenStep(s.id);
                   }}
-                  className={`group flex items-center gap-2.5 px-2 py-2 rounded-xl text-left transition hover:bg-white border ${running ? "border-transparent ring-2 " + th.ring + " bg-white os-glow" : "border-slate-200/70 bg-white/60"}`}>
+                  className={`group flex items-center gap-2.5 px-2 py-2 rounded-xl text-left transition hover:bg-neutral-800 border ${running ? "border-transparent ring-2 " + th.ring + " bg-neutral-800 os-glow" : "border-neutral-800/70 bg-neutral-900/60"}`}>
                   <span className={`grid place-items-center w-7 h-7 rounded-lg bg-gradient-to-br ${th.grad} text-white shrink-0`}>
                     <Icon size={14} />
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="text-[12px] font-medium leading-tight truncate">{m.agent.replace(/ Agent$/i, "")}</div>
-                    <div className="text-[10px] text-slate-400 truncate">{m.role}</div>
+                    <div className="text-[10px] text-neutral-500 truncate">{m.role}</div>
                   </div>
                   {running ? <Loader2 size={13} className="text-emerald-500 animate-spin" />
                     : m.status === "failed" ? <AlertTriangle size={13} className="text-rose-500" />
@@ -181,23 +181,23 @@ export default function OrchestrationStudio({
           </aside>
 
           {/* ── Registro de orquestación (flujo) ── */}
-          <main className="min-h-0 overflow-y-auto p-5 sm:p-7 bg-gradient-to-b from-slate-50/60 to-white os-grid">
+          <main className="min-h-0 overflow-y-auto p-5 sm:p-7 bg-gradient-to-b from-neutral-900/40 to-neutral-950 os-grid">
             {/* Debug del despliegue (cuando aplica) */}
             {deploy && deploy.state && (
               <DeployDebug deploy={deploy} />
             )}
 
-            <p className="text-[10.5px] uppercase tracking-[0.14em] text-slate-400 mb-4 flex items-center gap-1.5 font-medium">
+            <p className="text-[10.5px] uppercase tracking-[0.14em] text-neutral-500 mb-4 flex items-center gap-1.5 font-medium">
               <Activity size={12} className="text-brand" /> Registro de orquestación · cómo se pasan la información
             </p>
 
             {loaded && steps.length === 0 && (
-              <div className="mx-auto max-w-md mt-8 rounded-3xl border border-slate-200 bg-white/80 p-10 text-center shadow-sm">
+              <div className="mx-auto max-w-md mt-8 rounded-3xl border border-neutral-800 bg-neutral-900/60 p-10 text-center shadow-sm">
                 <span className="mx-auto mb-3 grid place-items-center w-14 h-14 rounded-2xl bg-gradient-to-br from-brand to-brand-dark text-white os-glow">
                   <Cpu size={26} />
                 </span>
-                <p className="text-[15px] font-semibold text-slate-700">El equipo aún no arranca</p>
-                <p className="mt-1.5 text-[12.5px] text-slate-400 leading-relaxed">
+                <p className="text-[15px] font-semibold text-neutral-100">El equipo aún no arranca</p>
+                <p className="mt-1.5 text-[12.5px] text-neutral-500 leading-relaxed">
                   Cuando inicies el ciclo verás aquí, paso a paso y en vivo, cómo el orquestador
                   llama a cada agente y cómo se pasan el trabajo entre ellos.
                 </p>
@@ -230,38 +230,38 @@ function DeployDebug({ deploy }: { deploy: NonNullable<Orchestration["deploy"]> 
   const done = deploy.state === "done";
   const pct = Math.max(5, Math.min(100, deploy.phase_pct ?? (done ? 100 : 20)));
   return (
-    <div className={`mb-5 rounded-2xl border p-4 ${failed ? "border-rose-200 bg-rose-50/60" : done ? "border-emerald-200 bg-emerald-50/60" : "border-indigo-200 bg-indigo-50/60"}`}>
+    <div className={`mb-5 rounded-2xl border p-4 ${failed ? "border-rose-500/30 bg-rose-500/10" : done ? "border-emerald-500/30 bg-emerald-500/10" : "border-indigo-500/30 bg-indigo-500/10"}`}>
       <div className="flex items-center gap-2 mb-2">
         <span className={`grid place-items-center w-7 h-7 rounded-lg text-white bg-gradient-to-br ${failed ? "from-rose-500 to-pink-500" : "from-indigo-500 to-blue-500"}`}>
           <Rocket size={14} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-semibold leading-tight">DevOps Agent · Despliegue</div>
-          <div className="text-[11px] text-slate-500 truncate">{deploy.phase_label || deploy.state}</div>
+          <div className="text-[11px] text-neutral-400 truncate">{deploy.phase_label || deploy.state}</div>
         </div>
         {!failed && !done && <Loader2 size={14} className="text-indigo-500 animate-spin" />}
         {done && <CheckCircle2 size={15} className="text-emerald-500" />}
         {failed && <AlertTriangle size={15} className="text-rose-500" />}
       </div>
-      <div className="h-2 w-full rounded-full bg-white/70 overflow-hidden ring-1 ring-black/5">
+      <div className="h-2 w-full rounded-full bg-neutral-800 overflow-hidden ring-1 ring-white/5">
         <div className={`h-full rounded-full transition-all duration-700 ${failed ? "bg-rose-500" : "bg-gradient-to-r from-indigo-500 to-blue-500"}`} style={{ width: `${pct}%` }} />
       </div>
       {/* dónde se quedó / resultado */}
       {failed && (
-        <p className="mt-2 text-[11.5px] text-rose-700">
+        <p className="mt-2 text-[11.5px] text-rose-300">
           ⚠ Se detuvo aquí: {deploy.error || "el build local falló y NO se subió nada (deploy abortado, sin romper la nube)."}
         </p>
       )}
       {Array.isArray(deploy.e2e_fails) && deploy.e2e_fails.length > 0 && (
         <ul className="mt-1.5 space-y-0.5">
           {deploy.e2e_fails.slice(0, 4).map((f, i) => (
-            <li key={i} className="text-[11px] text-amber-700 flex items-start gap-1"><span>•</span>{f}</li>
+            <li key={i} className="text-[11px] text-amber-300 flex items-start gap-1"><span>•</span>{f}</li>
           ))}
         </ul>
       )}
       {done && deploy.url && (
         <a href={deploy.url.startsWith("http") ? deploy.url : `https://${deploy.url}`} target="_blank" rel="noopener noreferrer"
-          className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-medium text-emerald-700 hover:underline">
+          className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-medium text-emerald-400 hover:underline">
           <ExternalLink size={12} /> Abrir la app publicada
         </a>
       )}
@@ -288,14 +288,14 @@ function StepCard({
     <li className="relative pl-10" style={{ animation: `rise .35s ease both`, animationDelay: `${Math.min(index, 12) * 45}ms` }}>
       {/* línea conectora animada */}
       {!isLast && (
-        <span className={`absolute left-[18px] top-9 bottom-0 w-px ${running ? th.text + " os-flowline" : "bg-slate-200"}`} />
+        <span className={`absolute left-[18px] top-9 bottom-0 w-px ${running ? th.text + " os-flowline" : "bg-neutral-800"}`} />
       )}
       {/* nodo */}
       <span className={`absolute left-0 top-1 grid place-items-center w-9 h-9 rounded-xl text-white bg-gradient-to-br ${th.grad} ${running ? "os-glow" : ""}`}>
         <Icon size={16} />
       </span>
 
-      <div className={`mb-4 rounded-2xl border transition ${open ? `border-transparent ring-1 ${th.ring} ${th.soft} shadow-sm` : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm"}`}>
+      <div className={`mb-4 rounded-2xl border transition ${open ? `border-transparent ring-1 ${th.ring} ${th.soft} shadow-sm` : "border-neutral-800 bg-neutral-900/70 hover:border-neutral-700 hover:bg-neutral-900"}`}>
         <button onClick={onToggle} className="w-full text-left px-4 py-3.5 flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
@@ -304,35 +304,35 @@ function StepCard({
               {running ? <Loader2 size={12} className="text-emerald-500 animate-spin" />
                 : failed ? <AlertTriangle size={12} className="text-rose-500" />
                 : <CheckCircle2 size={12} className="text-emerald-500" />}
-              {step.duration_ms != null && <span className="ml-auto text-[10px] text-slate-400 tabular-nums">{fmtDur(step.duration_ms)}</span>}
+              {step.duration_ms != null && <span className="ml-auto text-[10px] text-neutral-500 tabular-nums">{fmtDur(step.duration_ms)}</span>}
             </div>
-            <p className="mt-0.5 text-[12.5px] text-slate-700 leading-snug">
+            <p className="mt-0.5 text-[12.5px] text-neutral-100 leading-snug">
               {step.output_summary || step.action}
             </p>
             {/* handoff: de quién recibió */}
             {step.handoff_from && (
-              <p className="mt-1 text-[11px] text-slate-400 inline-flex items-center gap-1">
+              <p className="mt-1 text-[11px] text-neutral-500 inline-flex items-center gap-1">
                 <ArrowDown size={10} className="rotate-[-90deg]" />
-                {handoffLabel(step.handoff_from)} <span className="font-medium text-slate-500">{step.agent.replace(/ Agent$/i, "")}</span>
+                {handoffLabel(step.handoff_from)} <span className="font-medium text-neutral-400">{step.agent.replace(/ Agent$/i, "")}</span>
               </p>
             )}
           </div>
-          <ChevronRight size={15} className={`text-slate-300 mt-0.5 transition-transform ${open ? "rotate-90" : ""}`} />
+          <ChevronRight size={15} className={`text-neutral-600 mt-0.5 transition-transform ${open ? "rotate-90" : ""}`} />
         </button>
 
         {open && (
-          <div className="px-3.5 pb-3.5 border-t border-slate-100 pt-3 space-y-2.5">
+          <div className="px-3.5 pb-3.5 border-t border-neutral-800 pt-3 space-y-2.5">
             {/* cómo lo hizo: in -> out */}
             {(step.input_summary || step.output_summary) && (
               <div className="flex items-stretch gap-2 text-[11px]">
-                <div className="flex-1 rounded-lg bg-slate-50 border border-slate-100 px-2 py-1.5">
-                  <div className="text-[9px] uppercase tracking-wide text-slate-400">recibió</div>
-                  <div className="text-slate-600">{step.input_summary || "—"}</div>
+                <div className="flex-1 rounded-lg bg-neutral-900 border border-neutral-800 px-2 py-1.5">
+                  <div className="text-[9px] uppercase tracking-wide text-neutral-500">recibió</div>
+                  <div className="text-neutral-300">{step.input_summary || "—"}</div>
                 </div>
-                <div className="flex items-center text-slate-300"><ChevronRight size={14} /></div>
-                <div className="flex-1 rounded-lg bg-slate-50 border border-slate-100 px-2 py-1.5">
-                  <div className="text-[9px] uppercase tracking-wide text-slate-400">produjo</div>
-                  <div className="text-slate-600">{step.output_summary || "—"}</div>
+                <div className="flex items-center text-neutral-600"><ChevronRight size={14} /></div>
+                <div className="flex-1 rounded-lg bg-neutral-900 border border-neutral-800 px-2 py-1.5">
+                  <div className="text-[9px] uppercase tracking-wide text-neutral-500">produjo</div>
+                  <div className="text-neutral-300">{step.output_summary || "—"}</div>
                 </div>
               </div>
             )}
@@ -340,8 +340,8 @@ function StepCard({
             {step.artifacts && step.artifacts.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {step.artifacts.map((a, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600">
-                    <Layers size={10} className="text-slate-400" />
+                  <span key={i} className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-800 text-neutral-300">
+                    <Layers size={10} className="text-neutral-500" />
                     {a.type === "backlog" ? `${a.count ?? 0} historias`
                       : a.type === "adr" ? `${a.count ?? 0} ADRs`
                       : a.type === "build" ? "código del sprint"
@@ -377,26 +377,26 @@ function ArtifactFiles({ projectKey }: { projectKey: string }) {
   };
   return (
     <div>
-      <button onClick={toggle} className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-emerald-600 hover:underline">
-        <FileCode2 size={13} /> {open ? "Ocultar" : "Ver"} archivos generados {files && <span className="text-slate-400">({files.length})</span>}
+      <button onClick={toggle} className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-emerald-400 hover:underline">
+        <FileCode2 size={13} /> {open ? "Ocultar" : "Ver"} archivos generados {files && <span className="text-neutral-500">({files.length})</span>}
         {loading && <Loader2 size={11} className="animate-spin" />}
       </button>
       {open && files && (
         <div className="mt-2 grid grid-cols-1 lg:grid-cols-[minmax(0,18rem)_1fr] gap-2.5">
-          <ul className="max-h-[28rem] overflow-y-auto rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-            {files.length === 0 && <li className="text-[11px] text-slate-400 p-2">Aún no hay archivos.</li>}
+          <ul className="max-h-[28rem] overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 divide-y divide-neutral-800">
+            {files.length === 0 && <li className="text-[11px] text-neutral-500 p-2">Aún no hay archivos.</li>}
             {files.map((f) => (
               <li key={f.id || f.file_path}>
                 <button onClick={() => setSel(f)}
-                  className={`w-full text-left flex items-center gap-1.5 px-2.5 py-1.5 text-[11.5px] font-mono truncate hover:bg-slate-50 ${sel?.file_path === f.file_path ? "bg-emerald-50 text-emerald-700" : "text-slate-600"}`}>
-                  <FileCode2 size={12} className="shrink-0 text-slate-400" />
+                  className={`w-full text-left flex items-center gap-1.5 px-2.5 py-1.5 text-[11.5px] font-mono truncate hover:bg-neutral-900 ${sel?.file_path === f.file_path ? "bg-emerald-500/15 text-emerald-300" : "text-neutral-300"}`}>
+                  <FileCode2 size={12} className="shrink-0 text-neutral-500" />
                   <span className="truncate">{f.file_path}</span>
                 </button>
               </li>
             ))}
           </ul>
           <pre className="max-h-[28rem] overflow-auto rounded-xl bg-slate-900 text-slate-100 text-[11.5px] leading-relaxed p-3.5 ring-1 ring-black/20">
-            {sel ? (sel.content || "").slice(0, 8000) : <span className="text-slate-500">Elige un archivo de la izquierda para ver su código →</span>}
+            {sel ? (sel.content || "").slice(0, 8000) : <span className="text-neutral-400">Elige un archivo de la izquierda para ver su código →</span>}
           </pre>
         </div>
       )}
@@ -422,20 +422,20 @@ function ArtifactTests({ projectKey }: { projectKey: string }) {
   };
   return (
     <div>
-      <button onClick={toggle} className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-amber-600 hover:underline">
-        <FlaskConical size={13} /> {open ? "Ocultar" : "Ver"} pruebas ejecutadas {tests && <span className="text-slate-400">({tests.length})</span>}
+      <button onClick={toggle} className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-amber-400 hover:underline">
+        <FlaskConical size={13} /> {open ? "Ocultar" : "Ver"} pruebas ejecutadas {tests && <span className="text-neutral-500">({tests.length})</span>}
         {loading && <Loader2 size={11} className="animate-spin" />}
       </button>
       {open && tests && (
         <>
-          <p className="mt-1 text-[10.5px] text-slate-400">Estas son las pruebas que el QA corrió para validar la evidencia. Abre una para ver qué verifica.</p>
+          <p className="mt-1 text-[10.5px] text-neutral-500">Estas son las pruebas que el QA corrió para validar la evidencia. Abre una para ver qué verifica.</p>
           <div className="mt-1.5 grid grid-cols-1 lg:grid-cols-[minmax(0,18rem)_1fr] gap-2.5">
-            <ul className="max-h-[26rem] overflow-y-auto rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-              {tests.length === 0 && <li className="text-[11px] text-slate-400 p-2">No se encontraron archivos de prueba.</li>}
+            <ul className="max-h-[26rem] overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 divide-y divide-neutral-800">
+              {tests.length === 0 && <li className="text-[11px] text-neutral-500 p-2">No se encontraron archivos de prueba.</li>}
               {tests.map((f) => (
                 <li key={f.id || f.file_path}>
                   <button onClick={() => setSel(f)}
-                    className={`w-full text-left flex items-center gap-1.5 px-2.5 py-1.5 text-[11.5px] font-mono truncate hover:bg-slate-50 ${sel?.file_path === f.file_path ? "bg-amber-50 text-amber-700" : "text-slate-600"}`}>
+                    className={`w-full text-left flex items-center gap-1.5 px-2.5 py-1.5 text-[11.5px] font-mono truncate hover:bg-neutral-900 ${sel?.file_path === f.file_path ? "bg-amber-500/15 text-amber-300" : "text-neutral-300"}`}>
                     <FlaskConical size={12} className="shrink-0 text-amber-400" />
                     <span className="truncate">{f.file_path}</span>
                   </button>
@@ -443,7 +443,7 @@ function ArtifactTests({ projectKey }: { projectKey: string }) {
               ))}
             </ul>
             <pre className="max-h-[26rem] overflow-auto rounded-xl bg-slate-900 text-slate-100 text-[11.5px] leading-relaxed p-3.5 ring-1 ring-black/20">
-              {sel ? (sel.content || "").slice(0, 8000) : <span className="text-slate-500">Elige una prueba para ver qué valida →</span>}
+              {sel ? (sel.content || "").slice(0, 8000) : <span className="text-neutral-400">Elige una prueba para ver qué valida →</span>}
             </pre>
           </div>
         </>
@@ -469,34 +469,34 @@ function ArtifactStories({ projectKey }: { projectKey: string }) {
   const nMock = (stories || []).filter((s) => s.mockup).length;
   return (
     <div>
-      <button onClick={toggle} className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-violet-600 hover:underline">
+      <button onClick={toggle} className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-violet-400 hover:underline">
         <FileText size={13} /> {open ? "Ocultar" : "Ver"} historias{nMock > 0 ? " + mockups" : ""}
-        {stories && <span className="text-slate-400">({stories.length})</span>}
+        {stories && <span className="text-neutral-500">({stories.length})</span>}
         {loading && <Loader2 size={11} className="animate-spin" />}
       </button>
       {open && stories && (
         <ul className="mt-2 space-y-1.5 max-h-72 overflow-y-auto pr-0.5">
-          {stories.length === 0 && <li className="text-[11px] text-slate-400">Aún no hay historias.</li>}
+          {stories.length === 0 && <li className="text-[11px] text-neutral-500">Aún no hay historias.</li>}
           {stories.map((s, i) => {
             const k = s.story_key || String(i);
             const mockOpen = !!openMock[k];
             return (
-              <li key={k} className="rounded-lg border border-slate-200 px-2.5 py-1.5">
+              <li key={k} className="rounded-lg border border-neutral-800 px-2.5 py-1.5">
                 <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[10px] text-violet-600">{s.story_key}</span>
-                  <span className="text-[12px] text-slate-700 truncate">{s.title}</span>
+                  <span className="font-mono text-[10px] text-violet-400">{s.story_key}</span>
+                  <span className="text-[12px] text-neutral-100 truncate">{s.title}</span>
                   {typeof s.story_points === "number" && (
-                    <span className="ml-auto text-[10px] px-1.5 py-px rounded bg-violet-500/10 text-violet-600 font-medium">{s.story_points} pts</span>
+                    <span className="ml-auto text-[10px] px-1.5 py-px rounded bg-violet-500/10 text-violet-400 font-medium">{s.story_points} pts</span>
                   )}
                 </div>
                 {s.mockup && (
                   <>
                     <button onClick={() => setOpenMock((o) => ({ ...o, [k]: !o[k] }))}
-                      className="mt-1 inline-flex items-center gap-1 text-[10.5px] font-medium text-sky-600 hover:underline">
+                      className="mt-1 inline-flex items-center gap-1 text-[10.5px] font-medium text-sky-400 hover:underline">
                       <ImageIcon size={11} /> {mockOpen ? "ocultar" : "ver"} mockup
                     </button>
                     {mockOpen && (
-                      <div className="mt-1.5 max-w-[280px] rounded-md overflow-hidden border border-slate-200 bg-slate-50"
+                      <div className="mt-1.5 max-w-[280px] rounded-md overflow-hidden border border-neutral-800 bg-neutral-100"
                         dangerouslySetInnerHTML={{ __html: s.mockup }} />
                     )}
                   </>
