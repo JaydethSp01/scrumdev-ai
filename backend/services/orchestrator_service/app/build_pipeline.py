@@ -306,7 +306,9 @@ async def run_build_pipeline(
                 "stack_preference": effective_stack,
                 "nfr": nfr_data or None,
             },
-            timeout=600.0,
+            # supera el presupuesto wall-clock de la generación (APP_GEN_BUDGET_S=900s)
+            # + margen para que el corte lo haga el presupuesto interno, no este httpx.
+            timeout=1000.0,
         )
         files = app_resp.get("files", [])
         await _save_code(project_key, None, files)

@@ -388,7 +388,9 @@ async def _run_generate_full_app(
                 "brand_kit": brand_kit_dict,
                 "assets": assets_list,
             },
-            timeout=600.0,
+            # supera el presupuesto interno (APP_GEN_BUDGET_S=900s) + margen: el corte
+            # lo hace el presupuesto del generador (envía lo hecho), no este httpx.
+            timeout=1000.0,
         )
         files = resp.get("files", [])
 

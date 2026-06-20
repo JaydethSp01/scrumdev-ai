@@ -12,16 +12,25 @@ Stack OBLIGATORIO:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
+import time
 
 from services.agent_runtime_service.app.runtime.claude_code_runtime import run_claude_code
+from services.agent_runtime_service.app.runtime.gen_progress import GenProgress
 from services.agent_runtime_service.app.runtime.product_classifier import classify_product
 from shared.observability import get_logger
 from shared.personalization import build_style_prefix, remember
 
 logger = get_logger(__name__)
+
+# Presupuesto wall-clock TOTAL de la generación (segundos). Garantiza que la fase
+# DEVELOPMENT no se demore "un siglo": la generación principal siempre corre; los
+# refinamientos (calidad/diseño/tests) solo se ejecutan mientras quede presupuesto,
+# y si no caben se OMITEN y se envía la app ya generada (nunca code=0, nunca colgado).
+_APP_GEN_BUDGET_S = float(os.environ.get("APP_GEN_BUDGET_S", "900"))  # 15 min tope
 
 
 APP_GENERATOR_SYSTEM = (
@@ -648,6 +657,20 @@ async def _generate_tests_module(
     ]
 
 
+async def _qg(files, vision, classification, project_key):
+    """Wrapper del gate de calidad (import local: evita import circular)."""
+    from services.agent_runtime_service.app.runtime.quality_gate import enforce_quality
+    return await enforce_quality(files, vision, classification, project_key)
+
+
+async def _dr(files, vision, project_key):
+    """Wrapper del revisor de diseño (import local: evita import circular)."""
+    from services.agent_runtime_service.app.runtime.design_reviewer import (
+        review_and_fix_design,
+    )
+    return await review_and_fix_design(files, vision, project_key)
+
+
 async def generate_full_app(
     project_key: str,
     vision: str,
@@ -731,30 +754,70 @@ async def generate_full_app(
         "}\n"
     )
 
-    raw = await run_claude_code(prompt, system_prompt=APP_GENERATOR_SYSTEM, max_turns=1, kind="ui")
-    data = _extract_json(raw)
-    if not isinstance(data, dict) or "files" not in data:
-        raise ValueError("app generation parse failed")
-    files = data.get("files", [])
-    if not isinstance(files, list) or not files:
-        raise ValueError("files must be a non-empty list")
+    # Reporter de progreso (feedback en vivo + traza por sub-paso) y presupuesto.
+    progress = GenProgress(project_key)
+    _deadline = time.monotonic() + _APP_GEN_BUDGET_S
 
-    # LOOP DIRIGIDO POR EL ML: completar archivos de DOMINIO faltantes (por
-    # entidad) pidiéndole a la IA contenido REAL antes del backfill de scaffolding.
-    files, domain_added = await _complete_domain_with_ai(
-        files, classification, stack_id, vision, project_key)
-    if domain_added:
-        logger.info("domain_files_completed_by_ai", project=project_key, added=domain_added)
+    def _budget_left() -> float:
+        return _deadline - time.monotonic()
 
-    # GATE DE COMPLETITUD (scaffolding): rellenar archivos obligatorios del
-    # blueprint que falten, con defaults válidos (configs, package.json, etc.)
+    # PASO 1 (obligatorio): estructura de la app. Claude genera el manifiesto entero.
+    async with progress.step(
+        "Developer Agent", "Generando estructura, páginas y backend de la app", "generate_app"
+    ) as _s1:
+        raw = await run_claude_code(prompt, system_prompt=APP_GENERATOR_SYSTEM, max_turns=1, kind="ui")
+        data = _extract_json(raw)
+        if not isinstance(data, dict) or "files" not in data:
+            raise ValueError("app generation parse failed")
+        files = data.get("files", [])
+        if not isinstance(files, list) or not files:
+            raise ValueError("files must be a non-empty list")
+        _s1.set(output=f"Generados {len(files)} archivos base",
+                artifacts=[{"type": "files", "count": len(files)}])
+
+    # Helper: corre un refinamiento con IA SOLO si queda presupuesto, time-boxeado al
+    # presupuesto restante, registrando el paso (progreso en vivo). Si no cabe o falla,
+    # se OMITE y se conservan los archivos actuales -> nunca code=0, nunca un siglo.
+    # `summarize(res) -> (output_str, artifacts)` se aplica DENTRO del paso para que el
+    # resumen quede persistido antes de cerrar la fila AgentRun. Devuelve el `res` o None.
+    async def _refine(agent: str, desc: str, min_needed: float, coro_factory, summarize):
+        left = _budget_left()
+        if left < min_needed:
+            await progress.note(agent, desc,
+                                f"Omitido para no demorar más (quedaban {int(left)}s)",
+                                status="skipped")
+            logger.info("refine_skipped_budget", agent=agent, left=int(left))
+            return None
+        try:
+            async with progress.step(agent, desc) as st:
+                # margen de 20s para cerrar/guardar antes del tope duro
+                res = await asyncio.wait_for(coro_factory(), timeout=max(30.0, left - 20))
+                out, arts = summarize(res)
+                st.set(output=out, artifacts=arts)
+                return res
+        except asyncio.TimeoutError:
+            await progress.note(agent, desc, "Cortado por tiempo; se envía lo generado",
+                                status="skipped")
+            logger.warning("refine_timeout", agent=agent)
+            return None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("refine_failed", agent=agent, error=str(exc)[:160])
+            return None
+
+    # PASO 2: completar archivos de DOMINIO faltantes con contenido REAL (IA).
+    res = await _refine(
+        "Developer Agent", "Completando archivos de dominio (datos reales)", 90,
+        lambda: _complete_domain_with_ai(files, classification, stack_id, vision, project_key),
+        lambda r: (f"{r[1]} archivos de dominio completados", [{"type": "files", "count": r[1]}]))
+    if res:
+        files = res[0]
+
+    # GATE DE COMPLETITUD (scaffolding): determinista y rápido -> siempre corre.
     files, fill_report = _ensure_manifest_complete(files, stack_id, project_key)
     if fill_report:
         logger.info("manifest_backfilled", project=project_key, filled=fill_report)
 
-    # UI-KIT 1A: inyectar componentes curados (Claude los compone, no inventa) +
-    # garantizar el color de marca del sector en tailwind. Palanca de consistencia.
-    # Best-effort: un fallo aquí NUNCA debe tumbar la generación.
+    # UI-KIT 1A: inyección determinista de componentes + color de marca (rápido).
     try:
         kit_report: list[str] = []
         files = _inject_ui_kit(files, kit_report)
@@ -765,40 +828,34 @@ async def generate_full_app(
     except Exception as exc:  # noqa: BLE001
         logger.warning("ui_kit_skipped", project=project_key, error=str(exc)[:160])
 
-    # GATE DE CALIDAD (#1): mide CADA página y REGENERA con Claude las pobres
-    # (las de 634 chars / useState(null) / sin datos que salían en blanco) hasta
-    # que cumplan el umbral. Nada pobre se despliega. Claude es obligatorio (UI).
-    try:
-        from services.agent_runtime_service.app.runtime.quality_gate import enforce_quality
-        files, quality_report = await enforce_quality(files, vision, classification, project_key)
-        if quality_report:
-            logger.info("quality_gate", project=project_key, report=quality_report)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("quality_gate_skipped", project=project_key, error=str(exc)[:160])
+    # PASO 3: GATE DE CALIDAD — regenera con Claude las páginas pobres (best-effort).
+    res = await _refine(
+        "Quality Gate", "Revisando y mejorando la calidad de las páginas", 120,
+        lambda: _qg(files, vision, classification, project_key),
+        lambda r: (f"{len(r[1] or [])} páginas mejoradas",
+                   [{"type": "quality", "fixed": len(r[1] or [])}]))
+    if res:
+        files = res[0]
 
-    # AGENTE DE DISEÑO (#11): audita el frontend contra los 7 principios UX/UI +
-    # responsive + accesibilidad y reescribe los archivos con diseño pobre. Sin
-    # límite de tiempo: la calidad visual manda (best-effort, no rompe el flujo).
-    try:
-        from services.agent_runtime_service.app.runtime.design_reviewer import (
-            review_and_fix_design,
-        )
-        files, design_report = await review_and_fix_design(files, vision, project_key)
-        if design_report:
-            logger.info("design_review", project=project_key, report=design_report)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("design_review_skipped", project=project_key, error=str(exc)[:160])
+    # PASO 4: AGENTE DE DISEÑO — audita 7 principios UX/UI y reescribe (best-effort).
+    res = await _refine(
+        "Design Reviewer", "Auditando diseño UX/UI y accesibilidad", 120,
+        lambda: _dr(files, vision, project_key),
+        lambda r: (f"{len(r[1] or [])} archivos rediseñados",
+                   [{"type": "design", "fixed": len(r[1] or [])}]))
+    if res:
+        files = res[0]
 
-    # CICLO DE MÓDULO: TESTS (Adam E) — ciclo de generación propio, después de que
-    # el código (backend/frontend) está listo. Best-effort: nunca rompe el build.
-    try:
-        test_files = await _generate_tests_module(files, backlog, stack_id, project_key)
-        if test_files:
-            files = files + test_files
-            logger.info("tests_module_generated", project=project_key, tests=len(test_files))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("tests_module_skipped", project=project_key, error=str(exc)[:160])
+    # PASO 5: TESTS — genera el módulo de pruebas (best-effort, último en presupuesto).
+    res = await _refine(
+        "Test Engineer", "Generando módulo de pruebas", 90,
+        lambda: _generate_tests_module(files, backlog, stack_id, project_key),
+        lambda r: (f"{len(r or [])} archivos de prueba", [{"type": "tests", "count": len(r or [])}]))
+    if res:
+        files = files + res
 
+    logger.info("app_gen_budget_done", project=project_key,
+                spent_s=int(_APP_GEN_BUDGET_S - _budget_left()), files=len(files))
     data["files"] = files
     data["stack"] = stack_id
     data["classification"] = classification

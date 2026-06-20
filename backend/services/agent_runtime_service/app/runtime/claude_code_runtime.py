@@ -68,6 +68,17 @@ def _ensure_bin_in_env() -> None:
         logger.info("anthropic_api_key_removed_for_oauth_plan")
 
 
+# Timeout por intento (segundos) según el peso de la tarea. La generación de app
+# (ui/app) produce muchos archivos en una respuesta -> necesita más aire que una
+# clasificación de texto. Configurable por env para ajustar sin redeploy de código.
+_KIND_TIMEOUT = {
+    "ui": float(os.environ.get("CLAUDE_TIMEOUT_UI", "420")),
+    "app": float(os.environ.get("CLAUDE_TIMEOUT_APP", "420")),
+    "code": float(os.environ.get("CLAUDE_TIMEOUT_CODE", "300")),
+    "text": float(os.environ.get("CLAUDE_TIMEOUT_TEXT", "180")),
+}
+
+
 async def run_claude_code(
     prompt: str,
     system_prompt: Optional[str] = None,
@@ -75,45 +86,46 @@ async def run_claude_code(
     image_paths: Optional[list[str]] = None,
     kind: str = "text",
 ) -> str:
-    """Punto único de generación con LLM (HÍBRIDO por tipo de tarea).
+    """Punto único de generación con LLM — **CLAUDE-ONLY** (Anthropic es lo mejor hoy
+    para código y UI; OpenAI quedó retirado del flujo).
 
-    REGLA: el DISEÑO/UI lo genera SIEMPRE Claude (OpenAI hace interfaces feas).
-    OpenAI solo apoya en tareas SIN diseño (backlog, clasificación, backend).
+    Estrategia: Claude vía plan headless con REINTENTOS y timeout duro por intento.
+    NO hay fallback a OpenAI (era peso muerto: una key sin saldo convertía un hipo de
+    Claude en fallo duro). Si Claude no responde tras los reintentos, se lanza el error
+    para que el llamador degrade con elegancia (p.ej. omitir un paso de refinamiento y
+    enviar lo ya generado), nunca para tumbar todo el build.
 
-    - kind="ui"  (frontend/componentes/páginas): Claude OBLIGATORIO. Si falla,
-      reintenta Claude (hasta 3x). NO cae a OpenAI -> nunca UI fea.
-    - kind="text"(backlog/clasif/backend/docs): Claude primero; si falla, OpenAI.
+    El único camino no-Claude es `SCRUMDEV_AI_PROVIDER != claude_code` (dev local sin
+    token), que respeta el provider explícito.
     """
     provider = (settings.scrumdev_ai_provider or "claude_code").lower()
     if provider != "claude_code":
         # provider explícito no-claude: respetarlo (p.ej. dev local sin token)
         return await _run_via_api(prompt, system_prompt, image_paths, provider)
 
-    if kind == "ui":
-        last = None
-        for attempt in range(3):  # Claude es obligatorio para UI
-            try:
-                # timeout duro: si el SDK se cuelga, no dejar la corrutina (ni el
-                # build entero) colgada indefinidamente -> aborta y reintenta.
-                return await asyncio.wait_for(
-                    _run_claude_sdk(prompt, system_prompt, max_turns, image_paths),
-                    timeout=180,
-                )
-            except BaseException as exc:  # noqa: BLE001
-                last = exc
-                logger.warning("claude_ui_retry", attempt=attempt, error=str(exc)[:160])
-                if attempt < 2:  # backoff exponencial: no martillear un SDK rate-limited
-                    await asyncio.sleep(2 ** attempt)
-        # agotados los reintentos: usar OpenAI como ÚLTIMO recurso (mejor algo que nada)
-        logger.error("claude_ui_exhausted_openai_fallback", error=str(last)[:160])
-        return await _run_via_api(prompt, system_prompt, image_paths, "openai")
-
-    # tareas de texto (sin diseño): Claude primero, OpenAI de apoyo
-    try:
-        return await _run_claude_sdk(prompt, system_prompt, max_turns, image_paths)
-    except BaseException as exc:  # noqa: BLE001
-        logger.warning("claude_code_failed_fallback_openai", error=str(exc)[:200])
-        return await _run_via_api(prompt, system_prompt, image_paths, "openai")
+    timeout_s = _KIND_TIMEOUT.get(kind, _KIND_TIMEOUT["text"])
+    # 2 intentos (1 reintento): acota el peor caso de tiempo. Un 2º timeout significa
+    # que Claude está genuinamente caído -> el llamador degrada con elegancia.
+    attempts = 2
+    last: BaseException | None = None
+    for attempt in range(attempts):
+        try:
+            # timeout duro: si el SDK se cuelga, abortamos el intento y reintentamos
+            # en vez de dejar la corrutina (y el build) colgada indefinidamente.
+            return await asyncio.wait_for(
+                _run_claude_sdk(prompt, system_prompt, max_turns, image_paths),
+                timeout=timeout_s,
+            )
+        except BaseException as exc:  # noqa: BLE001
+            last = exc
+            logger.warning(
+                "claude_retry", kind=kind, attempt=attempt, error=str(exc)[:160]
+            )
+            if attempt < attempts - 1:
+                await asyncio.sleep(2 ** attempt)  # backoff: no martillear el SDK
+    raise RuntimeError(
+        f"Claude generation failed ({kind}) tras {attempts} intentos: {str(last)[:200]}"
+    )
 
 
 async def _run_claude_sdk(
