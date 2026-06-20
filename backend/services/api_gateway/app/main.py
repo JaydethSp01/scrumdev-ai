@@ -72,9 +72,15 @@ class TextIn(BaseModel):
     text: str
 
 
+# Marcador de BUILD: permite verificar AL INSTANTE qué versión de código está viva
+# en el contenedor (en vez de inferirlo de un ciclo de 10 min). Subir este valor en
+# cada deploy que se quiera confirmar en prod.
+BUILD_MARKER = "gen-budget-progress-v1"
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "api-gateway"}
+    return {"status": "ok", "service": "api-gateway", "build": BUILD_MARKER}
 
 
 @app.get("/services/status")
