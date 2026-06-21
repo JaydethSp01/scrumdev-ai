@@ -103,16 +103,19 @@ RUN npm install -g @anthropic-ai/claude-code || true
 # falla, el build falla y nos enteramos (mejor que un juez visual muerto).
 # PW_BUST: incrementar este número fuerza a HF a reconstruir esta capa (su cache
 # de Docker ignora cambios sutiles; un ARG que cambia sí la invalida).
-ARG PW_BUST=5
+ARG PW_BUST=6
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
-# RESILIENTE: si playwright/--with-deps falla (en trixie faltan algunas fuentes),
-# NO debe tumbar el build (el juez visual es opcional; los brokers SÍ importan).
+# CAUSA RAÍZ del loop de build en HF free-tier (cpu-basic): `--with-deps` instalaba
+# ~200 paquetes apt (fuentes, libs del navegador) que reventaban la RAM/tiempo del
+# builder -> HF mataba el build (OOM) y lo reintentaba sin fin (nunca desplegaba).
+# El `|| echo` NO atrapa un OOM-kill del contenedor de build.
+# FIX: descargar SOLO el binario de chromium (ligero, ~150MB), SIN la bomba apt de
+# system-deps. El juez visual es opcional (el build gate degrada a warning si el
+# navegador no levanta por libs faltantes). Lo esencial es que el build COMPLETE.
 RUN echo "pw-bust=${PW_BUST}" \
     && mkdir -p /opt/pw-browsers \
-    && (apt-get update \
-        && python -m playwright install --with-deps chromium \
-        && chmod -R a+rx /opt/pw-browsers; \
-        rm -rf /var/lib/apt/lists/*) || echo "chromium install skipped (no rompe el build)"
+    && (python -m playwright install chromium \
+        && chmod -R a+rx /opt/pw-browsers) || echo "chromium install skipped (no rompe el build)"
 
 # Redpanda (Kafka-compatible, single-binary) para que la arquitectura
 # event-driven esté VIVA en prod (allinone lo arranca en background). Resiliente:
