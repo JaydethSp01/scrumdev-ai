@@ -46,7 +46,18 @@ RUN poetry export \
         --without-hashes \
         --without dev \
         --format requirements.txt \
-        --output requirements.txt
+        --output requirements.txt.full
+
+# AGILIZAR BUILD (raíz de los deploys lentos/OOM): torch + transformers +
+# sentence-transformers + sus CUDA (nvidia-*/triton) pesan ~2-3GB y reventaban el
+# builder de HF (free-tier). En PRODUCCIÓN no se usan: las 4 NN corren inferencia
+# NumPy pura (pesos .npz, sin torch) y la memoria semántica usa embeddings por API/
+# hashing. Solo se necesitan para ENTRENAR (offline, scripts). Los filtramos del
+# requirements para que el build sea ligero y rápido (de ~20min a ~3-5min).
+RUN grep -viE '^(torch|torchvision|torchaudio|transformers|sentence-transformers|nvidia-|triton)([=<>! ]|$)' \
+        requirements.txt.full > requirements.txt \
+    && echo "=== deps ML pesadas excluidas del runtime ===" \
+    && (grep -iE '^(torch|transformers|sentence|nvidia|triton)' requirements.txt.full || true)
 
 RUN pip install --prefix=/install -r requirements.txt
 

@@ -58,26 +58,59 @@ async def _embed_openai(content: str) -> list[float] | None:
         return None
 
 
+# Dimensión del embedding por hashing (fallback sin deps pesadas). 384 = mismo dim
+# que el viejo MiniLM, así el esquema pgvector queda consistente.
+_HASH_DIM = 384
+
+
+def _embed_hash(content: str) -> list[float]:
+    """Embedding LIGERO por feature-hashing (cero deps: ni torch ni transformers).
+
+    Tokeniza el texto y mapea cada token a uno de _HASH_DIM cubos con signo, luego
+    L2-normaliza. Captura similitud léxica (no semántica profunda como un transformer,
+    pero suficiente para que la RAG recupere notas relacionadas) y es instantáneo.
+    Esto mantiene la memoria semántica VIVA tras quitar sentence-transformers/torch.
+    """
+    import hashlib
+    import math
+    import re
+
+    vec = [0.0] * _HASH_DIM
+    tokens = re.findall(r"[a-záéíóúñ0-9]+", (content or "").lower())
+    for tok in tokens:
+        hd = hashlib.md5(tok.encode("utf-8")).digest()
+        idx = (hd[0] | (hd[1] << 8)) % _HASH_DIM
+        sign = 1.0 if (hd[2] & 1) else -1.0
+        vec[idx] += sign
+    norm = math.sqrt(sum(v * v for v in vec))
+    if norm > 0:
+        vec = [v / norm for v in vec]
+    return vec
+
+
 async def _embed(content: str) -> list[float] | None:
-    """Estrategia hibrida:
+    """Estrategia híbrida (de mejor a más ligera, siempre devuelve algo usable):
     1. OpenAI text-embedding-3-small (1536 dim, mejor recall) si OPENAI_ENABLED
-    2. Fallback al ml_service local (sentence-transformers MiniLM, 384 dim)
+    2. ml_service local (sentence-transformers MiniLM, 384 dim) si ML_ENABLED
+    3. FALLBACK por hashing (384 dim, cero deps) -> la RAG nunca queda muerta
     """
     vec = await _embed_openai(content)
     if vec is not None:
         return vec
-    if not settings.ml_enabled:
-        return None
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{settings.ml_service_url}/ml/embed", json={"text": content}
-            )
-            response.raise_for_status()
-            return response.json().get("embedding")
-    except Exception as exc:
-        logger.warning("ml_embed_unavailable", error=str(exc))
-        return None
+    if settings.ml_enabled:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{settings.ml_service_url}/ml/embed", json={"text": content}
+                )
+                response.raise_for_status()
+                ml_vec = response.json().get("embedding")
+                if ml_vec:
+                    return ml_vec
+        except Exception as exc:
+            logger.warning("ml_embed_unavailable", error=str(exc))
+    # Fallback ligero: garantiza que la memoria semántica siga funcionando sin torch.
+    return _embed_hash(content)
 
 
 async def _setup_pgvector() -> None:
