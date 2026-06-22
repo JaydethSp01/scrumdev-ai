@@ -711,69 +711,138 @@ async def generate_full_app(
     )
     users_block = f"\nUsuarios objetivo: {target_users}" if target_users else ""
 
-    prompt = (
-        f"{style_prefix}"
-        f"{brand_block}"
-        f"Proyecto: **{project_key}**\n"
-        f"Vision:\n{vision}\n{users_block}\n\n"
-        f"{software_block}\n"
-        f"### Backlog priorizado (las historias guian QUE features construir):\n{backlog_block}\n\n"
-        f"{exemplars_block}"
-        f"{stack_block}\n\n"
-        f"{manifest_block}\n\n"
-        f"{design_brief}\n\n"
-        f"{_sector_design_note(classification, vision)}\n"
+    # CONTEXTO COMPARTIDO: idéntico para todos los agentes paralelos -> coherencia
+    # (mismos nombres de entidades, rutas, stack y diseño en frontend y backend).
+    _RULES = (
         "**REGLAS TÉCNICAS OBLIGATORIAS (romperlas = build roto):**\n"
         "1. DATOS (CRÍTICO - la pantalla NUNCA debe verse vacía): el estado inicial DEBE SER "
         "el array de datos, NO vacío. `useState(MOCK)` donde MOCK es un array inline de 4-8 "
         "registros REALES del dominio (o importado de `frontend/lib/mock.ts`). "
-        "PROHIBIDO `useState([])`, `useState(null)`, `useState<...>([])`. El fetch al backend "
-        "va en useEffect SOLO para REFRESCAR (`.then(d => d?.length && setX(d))`), nunca para "
-        "llenar desde vacío. Así el dashboard SIEMPRE muestra datos al cargar, aunque el backend "
-        "esté dormido. Los números de las MetricCard cuadran con las filas. Cero ceros, cero Lorem.\n"
-        "2. COMPONENTES: si IMPORTAS un componente (`@/components/X`, `../components/X`) DEBES "
-        "generar ese archivo, completo y con estilo del sistema de diseño. Cada import = un archivo.\n"
-        "3. SEPARACIÓN: frontend bajo `frontend/`, backend bajo `backend/`. No dupliques archivos.\n"
-        "4. COHERENCIA: `frontend/app/page.tsx` SIEMPRE existe (es el dashboard). TODOS los "
-        "`<Link href>` apuntan a páginas que CREAS. Cero rutas rotas.\n"
-        "5. App Router: navega con `next/navigation` (useRouter/usePathname) y `next/link`. "
-        "NUNCA `next/router`. TODO archivo con hooks/eventos empieza con `\"use client\";` en la "
-        "PRIMERA línea (una sola vez). `app/layout.tsx` es server component con <html><body> "
-        "(sin 'use client').\n"
-        "6. El frontend habla con backend SOLO vía `process.env.NEXT_PUBLIC_API_URL` con fallback "
-        "a `lib/mock.ts`. El backend `backend/main.py` deja `app` (FastAPI) accesible y con CORS.\n"
-        "7. Cada archivo COMPLETO Y EJECUTABLE (sin '...', sin placeholders). Genera TODO el "
-        "manifiesto + 1 página/router CRUD por entidad.\n\n"
-        "**Formato JSON exacto (sin texto extra):**\n"
-        "{\n"
-        f'  "stack": "{stack_id}",\n'
-        '  "product_type": "' + classification["type"] + '",\n'
-        '  "summary": "1-2 frases del producto",\n'
-        '  "routes": ["/", "/<entidad>", ...],\n'
-        '  "files": [{"path": "frontend/app/page.tsx", "content": "..."}, ...]\n'
-        "}\n"
+        "PROHIBIDO `useState([])`, `useState(null)`. El fetch al backend va en useEffect SOLO "
+        "para REFRESCAR (`.then(d => d?.length && setX(d))`). Cero ceros, cero Lorem.\n"
+        "2. COMPONENTES: si IMPORTAS un componente (`@/components/X`) DEBES generarlo completo.\n"
+        "3. SEPARACIÓN: frontend bajo `frontend/`, backend bajo `backend/`. No dupliques.\n"
+        "4. App Router: navega con `next/navigation` y `next/link`. NUNCA `next/router`. TODO "
+        "archivo con hooks/eventos empieza con `\"use client\";` en la 1ª línea. `app/layout.tsx` "
+        "es server component (sin 'use client').\n"
+        "5. El frontend habla con backend SOLO vía `process.env.NEXT_PUBLIC_API_URL` con fallback "
+        "a `lib/mock.ts`. El backend `backend/main.py` deja `app` (FastAPI) con CORS.\n"
+        "6. Cada archivo COMPLETO Y EJECUTABLE (sin '...', sin placeholders).\n"
+    )
+    shared_ctx = (
+        f"{style_prefix}{brand_block}"
+        f"Proyecto: **{project_key}**\nVision:\n{vision}\n{users_block}\n\n"
+        f"{software_block}\n### Backlog priorizado:\n{backlog_block}\n\n"
+        f"{exemplars_block}{stack_block}\n\n{manifest_block}\n\n{design_brief}\n\n"
+        f"{_sector_design_note(classification, vision)}\n{_RULES}\n"
+    )
+    _entities = classification.get("entities") or []
+    _routes_hint = ", ".join(["/"] + [f"/{str(e).lower()}" for e in _entities][:8]) or "/"
+    _json_fmt = (
+        "\n**Devuelve SOLO este JSON (sin texto extra):**\n"
+        '{ "files": [{"path": "...", "content": "..."}, ...] }\n'
     )
 
-    # Reporter de progreso (feedback en vivo + traza por sub-paso) y presupuesto.
     progress = GenProgress(project_key)
     _deadline = time.monotonic() + _APP_GEN_BUDGET_S
 
     def _budget_left() -> float:
         return _deadline - time.monotonic()
 
-    # PASO 1 (obligatorio): estructura de la app. Claude genera el manifiesto entero.
-    async with progress.step(
-        "Developer Agent", "Generando estructura, páginas y backend de la app", "generate_app"
-    ) as _s1:
-        raw = await run_claude_code(prompt, system_prompt=APP_GENERATOR_SYSTEM, max_turns=1, kind="ui")
-        data = _extract_json(raw)
-        if not isinstance(data, dict) or "files" not in data:
-            raise ValueError("app generation parse failed")
-        files = data.get("files", [])
-        if not isinstance(files, list) or not files:
-            raise ValueError("files must be a non-empty list")
-        _s1.set(output=f"Generados {len(files)} archivos base",
-                artifacts=[{"type": "files", "count": len(files)}])
+    async def _gen_area(label: str, area_instr: str) -> list[dict]:
+        """Un agente Claude enfocado en un ÁREA (más pequeño y rápido que el monolito)."""
+        prompt = shared_ctx + area_instr + _json_fmt
+        async with progress.step("Developer Agent", f"Generando {label}", "generate_app") as st:
+            raw = await run_claude_code(
+                prompt, system_prompt=APP_GENERATOR_SYSTEM, max_turns=1, kind="ui")
+            d = _extract_json(raw)
+            fs = d.get("files", []) if isinstance(d, dict) else []
+            fs = [f for f in fs if isinstance(f, dict) and f.get("path")]
+            st.set(output=f"{len(fs)} archivos de {label}",
+                   artifacts=[{"type": "files", "count": len(fs)}])
+            return fs
+
+    # ===================== GENERACIÓN MULTI-AGENTE (SOLID) =====================
+    # En vez de UNA llamada gigante a Claude (~15min, frágil), descomponemos el
+    # trabajo en TAREAS pequeñas e independientes y lanzamos un agente Claude Code
+    # por cada una EN PARALELO. Diseño SOLID:
+    #   - PLANNER  (_plan_tasks): decide DINÁMICAMENTE qué agentes según el producto
+    #              (1 por entidad + base + backend). SRP: solo planifica.
+    #   - EXECUTOR (_run_task + gather + semáforo): corre los agentes en paralelo con
+    #              concurrencia acotada para no exceder el plan. OCP: agregar un tipo
+    #              de tarea NO toca el executor.
+    #   - MERGER:  une los archivos (dedup por path). Una tarea que falla NO rompe
+    #              el resto (los faltantes los cubre el backfill/_complete_domain).
+    # Resultado: cada agente es pequeño -> ~3-4x más rápido y mucho más robusto.
+
+    def _plan_tasks() -> list[tuple[str, str]]:
+        """PLANNER: lista dinámica de (label, instrucción) según el producto."""
+        if is_landing:
+            return [(
+                "la landing",
+                "Genera la LANDING completa y profesional: `frontend/app/page.tsx` con secciones "
+                "(hero, features, pricing, CTA, footer) + `frontend/app/layout.tsx` + los "
+                "componentes que importe. Diseño impecable, copy real del producto.")]
+        tasks: list[tuple[str, str]] = [(
+            "la base (layout + dashboard + datos)",
+            "Genera SOLO la base del frontend: `frontend/app/layout.tsx` (server component, "
+            "<html><body> + sidebar/nav con Links a TODAS las rutas de entidad), "
+            "`frontend/app/page.tsx` (DASHBOARD: MetricCards + tabla resumen con datos mock "
+            "inline) y `frontend/lib/mock.ts` (arrays de datos reales de TODAS las entidades: "
+            f"{', '.join(map(str, _entities[:8])) or 'del dominio'}). NO generes páginas de "
+            "entidad ni backend.")]
+        # UN AGENTE POR ENTIDAD -> paralelismo real, cada uno chico y enfocado.
+        for ent in _entities[:6]:
+            e = str(ent).lower()
+            tasks.append((
+                f"la página de {ent}",
+                f"Genera SOLO la página de la entidad '{ent}': `frontend/app/{e}/page.tsx` "
+                f"(CRUD completo: tabla + crear/editar/eliminar, datos desde `frontend/lib/mock.ts`, "
+                "estilo del sistema de diseño) y los componentes propios que importe. NO generes "
+                "layout, dashboard, backend ni otras entidades."))
+        if not _entities:
+            tasks.append((
+                "las páginas principales",
+                f"Genera las páginas principales del frontend bajo `frontend/app/.../page.tsx` "
+                f"(rutas {_routes_hint}) con CRUD y datos de `frontend/lib/mock.ts`. NO layout/backend."))
+        tasks.append((
+            "el backend (FastAPI)",
+            "Genera SOLO el BACKEND: `backend/main.py` (FastAPI con CORS + endpoints CRUD por "
+            f"entidad: {', '.join(map(str, _entities[:8])) or 'del dominio'}, datos seed en memoria, "
+            "arranca SIN base de datos). NO generes nada de frontend."))
+        return tasks
+
+    # EXECUTOR: paralelo con concurrencia acotada (no saturar el plan de Claude).
+    _sem = asyncio.Semaphore(int(os.environ.get("GEN_MAX_CONCURRENCY", "4")))
+
+    async def _run_task(label: str, instr: str) -> list[dict]:
+        async with _sem:
+            try:
+                return await _gen_area(label, instr)
+            except Exception as exc:  # noqa: BLE001 — una tarea que falla no rompe el resto
+                logger.warning("gen_task_failed", project=project_key, label=label,
+                               error=str(exc)[:160])
+                return []
+
+    _tasks = _plan_tasks()
+    logger.info("multiagent_plan", project=project_key, agents=len(_tasks),
+                labels=[t[0] for t in _tasks])
+    _results = await asyncio.gather(*[_run_task(lbl, instr) for lbl, instr in _tasks])
+
+    # MERGER: dedup por path (cada agente genera paths distintos -> sin colisión real).
+    _merged: dict[str, dict] = {}
+    for _fs in _results:
+        for f in _fs:
+            _merged[f["path"]] = f
+    files = list(_merged.values())
+
+    if not files:
+        raise ValueError("app generation produced no files")
+    data = {
+        "stack": stack_id,
+        "product_type": classification["type"],
+        "files": files,
+    }
 
     # Helper: corre un refinamiento con IA SOLO si queda presupuesto, time-boxeado al
     # presupuesto restante, registrando el paso (progreso en vivo). Si no cabe o falla,
