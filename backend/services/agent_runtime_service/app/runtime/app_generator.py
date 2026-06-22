@@ -749,90 +749,118 @@ async def generate_full_app(
     def _budget_left() -> float:
         return _deadline - time.monotonic()
 
-    async def _gen_area(label: str, area_instr: str) -> list[dict]:
-        """Un agente Claude enfocado en un ÁREA (más pequeño y rápido que el monolito)."""
-        prompt = shared_ctx + area_instr + _json_fmt
+    # ============== GENERACIÓN POR-ARCHIVO (rápida en CPU débil) ==============
+    # EVIDENCIA (medida en prod free-tier): una llamada con OUTPUT GRANDE (varios
+    # archivos en un JSON) se cuelga >7min y supera el timeout — sin importar la
+    # concurrencia. Una llamada con output CHICO (≈backlog) completa en ~30-40s.
+    # => Generamos UN archivo por llamada, con output CRUDO (no un JSON gigante) y
+    # un prompt COMPACTO. Cada llamada es pequeña -> completa rápido y fiable.
+    # El scaffolding (package.json, configs) lo pone el backfill determinista, así
+    # Claude solo genera los archivos SUSTANTIVOS (páginas + backend).
+
+    _ent_list = ", ".join(map(str, _entities[:4])) or "del dominio"
+    compact_ctx = (
+        f"Producto: {vision[:500]}\n"
+        f"Usuarios: {target_users or 'generales'}\n"
+        f"Stack: Next.js 14 App Router + Tailwind (frontend/) y FastAPI (backend/).\n"
+        f"Entidades del dominio: {_ent_list}.\n"
+        f"{brand_block[:400]}"
+        "REGLAS: TypeScript/React limpio y profesional. Archivos con hooks/eventos empiezan "
+        "con \"use client\"; en la 1ª línea (app/layout.tsx NO). Navega con next/link y "
+        "next/navigation (NUNCA next/router). Estado inicial = datos mock reales inline "
+        "(useState con array de 4-8 registros), NUNCA useState([]) ni null. Importa datos de "
+        "@/lib/mock. Diseño Tailwind moderno (cards, tabla, sidebar), nada vacío ni Lorem.\n"
+    )
+
+    def _strip_fences(raw: str) -> str:
+        """Extrae el código si vino envuelto en ```; si no, devuelve tal cual."""
+        s = (raw or "").strip()
+        if "```" in s:
+            import re as _re
+            m = _re.search(r"```[a-zA-Z]*\n(.*?)```", s, _re.DOTALL)
+            if m:
+                return m.group(1).strip()
+        return s
+
+    async def _gen_file(path: str, what: str, label: str) -> dict | None:
+        """Genera UN archivo (output chico -> rápido y fiable en el free-tier)."""
+        prompt = (
+            compact_ctx
+            + f"\nGenera el archivo `{path}`.\n{what}\n"
+            "Devuelve SOLO el código COMPLETO del archivo, sin explicaciones."
+        )
         async with progress.step("Developer Agent", f"Generando {label}", "generate_app") as st:
             raw = await run_claude_code(
                 prompt, system_prompt=APP_GENERATOR_SYSTEM, max_turns=1, kind="ui")
-            d = _extract_json(raw)
-            fs = d.get("files", []) if isinstance(d, dict) else []
-            fs = [f for f in fs if isinstance(f, dict) and f.get("path")]
-            st.set(output=f"{len(fs)} archivos de {label}",
-                   artifacts=[{"type": "files", "count": len(fs)}])
-            return fs
+            content = _strip_fences(raw)
+            st.set(output=f"{path} ({len(content)} chars)",
+                   artifacts=[{"type": "file", "path": path}])
+            if content and len(content) > 20:
+                return {"path": path, "content": content}
+            return None
 
-    # ===================== GENERACIÓN MULTI-AGENTE (SOLID) =====================
-    # En vez de UNA llamada gigante a Claude (~15min, frágil), descomponemos el
-    # trabajo en TAREAS pequeñas e independientes y lanzamos un agente Claude Code
-    # por cada una EN PARALELO. Diseño SOLID:
-    #   - PLANNER  (_plan_tasks): decide DINÁMICAMENTE qué agentes según el producto
-    #              (1 por entidad + base + backend). SRP: solo planifica.
-    #   - EXECUTOR (_run_task + gather + semáforo): corre los agentes en paralelo con
-    #              concurrencia acotada para no exceder el plan. OCP: agregar un tipo
-    #              de tarea NO toca el executor.
-    #   - MERGER:  une los archivos (dedup por path). Una tarea que falla NO rompe
-    #              el resto (los faltantes los cubre el backfill/_complete_domain).
-    # Resultado: cada agente es pequeño -> ~3-4x más rápido y mucho más robusto.
-
-    def _plan_tasks() -> list[tuple[str, str]]:
-        """PLANNER: lista dinámica de (label, instrucción) según el producto."""
+    def _plan_files() -> list[tuple[str, str, str]]:
+        """PLANNER: lista de (path, qué contiene, label) — UN archivo por tarea."""
         if is_landing:
-            return [(
-                "la landing",
-                "Genera la LANDING completa y profesional: `frontend/app/page.tsx` con secciones "
-                "(hero, features, pricing, CTA, footer) + `frontend/app/layout.tsx` + los "
-                "componentes que importe. Diseño impecable, copy real del producto.")]
-        tasks: list[tuple[str, str]] = [(
-            "la base (layout + dashboard + datos)",
-            "Genera SOLO la base del frontend: `frontend/app/layout.tsx` (server component, "
-            "<html><body> + sidebar/nav con Links a TODAS las rutas de entidad), "
-            "`frontend/app/page.tsx` (DASHBOARD: MetricCards + tabla resumen con datos mock "
-            "inline) y `frontend/lib/mock.ts` (arrays de datos reales de TODAS las entidades: "
-            f"{', '.join(map(str, _entities[:8])) or 'del dominio'}). NO generes páginas de "
-            "entidad ni backend.")]
-        # UN AGENTE POR ENTIDAD -> paralelismo real, cada uno chico y enfocado.
-        for ent in _entities[:6]:
+            return [
+                ("frontend/app/layout.tsx",
+                 "Server component con <html><body> y metadata. Sin 'use client'.", "el layout"),
+                ("frontend/app/page.tsx",
+                 "Landing profesional: hero, features, pricing, CTA y footer. Copy real del producto.",
+                 "la landing"),
+            ]
+        plan: list[tuple[str, str, str]] = [
+            ("frontend/app/layout.tsx",
+             "Server component <html><body> + un sidebar/nav (componente inline o simple) con "
+             f"<Link> a / y a una ruta por entidad ({_ent_list}). Sin 'use client'.", "el layout"),
+            ("frontend/lib/mock.ts",
+             f"Exporta arrays de datos mock REALES (4-8 registros) por cada entidad: {_ent_list}. "
+             "TypeScript con tipos.", "los datos mock"),
+            ("frontend/app/page.tsx",
+             "DASHBOARD: 3-4 MetricCards con números reales + una tabla resumen. Importa datos "
+             "de @/lib/mock. 'use client' arriba.", "el dashboard"),
+        ]
+        for ent in _entities[:4]:
             e = str(ent).lower()
-            tasks.append((
-                f"la página de {ent}",
-                f"Genera SOLO la página de la entidad '{ent}': `frontend/app/{e}/page.tsx` "
-                f"(CRUD completo: tabla + crear/editar/eliminar, datos desde `frontend/lib/mock.ts`, "
-                "estilo del sistema de diseño) y los componentes propios que importe. NO generes "
-                "layout, dashboard, backend ni otras entidades."))
-        if not _entities:
-            tasks.append((
-                "las páginas principales",
-                f"Genera las páginas principales del frontend bajo `frontend/app/.../page.tsx` "
-                f"(rutas {_routes_hint}) con CRUD y datos de `frontend/lib/mock.ts`. NO layout/backend."))
-        tasks.append((
-            "el backend (FastAPI)",
-            "Genera SOLO el BACKEND: `backend/main.py` (FastAPI con CORS + endpoints CRUD por "
-            f"entidad: {', '.join(map(str, _entities[:8])) or 'del dominio'}, datos seed en memoria, "
-            "arranca SIN base de datos). NO generes nada de frontend."))
-        return tasks
+            plan.append((
+                f"frontend/app/{e}/page.tsx",
+                f"Página CRUD de '{ent}': tabla con los datos de @/lib/mock + formulario para "
+                "crear/editar y botón eliminar (estado local). 'use client' arriba.",
+                f"la página de {ent}"))
+        plan.append((
+            "backend/main.py",
+            "FastAPI con CORS abierto + endpoints CRUD GET/POST/PUT/DELETE por cada entidad "
+            f"({_ent_list}), con datos seed en memoria (listas Python). Expone `app`. Arranca "
+            "SIN base de datos. Incluye if __name__ con uvicorn.", "el backend"))
+        return plan
 
-    # EXECUTOR: paralelo con concurrencia acotada (no saturar el plan de Claude).
-    _sem = asyncio.Semaphore(int(os.environ.get("GEN_MAX_CONCURRENCY", "4")))
+    # EXECUTOR: secuencial por defecto (concurrencia 1) en el free-tier para que cada
+    # archivo tenga todo el CPU. Configurable con GEN_MAX_CONCURRENCY. Cada archivo es
+    # chico -> aunque sea secuencial, ~30-40s c/u. Respeta el presupuesto wall-clock.
+    _conc = int(os.environ.get("GEN_MAX_CONCURRENCY", "1"))
+    _sem = asyncio.Semaphore(max(1, _conc))
 
-    async def _run_task(label: str, instr: str) -> list[dict]:
+    async def _run_one(path: str, what: str, label: str) -> dict | None:
+        if _budget_left() < 45:  # sin presupuesto -> no arrancar otro archivo
+            return None
         async with _sem:
             try:
-                return await _gen_area(label, instr)
-            except Exception as exc:  # noqa: BLE001 — una tarea que falla no rompe el resto
-                logger.warning("gen_task_failed", project=project_key, label=label,
-                               error=str(exc)[:160])
-                return []
+                return await asyncio.wait_for(_gen_file(path, what, label),
+                                              timeout=max(40.0, _budget_left() - 20))
+            except Exception as exc:  # noqa: BLE001 — un archivo que falla no rompe el resto
+                logger.warning("gen_file_failed", project=project_key, path=path,
+                               error=str(exc)[:140])
+                return None
 
-    _tasks = _plan_tasks()
-    logger.info("multiagent_plan", project=project_key, agents=len(_tasks),
-                labels=[t[0] for t in _tasks])
-    _results = await asyncio.gather(*[_run_task(lbl, instr) for lbl, instr in _tasks])
+    _plan = _plan_files()
+    logger.info("perfile_plan", project=project_key, files=len(_plan),
+                paths=[p[0] for p in _plan])
+    _results = await asyncio.gather(*[_run_one(p, w, l) for p, w, l in _plan])
 
-    # MERGER: dedup por path (cada agente genera paths distintos -> sin colisión real).
+    # MERGER: dedup por path. Un archivo que falló lo cubre el backfill determinista.
     _merged: dict[str, dict] = {}
-    for _fs in _results:
-        for f in _fs:
+    for f in _results:
+        if f and f.get("path"):
             _merged[f["path"]] = f
     files = list(_merged.values())
 
