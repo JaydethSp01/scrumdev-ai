@@ -790,8 +790,13 @@ async def generate_full_app(
             "Devuelve SOLO el código COMPLETO del archivo, sin explicaciones."
         )
         async with progress.step("Developer Agent", f"Generando {label}", "generate_app") as st:
+            # max_turns ALTO: el CLI de Claude Code es AGÉNTICO (razona + genera). Con
+            # max_turns=1 los archivos sustantivos (mock con datos reales, páginas CRUD)
+            # chocaban con "Reached maximum number of turns (1)" y FALLABAN. Esa era la
+            # causa raíz del "se cuelga y no crea código", NO el tamaño ni el free-tier.
             raw = await run_claude_code(
-                prompt, system_prompt=APP_GENERATOR_SYSTEM, max_turns=1, kind="ui")
+                prompt, system_prompt=APP_GENERATOR_SYSTEM,
+                max_turns=int(os.environ.get("GEN_MAX_TURNS", "10")), kind="ui")
             content = _strip_fences(raw)
             st.set(output=f"{path} ({len(content)} chars)",
                    artifacts=[{"type": "file", "path": path}])
