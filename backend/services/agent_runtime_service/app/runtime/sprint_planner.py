@@ -7,6 +7,7 @@ reordena sprints, mueve historias, decide cual ejecutar primero.
 from __future__ import annotations
 
 import json
+import os
 import re
 
 from services.agent_runtime_service.app.runtime.openai_client import chat_fast, is_enabled
@@ -49,6 +50,23 @@ async def plan_sprints(
     """
     if not backlog:
         return []
+
+    # ARQUITECTURA HOLÍSTICA: la generación de código regenera la app COMPLETA en
+    # cada sprint (no es incremental). Por eso dividir en varios sprints solo REPITE
+    # la generación entera N veces, sin aportar nada y multiplicando el tiempo (era la
+    # causa del "loop": PO_REVIEW -> vuelve a DEVELOPMENT -> regenera todo otra vez).
+    # => UN solo sprint con todas las historias: DEVELOPMENT corre una vez y el flujo
+    # avanza directo a release/deploy. (Configurable: SPRINTS_MULTI=1 reactiva el split.)
+    if os.environ.get("SPRINTS_MULTI", "0") != "1":
+        points_total = sum(int(b.get("story_points", 3)) for b in backlog)
+        return [{
+            "number": 1,
+            "name": "Sprint 1 — MVP",
+            "goal": "Construir el MVP completo del producto",
+            "story_keys": [b.get("story_key") for b in backlog],
+            "total_points": points_total,
+            "order_index": 0,
+        }]
 
     stories_block = "\n".join(
         f"- {b.get('story_key','S?')} [{b.get('story_points', 3)}pts, {b.get('priority','medium')}]: "
