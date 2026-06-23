@@ -4099,8 +4099,18 @@ async def _run_deploy_bg(project_key: str, triggered_by: str) -> None:
             res = await _deploy_project_impl(project_key, triggered_by)
         st = _DEPLOY_STATUS.setdefault(project_key, {})
         if res.get("build_gate_failed"):
+            # VISIBILIDAD (pedido de Adam "ver dónde falla"): exponer el error REAL de
+            # compilación del gate (qué archivo/línea rompió), no un mensaje genérico.
+            _gate = res.get("gate") or {}
+            _fe = (_gate.get("tiers") or {}).get("frontend") or {}
+            _be = (_gate.get("tiers") or {}).get("backend") or {}
+            _detail = (_fe.get("log") or "") or "; ".join(_be.get("errors", []))
             st.update({"state": "gate_failed", "deployed": False, "gate_ok": False,
-                       "error": res.get("message")})
+                       "error": res.get("message"),
+                       "gate_detail": _detail[-1800:],
+                       "gate_fixes": _fe.get("fixes", [])})
+            logger.warning("deploy_gate_failed", project=project_key,
+                           detail=_detail[-600:])
         elif res.get("deployed"):
             # GATE DE READINESS: no marcar 'done' hasta verificar que front+back
             # respondan (calienta Render). El user solo recibe apps al 100%.
