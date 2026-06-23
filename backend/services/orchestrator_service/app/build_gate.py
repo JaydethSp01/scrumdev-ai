@@ -1870,6 +1870,50 @@ async def _save_node_modules(tmp: str, key: str) -> None:
         pass
 
 
+def _dedup_imports(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """Quita imports DUPLICADOS por archivo (mismo identificador importado 2+ veces).
+
+    Causa real de deploys rotos: varios inyectores del gate (UI-kit, premium-home,
+    auto-import) podían añadir el MISMO import (p.ej. `MetricCard`) que ya existía ->
+    Next/SWC falla con "the name `X` is defined multiple times". Aquí, por archivo,
+    conservamos el PRIMER import de cada identificador y descartamos los que reimportan
+    nombres ya vistos."""
+    import re as _re
+    total = 0
+    for f in files_rel:
+        p = (f.get("path") or "")
+        if not p.endswith((".tsx", ".ts", ".jsx", ".js")):
+            continue
+        seen: set[str] = set()
+        out: list[str] = []
+        removed = 0
+        for ln in (f.get("content") or "").split("\n"):
+            m = _re.match(r'\s*import\s+(.+?)\s+from\s+["\']', ln)
+            if m:
+                spec = m.group(1).strip()
+                ids: set[str] = set()
+                if not spec.startswith("{") and not spec.startswith("*"):
+                    dm = _re.match(r'([A-Za-z_$][\w$]*)', spec)
+                    if dm:
+                        ids.add(dm.group(1))
+                for grp in _re.findall(r'\{([^}]*)\}', spec):
+                    for part in grp.split(","):
+                        name = part.strip().split(" as ")[-1].strip()
+                        if name:
+                            ids.add(name)
+                if ids and ids <= seen:  # todos ya importados -> línea duplicada
+                    removed += 1
+                    continue
+                seen |= ids
+            out.append(ln)
+        if removed:
+            f["content"] = "\n".join(out)
+            total += removed
+    if total:
+        report.append(f"imports duplicados removidos: {total}")
+    return files_rel
+
+
 async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
                               vision: str = "", is_landing: bool = False,
                               with_auth: bool | None = None) -> dict:
@@ -1919,6 +1963,8 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     # reforzado) y el UI-kit maneja vacío con gracia ("Sin registros"). Estabilidad > seed.
     files_rel = _harden_data_access(files_rel, _pre)
     files_rel = _force_dynamic_pages(files_rel, _pre)
+    files_rel = _dedup_imports(files_rel, _pre)  # imports duplicados (los inyectores
+    #   del UI-kit/premium podían añadir 2x el mismo import -> "defined multiple times")
 
     env = _node_env()
     all_fixes: list[str] = list(_pre)
