@@ -1914,6 +1914,42 @@ def _dedup_imports(files_rel: list[dict], report: list[str]) -> list[dict]:
     return files_rel
 
 
+def _quarantine_failing_files(files_rel: list[dict], log: str, report: list[str]) -> tuple[list[dict], list[str]]:
+    """FALLBACK que GARANTIZA el deploy: si `next build` marca archivos como rotos
+    (errores de compilación que el autofix no resolvió), los reemplaza por una versión
+    que SIEMPRE compila (stub estilizado/funcional). Mejor desplegar la app con una
+    página simplificada que NO desplegar nada. Maneja CUALQUIER error genéricamente."""
+    import re as _re
+    bad = set(_re.findall(r'\.?/((?:app|components|lib|src)/[\w./\-\[\]]+\.(?:tsx|ts|jsx|js))', log or ""))
+    bad |= set(_re.findall(r'([\w./\-\[\]]+\.(?:tsx|ts))(?::\d+:\d+)', log or ""))  # path:line:col
+    if not bad:
+        return files_rel, []
+    try:
+        routes = _discover_routes(files_rel)
+    except Exception:
+        routes = []
+    replaced: list[str] = []
+    for f in files_rel:
+        rel = (f.get("path") or "").lstrip("/")
+        if rel not in bad and not any(rel.endswith(b) for b in bad):
+            continue
+        base = rel.split("/")[-1].rsplit(".", 1)[0]
+        try:
+            if rel.endswith("page.tsx") or rel.endswith("page.jsx"):
+                parts = rel.split("/")
+                label = (parts[-2] if len(parts) > 1 and parts[-2] not in ("app",) else "Inicio").replace("-", " ").title()
+                f["content"] = _route_stub_src(label, "/", False)
+            else:
+                f["content"] = _styled_stub(base, routes)
+            replaced.append(rel)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("quarantine_stub_failed", path=rel, error=str(exc)[:100])
+    if replaced:
+        report.append(f"archivos rotos reemplazados por stub (deploy garantizado): {', '.join(replaced)}")
+        logger.warning("quarantined_failing_files", files=replaced)
+    return files_rel, replaced
+
+
 async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
                               vision: str = "", is_landing: bool = False,
                               with_auth: bool | None = None) -> dict:
@@ -2038,6 +2074,11 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
             files_rel, fixes = _apply_frontend_autofix(files_rel, log_tail)
             all_fixes.extend(fixes)
             logger.warning("frontend_build_failed_retry", attempt=attempt, fixes=fixes)
+            # FALLBACK que garantiza el deploy: en los 2 últimos intentos, si sigue
+            # roto, reemplazar los archivos que el build marca como rotos por stubs que
+            # SIEMPRE compilan -> nunca se cae el deploy por un archivo IA malo.
+            if attempt >= max_attempts - 1:
+                files_rel, _q = _quarantine_failing_files(files_rel, log_tail, all_fixes)
             if attempt < max_attempts:
                 _write_tree(tmp, files_rel)  # reflejar autofix antes de recompilar
                 new_pkg = _pkg_hash(files_rel)
