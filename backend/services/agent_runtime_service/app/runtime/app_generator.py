@@ -773,21 +773,53 @@ async def generate_full_app(
     )
 
     def _strip_fences(raw: str) -> str:
-        """Extrae el código si vino envuelto en ```; si no, devuelve tal cual."""
+        """Extrae el código limpio de la respuesta de Claude.
+
+        ROBUSTO contra el fallo #1 de la generación por-archivo: el modelo a veces
+        devuelve el código y DESPUÉS una explicación markdown (## …, ---, tablas, "
+        Decisiones de diseño…") que, sin cercas ```, se colaba al archivo -> Syntax
+        Error en el build (era la causa de deploys rotos). Aquí: (1) si hay cerca ```
+        usamos su contenido; (2) si no, cortamos la prosa markdown trailing.
+        """
+        import re as _re
         s = (raw or "").strip()
         if "```" in s:
-            import re as _re
-            m = _re.search(r"```[a-zA-Z]*\n(.*?)```", s, _re.DOTALL)
+            m = _re.search(r"```[a-zA-Z]*\n(.*?)```", s, _re.DOTALL)  # bloque cerrado
             if m:
                 return m.group(1).strip()
-        return s
+            m2 = _re.search(r"```[a-zA-Z]*\n(.*)", s, _re.DOTALL)  # cerca sin cierre
+            if m2:
+                s = m2.group(1).strip()
+        # cortar explicación markdown que el modelo añade DESPUÉS del código
+        lines = s.split("\n")
+        cut = len(lines)
+        seen_code = False
+        for i, ln in enumerate(lines):
+            t = ln.strip()
+            if not seen_code and any(ch in t for ch in ("{", "}", ";", "=", "(", "import", "def ", "class ")):
+                seen_code = True
+            tl = t.lower()
+            is_prose = (
+                t in ("---", "***", "___")
+                or t.startswith(("## ", "### ", "#### ", "> **", "| "))
+                or (t.startswith("**") and t.endswith("**") and len(t) > 4)
+                or tl.startswith(("decisiones de", "explicación", "explicacion", "nota:",
+                                  "notas:", "este archivo", "el componente anterior",
+                                  "resumen:", "cómo funciona", "como funciona"))
+            )
+            if is_prose and seen_code and i > 2:
+                cut = i
+                break
+        return "\n".join(lines[:cut]).strip()
 
     async def _gen_file(path: str, what: str, label: str) -> dict | None:
         """Genera UN archivo (output chico -> rápido y fiable en el free-tier)."""
         prompt = (
             compact_ctx
             + f"\nGenera el archivo `{path}`.\n{what}\n"
-            "Devuelve SOLO el código COMPLETO del archivo, sin explicaciones."
+            "IMPORTANTE: responde ÚNICAMENTE con el código del archivo. NADA de "
+            "explicaciones, comentarios introductorios, tablas ni texto markdown "
+            "(ni '---', ni '## ', ni 'Decisiones de diseño') ni antes ni después del código."
         )
         async with progress.step("Developer Agent", f"Generando {label}", "generate_app") as st:
             # max_turns ALTO: el CLI de Claude Code es AGÉNTICO (razona + genera). Con
