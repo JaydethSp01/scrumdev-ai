@@ -2032,8 +2032,23 @@ def _quarantine_failing_files(files_rel: list[dict], log: str, report: list[str]
     que SIEMPRE compila (stub estilizado/funcional). Mejor desplegar la app con una
     página simplificada que NO desplegar nada. Maneja CUALQUIER error genéricamente."""
     import re as _re
-    bad = set(_re.findall(r'\.?/((?:app|components|lib|src)/[\w./\-\[\]]+\.(?:tsx|ts|jsx|js))', log or ""))
-    bad |= set(_re.findall(r'([\w./\-\[\]]+\.(?:tsx|ts))(?::\d+:\d+)', log or ""))  # path:line:col
+    log = log or ""
+    # GUARDA CRÍTICA (free-tier): solo cuarentenar si el log tiene un error de
+    # compilación GENUINO. En cpu-basic, `next build` OOMea/se mata con apps grandes
+    # SIN un error de código real -> antes la cuarentena reemplazaba archivos BUENOS
+    # por stubs (death-spiral que nukeaba el contenido). Vercel (recursos reales)
+    # compila ese mismo código perfecto. Si NO hay firma de error real, NO tocamos
+    # nada y dejamos que deploy-anyway + Vercel sean el juez.
+    _ERR_SIG = ("Type error:", "SyntaxError", "Module not found", "Cannot find module",
+                "is not defined", "Unexpected token", "Unexpected eof", "Expression expected",
+                "defined multiple times", "ReferenceError", "has no exported member",
+                "Cannot find name", "Parsing ecmascript", "Expected ',', got", "x Expected")
+    if not any(sig.lower() in log.lower() for sig in _ERR_SIG):
+        logger.warning("quarantine_skipped_no_real_error",
+                       reason="build falló sin error de compilación genuino (probable OOM free-tier)")
+        return files_rel, []
+    bad = set(_re.findall(r'\.?/((?:app|components|lib|src)/[\w./\-\[\]]+\.(?:tsx|ts|jsx|js))', log))
+    bad |= set(_re.findall(r'([\w./\-\[\]]+\.(?:tsx|ts))(?::\d+:\d+)', log))  # path:line:col
     if not bad:
         return files_rel, []
     try:
