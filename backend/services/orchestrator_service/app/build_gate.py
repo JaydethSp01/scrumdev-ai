@@ -742,7 +742,14 @@ def _autoimport_ui_components(files_rel: list[dict], report: list[str]) -> list[
                 continue
             imported = _re.search(r"import\s*\{[^}]*\b" + comp + r"\b[^}]*\}", c) or \
                 _re.search(r"import\s+" + comp + r"\b", c)
-            if not imported:
+            # NO importar si el archivo YA define el componente local (function/const/
+            # class X) -> el import colisiona: "`X` is defined multiple times". Era la
+            # causa real de builds rotos cuando el dashboard generado trae su propia
+            # MetricCard inline y el auto-import añadía otra del UI-kit.
+            defined_local = _re.search(
+                r"\b(?:function|class)\s+" + comp + r"\b", c) or _re.search(
+                r"\b(?:const|let|var)\s+" + comp + r"\s*[:=]", c)
+            if not imported and not defined_local:
                 missing.append(comp)
         # tipo `Tone` (de Badge) usado como anotación sin importar -> "Cannot find name 'Tone'".
         # PERO no importar si el archivo ya lo DEFINE local (type/interface Tone) -> evita

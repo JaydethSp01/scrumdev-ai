@@ -75,7 +75,7 @@ class TextIn(BaseModel):
 # Marcador de BUILD: permite verificar AL INSTANTE qué versión de código está viva
 # en el contenedor (en vez de inferirlo de un ciclo de 10 min). Subir este valor en
 # cada deploy que se quiera confirmar en prod.
-BUILD_MARKER = "truncation-gate-v14"
+BUILD_MARKER = "collision-fix-v15"
 
 
 @app.get("/health")
