@@ -446,6 +446,34 @@ def _shade(hexc: str, pct: int) -> str:
         return hexc
 
 
+def is_balanced_code(content: str) -> bool:
+    """¿El archivo de código parece COMPLETO (no truncado)? Chequeo BARATO, determinista.
+
+    Detecta el fallo #1 de la generación por-archivo: el modelo a veces corta el output
+    a la mitad (objeto/función incompleta) -> el build de Vercel muere con "Unexpected
+    eof". Un `next build` para detectarlo es caro y OOMea en el free-tier.
+
+    HEURÍSTICA DE DOBLE SEÑAL (precisa, inmune a JSX donde un tokenizer de strings falla
+    por apóstrofes en texto tipo `Cliente's`): marca TRUNCADO solo si se cumplen AMBAS:
+      (1) hay más aperturas que cierres de algún (){}[]  -> faltan cierres
+      (2) el archivo NO termina en un cierre limpio (} ; ) > `)  -> cortado a media línea
+    Exigir las dos hace falsos positivos casi imposibles (no stubbeamos código válido),
+    que es justo el error que antes nukeaba dashboards buenos. Devuelve True = completo.
+    """
+    s = content or ""
+    if len(s) < 20:
+        return False
+    more_opens = (
+        s.count("{") - s.count("}") > 0
+        or s.count("(") - s.count(")") > 0
+        or s.count("[") - s.count("]") > 0
+    )
+    tail = s.rstrip()
+    clean_close = bool(tail) and tail[-1] in "};)>`"
+    # truncado := faltan cierres Y termina a media línea
+    return not (more_opens and not clean_close)
+
+
 def _inject_ui_kit(files: list[dict], report: list[str]) -> list[dict]:
     """Inyecta el UI-kit 1A curado (AppShell/Sidebar/Card/DataTable/Badge/Button/
     PageHeader/EmptyState + cn) en CADA proyecto, bajo frontend/. Es la palanca de
@@ -830,6 +858,23 @@ async def generate_full_app(
                 prompt, system_prompt=APP_GENERATOR_SYSTEM,
                 max_turns=int(os.environ.get("GEN_MAX_TURNS", "10")), kind="ui")
             content = _strip_fences(raw)
+            # ANTI-TRUNCACIÓN: si el archivo de código quedó con llaves/paréntesis sin
+            # cerrar (output cortado a la mitad -> "Unexpected eof" en el build), lo
+            # REGENERAMOS una vez con instrucción de archivo COMPLETO. Esta era la causa
+            # raíz de los builds de Vercel que fallaban con un dashboard real válido.
+            _is_code = path.endswith((".ts", ".tsx", ".js", ".jsx"))
+            if _is_code and content and not is_balanced_code(content):
+                logger.warning("gen_file_truncated_retry", path=path, chars=len(content))
+                raw2 = await run_claude_code(
+                    prompt + "\nEl archivo DEBE estar COMPLETO: cierra TODAS las llaves, "
+                    "paréntesis y el export por defecto. No lo cortes a la mitad.",
+                    system_prompt=APP_GENERATOR_SYSTEM,
+                    max_turns=int(os.environ.get("GEN_MAX_TURNS", "10")), kind="ui")
+                c2 = _strip_fences(raw2)
+                if c2 and len(c2) > 20 and is_balanced_code(c2):
+                    content = c2
+                elif c2 and len(c2) > len(content) and is_balanced_code(c2):
+                    content = c2
             st.set(output=f"{path} ({len(content)} chars)",
                    artifacts=[{"type": "file", "path": path}])
             if content and len(content) > 20:

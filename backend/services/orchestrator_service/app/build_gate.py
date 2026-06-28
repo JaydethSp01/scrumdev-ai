@@ -2077,6 +2077,46 @@ def _quarantine_failing_files(files_rel: list[dict], log: str, report: list[str]
     return files_rel, replaced
 
 
+def _quarantine_unparseable_files(files_rel: list[dict], report: list[str]) -> tuple[list[dict], list[str]]:
+    """Red de seguridad DETERMINISTA (sin `next build`, sin OOM): detecta archivos de
+    código TRUNCADOS (llaves/paréntesis sin cerrar -> "Unexpected eof" en Vercel) y
+    reemplaza SOLO ese archivo por un stub que SIEMPRE compila. Corre siempre, incluso
+    en SKIP_LOCAL_BUILD. A diferencia de la vieja cuarentena (que dependía del log de
+    un build infiable y stubbeaba el dashboard bueno), esto identifica con precisión el
+    archivo realmente roto y deja TODO lo demás (dashboard real) intacto."""
+    try:
+        from services.agent_runtime_service.app.runtime.app_generator import is_balanced_code
+    except Exception:
+        return files_rel, []
+    try:
+        routes = _discover_routes(files_rel)
+    except Exception:
+        routes = []
+    replaced: list[str] = []
+    for f in files_rel:
+        rel = (f.get("path") or "").lstrip("/")
+        if not rel.endswith((".ts", ".tsx", ".js", ".jsx")):
+            continue
+        content = f.get("content") or ""
+        if is_balanced_code(content):
+            continue
+        base = rel.split("/")[-1].rsplit(".", 1)[0]
+        try:
+            if rel.endswith(("page.tsx", "page.jsx")):
+                parts = rel.split("/")
+                label = (parts[-2] if len(parts) > 1 and parts[-2] != "app" else "Inicio").replace("-", " ").title()
+                f["content"] = _route_stub_src(label, "/", False)
+            else:
+                f["content"] = _styled_stub(base, routes)
+            replaced.append(rel)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("unparseable_stub_failed", path=rel, error=str(exc)[:100])
+    if replaced:
+        report.append(f"archivos truncados (sintaxis incompleta) reemplazados por stub: {', '.join(replaced)}")
+        logger.warning("quarantined_unparseable_files", files=replaced)
+    return files_rel, replaced
+
+
 async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
                               vision: str = "", is_landing: bool = False,
                               with_auth: bool | None = None) -> dict:
@@ -2134,6 +2174,11 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     files_rel = _force_dynamic_pages(files_rel, _pre)
     files_rel = _dedup_imports(files_rel, _pre)  # imports duplicados (los inyectores
     #   del UI-kit/premium podían añadir 2x el mismo import -> "defined multiple times")
+
+    # RED DE SEGURIDAD DETERMINISTA: cuarentenar archivos truncados ANTES de decidir si
+    # saltamos el build. Atrapa "Unexpected eof" sin un `next build` completo -> el código
+    # roto NUNCA llega a Vercel, y los archivos válidos (dashboard real) pasan intactos.
+    files_rel, _unparseable = _quarantine_unparseable_files(files_rel, _pre)
 
     all_fixes: list[str] = list(_pre)
 
