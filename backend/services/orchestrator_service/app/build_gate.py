@@ -2135,8 +2135,21 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     files_rel = _dedup_imports(files_rel, _pre)  # imports duplicados (los inyectores
     #   del UI-kit/premium podían añadir 2x el mismo import -> "defined multiple times")
 
-    env = _node_env()
     all_fixes: list[str] = list(_pre)
+
+    # SKIP_LOCAL_BUILD (free-tier): el `next build` local en cpu-basic es INFIABLE
+    # (OOM/proceso matado con apps grandes SIN error de código real) y la cuarentena
+    # terminaba stubbeando dashboards VÁLIDOS ("Sección en preparación"). Vercel
+    # compila ese mismo código con recursos reales -> CONTENIDO REAL. Cuando está
+    # activo, aplicamos SOLO los fixes deterministas (ya hechos arriba: harden,
+    # app-shell, error-boundary, stubs de imports faltantes, configs) y dejamos que
+    # Vercel sea el juez del build. Probado: el dashboard generado compila perfecto.
+    if os.environ.get("SKIP_LOCAL_BUILD", "0") == "1":
+        logger.info("local_build_skipped_vercel_judges", fixes=len(all_fixes))
+        return {"ok": True, "skipped": True, "reason": "build local omitido (free-tier); Vercel compila",
+                "files": files_rel, "fixes": all_fixes, "attempts": 0}
+
+    env = _node_env()
     log_tail = ""
     # UN solo dir + UNA instalación (con cache de node_modules). Los reintentos
     # solo reescriben el código y RECOMPILAN -> recortamos ~3 npm install lentos.
