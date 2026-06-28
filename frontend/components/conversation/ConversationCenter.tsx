@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bot, Send, Loader2, Paperclip, ShieldCheck,
-  CheckCircle2, Lock, HelpCircle, FlaskConical, FileCode2,
+  CheckCircle2, Lock, HelpCircle, ImagePlus, X,
 } from "lucide-react";
 import http from "@/lib/http";
-import { API, apiVisionFromDocument, apiStartLifecycle, apiGetPipeline, apiApproveGate, apiAssistant, apiGetCode, type CodeFile } from "@/lib/api";
+import { API, apiVisionFromDocument, apiStartLifecycle, apiGetPipeline, apiApproveGate, apiAssistant, apiUploadChatImage, type ChatImageUpload } from "@/lib/api";
 
 import BacklogReview, { type ReviewStory } from "@/components/conversation/BacklogReview";
 import NfrInline from "@/components/conversation/NfrInline";
@@ -22,10 +22,15 @@ type Gate = {
     dod?: { done: boolean };
     planner?: { ok: boolean; blockers: number };
     needs_nfr_form?: boolean;
-    staging?: { state?: string; url?: string; api_url?: string; error?: string; phase_label?: string; phase_pct?: number };
+    staging?: { state?: string; url?: string; api_url?: string; error?: string };
   };
 };
-type Msg = { id: number; role: "human" | "agent"; content: string; gate?: Gate };
+type Msg = { id: number; role: "human" | "agent"; content: string; gate?: Gate; images?: string[] };
+
+// Capturas que el PO adjunta/pega en el chat (para reportar un bug visual).
+type ImgAttachment = { preview: string; uploading: boolean; upload?: ChatImageUpload };
+const IMG_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+const IMG_MAX_BYTES = 10 * 1024 * 1024;
 
 const PHASE_LABEL: Record<string, string> = {
   BACKLOG: "Generando el Product Backlog…",
@@ -121,6 +126,8 @@ export default function ConversationCenter({
   const lastState = useRef<string | null>(null);
   const idRef = useRef(1);
   const fileRef = useRef<HTMLInputElement>(null);
+  const imgRef = useRef<HTMLInputElement>(null);
+  const [imgs, setImgs] = useState<ImgAttachment[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // cronómetro de la fase actual (para mostrar el tiempo transcurrido)
@@ -294,25 +301,76 @@ export default function ConversationCenter({
     }
   }, [push, startFlow]);
 
+  // Adjuntar capturas (pega un screenshot del bug o súbelo). Se suben a uploads
+  // y quedan listas para que el agente las VEA (visión) al enviar el mensaje.
+  const handleImageFiles = useCallback(async (files: FileList | File[]) => {
+    const list = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    for (const file of list) {
+      if (!IMG_TYPES.includes(file.type)) continue;
+      if (file.size > IMG_MAX_BYTES) {
+        push({ role: "agent", content: `La imagen ${file.name} excede 10MB.` });
+        continue;
+      }
+      const att: ImgAttachment = { preview: URL.createObjectURL(file), uploading: true };
+      setImgs((prev) => [...prev, att]);
+      try {
+        const up = await apiUploadChatImage(projectKey, file);
+        setImgs((prev) => prev.map((a) => (a === att ? { ...a, uploading: false, upload: up } : a)));
+      } catch {
+        setImgs((prev) => prev.filter((a) => a !== att));
+        push({ role: "agent", content: "No pude subir la captura. Intenta de nuevo." });
+      }
+    }
+  }, [projectKey, push]);
+
+  const onPaste = useCallback((e: React.ClipboardEvent) => {
+    const files = e.clipboardData?.files;
+    if (files && files.length && Array.from(files).some((f) => f.type.startsWith("image/"))) {
+      e.preventDefault();
+      void handleImageFiles(files);
+    }
+  }, [handleImageFiles]);
+
   // Q&A LIBRE (Adam I, profundización): post-arranque el PO le pregunta lo que
-  // sea a los agentes; se responde con la MEMORIA del proyecto.
+  // sea a los agentes; se responde con la MEMORIA del proyecto. Si adjunta una
+  // captura de un bug, el asistente la VE, crea la US de bug y dispara el fix.
   const onSend = useCallback(async () => {
     const text = input.trim();
-    if (!text) return;
-    if (!started) { void startFlow(text); return; }
-    push({ role: "human", content: text });
+    const ready = imgs.filter((a) => a.upload && !a.uploading);
+    const stillUploading = imgs.some((a) => a.uploading);
+    if (stillUploading) return; // esperar a que terminen las subidas
+    if (!text && ready.length === 0) return;
+    // Sin proyecto arrancado y sin imágenes: tratar el texto como requerimientos.
+    if (!started && ready.length === 0) { void startFlow(text); return; }
+    const imageUrls = ready.map((a) => a.upload!.url);
+    const imagePaths = ready.map((a) => a.upload!.fs_path);
+    push({
+      role: "human",
+      content: text || (ready.length ? "(reporté un problema con una captura)" : ""),
+      images: imageUrls.length ? imageUrls : undefined,
+    });
     setInput("");
+    setImgs([]);
     resetInputHeight();
     setBusy(true);
     try {
-      const r = await apiAssistant(projectKey, { user_id: userId || "po", message: text });
+      const r = await apiAssistant(projectKey, {
+        user_id: userId || "po",
+        message: text || "Mira esta captura: reporta y arregla el problema que ves.",
+        image_paths: imagePaths,
+        image_urls: imageUrls,
+      });
       push({ role: "agent", content: r.reply || "…" });
+      // Estado de la acción (ej. "Bug registrado… analizando capturas y aplicando el fix").
+      const status = (r as { action_status?: string }).action_status;
+      if (status) push({ role: "agent", content: status });
+      if (started) { setTimeout(() => void syncPipeline(), 2000); }
     } catch {
       push({ role: "agent", content: "No pude responder ahora. Intenta de nuevo en un momento." });
     } finally {
       setBusy(false);
     }
-  }, [input, started, startFlow, push, projectKey, userId]);
+  }, [input, imgs, started, startFlow, push, projectKey, userId, syncPipeline]);
 
   // "Explícame más a fondo" (que el PO entienda qué va a aprobar).
   const explainGate = useCallback(async (g: Gate) => {
@@ -384,7 +442,16 @@ export default function ConversationCenter({
             </span>
             <div className={`max-w-[80%] space-y-2`}>
               <div className={`rounded-2xl px-4 py-2.5 text-sm ${m.role === "agent" ? "bg-neutral-100 dark:bg-neutral-900" : "bg-brand text-white"}`}>
-                {linkify(m.content)}
+                {m.images && m.images.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {m.images.map((src, i) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img key={i} src={src} alt="captura adjunta"
+                        className="max-h-40 rounded-lg border border-white/30 object-cover" />
+                    ))}
+                  </div>
+                )}
+                {m.content && linkify(m.content)}
               </div>
               {m.gate && (
                 <GateCard
@@ -461,32 +528,64 @@ export default function ConversationCenter({
         )}
       </div>
 
-      <div className="p-3 border-t border-neutral-200 dark:border-neutral-800 flex items-center gap-2 shrink-0">
-        <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.txt,.md" className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUpload(f); }} />
-        <button onClick={() => fileRef.current?.click()} disabled={busy} title="Subir documento"
-          className="p-2 rounded-lg border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
-          <Paperclip size={16} />
-        </button>
-        <textarea
-          ref={inputRef}
-          value={input}
-          rows={1}
-          onChange={(e) => {
-            setInput(e.target.value);
-            const el = e.currentTarget;
-            el.style.height = "auto";
-            el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-          }}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } }}
-          placeholder={started ? "Escribe un mensaje… (Shift+Enter = salto de línea)" : "Pega tus requerimientos aquí… (Shift+Enter = salto de línea)"}
-          disabled={busy}
-          className="flex-1 px-3.5 py-2.5 text-sm rounded-xl border border-neutral-300 dark:border-neutral-700 bg-transparent resize-none leading-relaxed max-h-[200px] overflow-y-auto"
-        />
-        <button onClick={onSend} disabled={busy || !input.trim()}
-          className="p-2.5 rounded-xl bg-brand text-white hover:bg-brand-dark disabled:opacity-60 self-end">
-          <Send size={16} />
-        </button>
+      <div className="border-t border-neutral-200 dark:border-neutral-800 shrink-0">
+        {/* Capturas adjuntas (preview antes de enviar) */}
+        {imgs.length > 0 && (
+          <div className="px-3 pt-3 flex flex-wrap gap-2">
+            {imgs.map((a, i) => (
+              <div key={i} className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={a.preview} alt="captura"
+                  className={`h-16 w-16 rounded-lg object-cover border border-neutral-300 dark:border-neutral-700 ${a.uploading ? "opacity-50" : ""}`} />
+                {a.uploading && (
+                  <span className="absolute inset-0 grid place-items-center">
+                    <Loader2 size={16} className="animate-spin text-brand" />
+                  </span>
+                )}
+                <button
+                  onClick={() => setImgs((prev) => prev.filter((x) => x !== a))}
+                  title="Quitar" disabled={busy}
+                  className="absolute -top-1.5 -right-1.5 grid place-items-center w-4 h-4 rounded-full bg-neutral-800 text-white">
+                  <X size={10} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="p-3 flex items-center gap-2">
+          <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.txt,.md" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUpload(f); }} />
+          <input ref={imgRef} type="file" accept={IMG_TYPES.join(",")} multiple className="hidden"
+            onChange={(e) => { if (e.target.files?.length) void handleImageFiles(e.target.files); e.target.value = ""; }} />
+          <button onClick={() => fileRef.current?.click()} disabled={busy} title="Subir documento de requerimientos"
+            className="p-2 rounded-lg border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
+            <Paperclip size={16} />
+          </button>
+          <button onClick={() => imgRef.current?.click()} disabled={busy} title="Adjuntar captura de un problema (o pégala con Ctrl/Cmd+V)"
+            className="p-2 rounded-lg border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-900">
+            <ImagePlus size={16} />
+          </button>
+          <textarea
+            ref={inputRef}
+            value={input}
+            rows={1}
+            onChange={(e) => {
+              setInput(e.target.value);
+              const el = e.currentTarget;
+              el.style.height = "auto";
+              el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+            }}
+            onPaste={onPaste}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } }}
+            placeholder={started ? "Escribe un mensaje o pega una captura del problema… (Shift+Enter = salto de línea)" : "Pega tus requerimientos aquí… (Shift+Enter = salto de línea)"}
+            disabled={busy}
+            className="flex-1 px-3.5 py-2.5 text-sm rounded-xl border border-neutral-300 dark:border-neutral-700 bg-transparent resize-none leading-relaxed max-h-[200px] overflow-y-auto"
+          />
+          <button onClick={onSend} disabled={busy || (!input.trim() && imgs.filter((a) => a.upload).length === 0) || imgs.some((a) => a.uploading)}
+            className="p-2.5 rounded-xl bg-brand text-white hover:bg-brand-dark disabled:opacity-60 self-end">
+            <Send size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Revisión completa del backlog: ver TODO, descargar y aprobar (Adam B) */}
@@ -498,55 +597,6 @@ export default function ConversationCenter({
           onClose={() => setReviewStories(null)}
           onApprove={() => { setReviewStories(null); void approve(); }}
         />
-      )}
-    </div>
-  );
-}
-
-// Visor de las PRUEBAS reales que ejecutó el QA — en la card de aprobar evidencia,
-// para que el PO vea QUÉ se validó (no solo "Pruebas incluidas").
-function EvidenceTests({ projectKey }: { projectKey: string }) {
-  const [tests, setTests] = useState<CodeFile[] | null>(null);
-  const [open, setOpen] = useState(false);
-  const [sel, setSel] = useState<CodeFile | null>(null);
-  const [loading, setLoading] = useState(false);
-  const toggle = async () => {
-    setOpen((v) => !v);
-    if (tests === null && !loading) {
-      setLoading(true);
-      try {
-        const all = await apiGetCode(projectKey);
-        setTests(all.filter((f) => /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.|test_/i.test(f.file_path)));
-      } catch { setTests([]); } finally { setLoading(false); }
-    }
-  };
-  return (
-    <div className="mt-2">
-      <button onClick={toggle} className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-amber-600 dark:text-amber-400 hover:underline">
-        <FlaskConical size={13} /> {open ? "Ocultar" : "Ver"} las pruebas que se ejecutaron {tests && <span className="text-neutral-400">({tests.length})</span>}
-        {loading && <Loader2 size={11} className="animate-spin" />}
-      </button>
-      {open && tests && (
-        tests.length === 0 ? (
-          <p className="mt-1 text-[11px] text-neutral-500">Aún no hay archivos de prueba generados.</p>
-        ) : (
-          <div className="mt-2 grid grid-cols-1 sm:grid-cols-[minmax(0,13rem)_1fr] gap-2">
-            <ul className="max-h-56 overflow-y-auto rounded-lg border border-neutral-200 dark:border-neutral-800 divide-y divide-neutral-100 dark:divide-neutral-800 bg-white dark:bg-neutral-950">
-              {tests.map((f) => (
-                <li key={f.id || f.file_path}>
-                  <button onClick={() => setSel(f)}
-                    className={`w-full text-left flex items-center gap-1.5 px-2 py-1 text-[11px] font-mono truncate hover:bg-neutral-50 dark:hover:bg-neutral-900 ${sel?.file_path === f.file_path ? "text-amber-600" : "text-neutral-600 dark:text-neutral-300"}`}>
-                    <FileCode2 size={11} className="shrink-0 text-amber-400" />
-                    <span className="truncate">{f.file_path}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <pre className="max-h-56 overflow-auto rounded-lg bg-neutral-900 text-neutral-100 text-[11px] leading-relaxed p-2.5">
-              {sel ? (sel.content || "").slice(0, 6000) : <span className="text-neutral-500">Elige una prueba para ver qué valida →</span>}
-            </pre>
-          </div>
-        )
       )}
     </div>
   );
@@ -636,17 +686,13 @@ function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExp
         </p>
       )}
       {r.evidence?.checks && (
-        <>
-          <ul className="mt-2 space-y-1">
-            {r.evidence.checks.map((c, i) => (
-              <li key={i} className="text-xs flex items-center gap-1.5">
-                {c.ok ? <CheckCircle2 size={11} className="text-emerald-500" /> : <Lock size={11} className="text-amber-500" />} {c.name}
-              </li>
-            ))}
-          </ul>
-          {/* Ver las PRUEBAS reales que validó el QA, antes de aprobar */}
-          <EvidenceTests projectKey={projectKey} />
-        </>
+        <ul className="mt-2 space-y-1">
+          {r.evidence.checks.map((c, i) => (
+            <li key={i} className="text-xs flex items-center gap-1.5">
+              {c.ok ? <CheckCircle2 size={11} className="text-emerald-500" /> : <Lock size={11} className="text-amber-500" />} {c.name}
+            </li>
+          ))}
+        </ul>
       )}
       {/* NFR conversacional: el agente pregunta AQUÍ y el PO responde (sin paneles) */}
       {r.needs_nfr_form && (
@@ -669,22 +715,11 @@ function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExp
               )}
               <span className="text-[11px] text-emerald-600">Valídala y luego aprueba producción.</span>
             </div>
-          ) : r.staging.state === "building" || r.staging.state === "verifying" || r.staging.state === "validando_e2e" ? (
-            <div>
-              <p className="text-xs text-neutral-600 dark:text-neutral-300 inline-flex items-center gap-1.5 font-medium">
-                <Loader2 size={12} className="animate-spin text-brand" />
-                {r.staging.phase_label || "Publicando a staging… la URL aparecerá aquí."}
-              </p>
-              {typeof r.staging.phase_pct === "number" && (
-                <div className="mt-2 h-1.5 w-full rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
-                  <div className="h-full bg-brand transition-all duration-500"
-                    style={{ width: `${Math.max(5, Math.min(100, r.staging.phase_pct))}%` }} />
-                </div>
-              )}
-              <p className="text-[11px] text-neutral-400 mt-1.5">
-                El agente validador sube a Git solo cuando el build pasa sin errores. No puedes aprobar producción hasta tener la URL.
-              </p>
-            </div>
+          ) : r.staging.state === "building" ? (
+            <p className="text-xs text-neutral-500 inline-flex items-center gap-1.5">
+              <Loader2 size={12} className="animate-spin" /> Publicando a staging… la URL aparecerá aquí.
+              <span className="text-neutral-400">(no puedes aprobar producción hasta tener la URL)</span>
+            </p>
           ) : (
             <div>
               <p className="text-xs text-red-600 font-medium">
