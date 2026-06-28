@@ -5,11 +5,13 @@ import {
   X, Cpu, ShoppingBag, Building2, Code2, FlaskConical, ShieldCheck,
   CalendarRange, Rocket, Bot, ArrowDown, CheckCircle2, Loader2, AlertTriangle,
   FileCode2, FileText, Layers, ChevronRight, Activity, ExternalLink,
-  Image as ImageIcon,
+  Image as ImageIcon, CornerDownRight, MinusCircle, XCircle, ScrollText,
+  Monitor, RefreshCw, GitBranch, Server, ShieldAlert,
 } from "lucide-react";
 import {
-  apiGetOrchestration, apiGetCode, apiGetRefinement,
+  apiGetOrchestration, apiGetCode, apiGetRefinement, apiGetAdrs, apiGetDeployPreview,
   type Orchestration, type OrchestrationStep, type CodeFile, type RefinementStory,
+  type AdrItem, type DeployPreview,
 } from "@/lib/api";
 
 // ── Identidad por agente ─────────────────────────────────────────────────────
@@ -52,6 +54,29 @@ function fmtDur(ms?: number | null): string {
   const s = ms / 1000;
   return s < 60 ? `${s.toFixed(s < 10 ? 1 : 0)}s` : `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
 }
+const cleanName = (n?: string | null) => (n || "").replace(/ Agent$/i, "").trim();
+const fullUrl = (u?: string | null) => (!u ? null : u.startsWith("http") ? u : `https://${u}`);
+
+// Reloj en vivo: cuánto lleva corriendo un paso (feedback constante).
+function Elapsed({ since }: { since?: string | null }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  if (!since) return null;
+  const ms = Date.now() - new Date(since).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  return <span className="tabular-nums">{fmtDur(ms)}</span>;
+}
+
+// Estado normalizado de un paso → clasificación visual.
+function stepKind(status: string): "running" | "error" | "skipped" | "done" {
+  if (status === "running") return "running";
+  if (status === "error" || status === "failed") return "error";
+  if (status === "skipped") return "skipped";
+  return "done";
+}
 
 export default function OrchestrationStudio({
   projectKey, onClose,
@@ -84,13 +109,14 @@ export default function OrchestrationStudio({
 
   // equipo único en orden de aparición (para el rail)
   const team = useMemo(() => {
-    const seen = new Map<string, { agent: string; role: string; status: string }>();
+    const rank = { running: 3, error: 2, done: 1, skipped: 0 } as const;
+    const seen = new Map<string, { agent: string; role: string; status: "running" | "error" | "skipped" | "done" }>();
     for (const s of steps) {
       const cur = seen.get(s.agent);
-      seen.set(s.agent, {
-        agent: s.agent, role: s.role,
-        status: s.status === "running" ? "running" : (cur?.status === "running" ? "running" : s.status),
-      });
+      const k = stepKind(s.status);
+      // running siempre gana; si no, conserva el de mayor severidad.
+      const next = !cur ? k : (rank[k] >= rank[cur.status] ? k : cur.status);
+      seen.set(s.agent, { agent: s.agent, role: s.role, status: next });
     }
     return Array.from(seen.values());
   }, [steps]);
@@ -164,7 +190,7 @@ export default function OrchestrationStudio({
                     const s = [...steps].reverse().find((x) => x.agent === m.agent);
                     if (s) setOpenStep(s.id);
                   }}
-                  className={`group flex items-center gap-2.5 px-2 py-2 rounded-xl text-left transition hover:bg-neutral-800 border ${running ? "border-transparent ring-2 " + th.ring + " bg-neutral-800 os-glow" : "border-neutral-800/70 bg-neutral-900/60"}`}>
+                  className={`group flex items-center gap-2.5 px-2 py-2 rounded-xl text-left transition hover:bg-neutral-800 border ${running ? "border-transparent ring-2 " + th.ring + " bg-neutral-800 os-glow" : m.status === "error" ? "border-rose-500/40 bg-rose-500/10 ring-1 ring-rose-500/30" : m.status === "skipped" ? "border-neutral-800/70 bg-neutral-900/40 opacity-70" : "border-neutral-800/70 bg-neutral-900/60"}`}>
                   <span className={`grid place-items-center w-7 h-7 rounded-lg bg-gradient-to-br ${th.grad} text-white shrink-0`}>
                     <Icon size={14} />
                   </span>
@@ -173,7 +199,8 @@ export default function OrchestrationStudio({
                     <div className="text-[10px] text-neutral-500 truncate">{m.role}</div>
                   </div>
                   {running ? <Loader2 size={13} className="text-emerald-500 animate-spin" />
-                    : m.status === "failed" ? <AlertTriangle size={13} className="text-rose-500" />
+                    : m.status === "error" ? <AlertTriangle size={13} className="text-rose-500" />
+                    : m.status === "skipped" ? <MinusCircle size={13} className="text-neutral-500" />
                     : <CheckCircle2 size={13} className="text-emerald-500" />}
                 </button>
               );
@@ -182,6 +209,9 @@ export default function OrchestrationStudio({
 
           {/* ── Registro de orquestación (flujo) ── */}
           <main className="min-h-0 overflow-y-auto p-5 sm:p-7 bg-gradient-to-b from-neutral-900/40 to-neutral-950 os-grid">
+            {/* Mockup REAL: la app desplegada, en vivo */}
+            <LivePreview projectKey={projectKey} deploy={deploy} />
+
             {/* Debug del despliegue (cuando aplica) */}
             {deploy && deploy.state && (
               <DeployDebug deploy={deploy} />
@@ -224,6 +254,115 @@ export default function OrchestrationStudio({
   );
 }
 
+// ── Mockup REAL: la app desplegada en vivo (iframe + enlaces) ─────────────────
+function LivePreview({
+  projectKey, deploy,
+}: { projectKey: string; deploy?: Orchestration["deploy"] }) {
+  const [pv, setPv] = useState<DeployPreview | null>(null);
+  const [embed, setEmbed] = useState(false);
+  const [nonce, setNonce] = useState(0);
+
+  const load = useCallback(async () => {
+    try { setPv(await apiGetDeployPreview(projectKey)); } catch { /* noop */ }
+  }, [projectKey]);
+  useEffect(() => { void load(); }, [load]);
+  // Refresca el estado del deploy mientras "calienta" / sigue desplegando.
+  useEffect(() => {
+    const t = setInterval(() => void load(), 8000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  const url = fullUrl(pv?.vercel_url || deploy?.vercel_url || deploy?.url);
+  const gitUrl = fullUrl(pv?.github_url || deploy?.git_url);
+  const apiUrl = fullUrl(deploy?.api_url);
+  if (!url) return null;
+
+  const gateOk = pv?.gate_ok !== false;
+  const warming = !!pv?.backend_warming;
+  const e2eFails = pv?.e2e_fails || deploy?.e2e_fails || [];
+
+  return (
+    <div className="mb-5 rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/10 via-neutral-900/60 to-neutral-950 overflow-hidden">
+      <div className="flex items-center gap-2.5 px-4 py-3">
+        <span className="grid place-items-center w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-500 text-white shrink-0">
+          <Monitor size={15} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-semibold leading-tight flex items-center gap-2">
+            App en vivo · el mockup real
+            {gateOk
+              ? <span className="text-[10px] px-1.5 py-px rounded-full bg-emerald-400/15 text-emerald-300 ring-1 ring-emerald-400/30">build gate ✓</span>
+              : <span className="text-[10px] px-1.5 py-px rounded-full bg-rose-400/15 text-rose-300 ring-1 ring-rose-400/30">gate falló</span>}
+            {warming && (
+              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-px rounded-full bg-amber-400/15 text-amber-300 ring-1 ring-amber-400/30">
+                <Loader2 size={9} className="animate-spin" /> backend calentando
+              </span>
+            )}
+          </div>
+          <a href={url} target="_blank" rel="noopener noreferrer"
+            className="text-[11px] text-emerald-400/90 hover:underline truncate inline-block max-w-full">
+            {url.replace(/^https?:\/\//, "")}
+          </a>
+        </div>
+        <button onClick={() => { setEmbed((v) => !v); setNonce((n) => n + 1); }}
+          className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-medium px-2.5 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/30 hover:bg-emerald-500/25 transition">
+          <Monitor size={13} /> {embed ? "Ocultar" : "Ver app embebida"}
+        </button>
+        <a href={url} target="_blank" rel="noopener noreferrer"
+          className="shrink-0 inline-flex items-center gap-1.5 text-[11.5px] font-medium px-2.5 py-1.5 rounded-lg bg-white/5 text-white ring-1 ring-white/15 hover:bg-white/10 transition">
+          <ExternalLink size={13} /> Abrir
+        </a>
+      </div>
+
+      {/* enlaces de soporte */}
+      <div className="px-4 pb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-neutral-400">
+        {gitUrl && (
+          <a href={gitUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:text-neutral-200">
+            <GitBranch size={11} /> repositorio
+          </a>
+        )}
+        {apiUrl && (
+          <a href={apiUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:text-neutral-200">
+            <Server size={11} /> API
+          </a>
+        )}
+        <span className="inline-flex items-center gap-1">estado vercel: <span className="text-neutral-200">{pv?.state || deploy?.state || "—"}</span></span>
+      </div>
+
+      {/* fallos e2e si los hay */}
+      {!gateOk && e2eFails.length > 0 && (
+        <ul className="px-4 pb-2 space-y-0.5">
+          {e2eFails.slice(0, 5).map((f, i) => (
+            <li key={i} className="text-[11px] text-rose-300 flex items-start gap-1"><span>•</span>{f}</li>
+          ))}
+        </ul>
+      )}
+
+      {embed && (
+        <div className="relative border-t border-emerald-500/20 bg-black">
+          <div className="absolute right-2 top-2 z-10 flex gap-1.5">
+            <button onClick={() => setNonce((n) => n + 1)}
+              className="grid place-items-center w-7 h-7 rounded-md bg-black/60 text-white/80 ring-1 ring-white/15 hover:text-white" title="Recargar">
+              <RefreshCw size={13} />
+            </button>
+          </div>
+          <iframe
+            key={nonce}
+            src={url}
+            title="App desplegada en vivo"
+            className="w-full h-[60vh] bg-white"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            loading="lazy"
+          />
+          <p className="px-4 py-2 text-[10.5px] text-neutral-500">
+            ¿No carga? Algunos despliegues bloquean el embebido por seguridad — usa “Abrir” para verlo en una pestaña nueva.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Barra de debug del despliegue ────────────────────────────────────────────
 function DeployDebug({ deploy }: { deploy: NonNullable<Orchestration["deploy"]> }) {
   const failed = deploy.state === "gate_failed" || deploy.state === "error" || deploy.state === "done_degraded";
@@ -252,6 +391,11 @@ function DeployDebug({ deploy }: { deploy: NonNullable<Orchestration["deploy"]> 
           ⚠ Se detuvo aquí: {deploy.error || "el build local falló y NO se subió nada (deploy abortado, sin romper la nube)."}
         </p>
       )}
+      {deploy.gate_detail && (
+        <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-black/40 ring-1 ring-white/5 p-2.5 text-[10.5px] leading-relaxed text-neutral-300 whitespace-pre-wrap break-words">
+          {deploy.gate_detail}
+        </pre>
+      )}
       {Array.isArray(deploy.e2e_fails) && deploy.e2e_fails.length > 0 && (
         <ul className="mt-1.5 space-y-0.5">
           {deploy.e2e_fails.slice(0, 4).map((f, i) => (
@@ -278,11 +422,14 @@ function StepCard({
 }) {
   const th = themeOf(step.agent, step.role);
   const Icon = th.icon;
-  const running = step.status === "running";
-  const failed = step.status === "failed";
+  const kind = stepKind(step.status);
+  const running = kind === "running";
+  const failed = kind === "error";
+  const skipped = kind === "skipped";
   const isDev = /develop/i.test(step.agent + step.role);
   const isPO = /product owner|^po/i.test(step.agent + " " + step.role);
   const isQA = /\bqa\b|quality|test/i.test(step.agent + " " + step.role);
+  const isArch = /arch/i.test(step.agent + " " + step.role);
 
   return (
     <li className="relative pl-10" style={{ animation: `rise .35s ease both`, animationDelay: `${Math.min(index, 12) * 45}ms` }}>
@@ -291,29 +438,37 @@ function StepCard({
         <span className={`absolute left-[18px] top-9 bottom-0 w-px ${running ? th.text + " os-flowline" : "bg-neutral-800"}`} />
       )}
       {/* nodo */}
-      <span className={`absolute left-0 top-1 grid place-items-center w-9 h-9 rounded-xl text-white bg-gradient-to-br ${th.grad} ${running ? "os-glow" : ""}`}>
+      <span className={`absolute left-0 top-1 grid place-items-center w-9 h-9 rounded-xl text-white bg-gradient-to-br ${th.grad} ${running ? "os-glow" : ""} ${failed ? "ring-2 ring-rose-500/60" : ""} ${skipped ? "opacity-50 grayscale" : ""}`}>
         <Icon size={16} />
       </span>
 
-      <div className={`mb-4 rounded-2xl border transition ${open ? `border-transparent ring-1 ${th.ring} ${th.soft} shadow-sm` : "border-neutral-800 bg-neutral-900/70 hover:border-neutral-700 hover:bg-neutral-900"}`}>
+      <div className={`mb-4 rounded-2xl border transition ${failed ? "border-rose-500/40 bg-rose-500/10 ring-1 ring-rose-500/25" : skipped ? "border-neutral-800/60 bg-neutral-900/40 opacity-75" : open ? `border-transparent ring-1 ${th.ring} ${th.soft} shadow-sm` : "border-neutral-800 bg-neutral-900/70 hover:border-neutral-700 hover:bg-neutral-900"}`}>
         <button onClick={onToggle} className="w-full text-left px-4 py-3.5 flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="text-[13px] font-semibold">{step.agent.replace(/ Agent$/i, "")}</span>
+              <span className="text-[13px] font-semibold">{cleanName(step.agent)}</span>
               <span className={`text-[10px] px-1.5 py-px rounded ${th.soft} ${th.text} font-medium`}>{step.phase}</span>
               {running ? <Loader2 size={12} className="text-emerald-500 animate-spin" />
-                : failed ? <AlertTriangle size={12} className="text-rose-500" />
+                : failed ? <XCircle size={12} className="text-rose-500" />
+                : skipped ? <MinusCircle size={12} className="text-neutral-500" />
                 : <CheckCircle2 size={12} className="text-emerald-500" />}
-              {step.duration_ms != null && <span className="ml-auto text-[10px] text-neutral-500 tabular-nums">{fmtDur(step.duration_ms)}</span>}
+              {skipped && <span className="text-[9.5px] uppercase tracking-wide px-1.5 py-px rounded bg-neutral-800 text-neutral-400">omitido</span>}
+              {failed && <span className="text-[9.5px] uppercase tracking-wide px-1.5 py-px rounded bg-rose-500/20 text-rose-300">error</span>}
+              <span className="ml-auto text-[10px] text-neutral-500 tabular-nums inline-flex items-center gap-1">
+                {running ? <><Loader2 size={9} className="animate-spin" /><Elapsed since={step.started_at} /></>
+                  : step.duration_ms != null ? fmtDur(step.duration_ms) : null}
+              </span>
             </div>
-            <p className="mt-0.5 text-[12.5px] text-neutral-100 leading-snug">
+            <p className={`mt-0.5 text-[12.5px] leading-snug ${failed ? "text-rose-200" : "text-neutral-100"}`}>
               {step.output_summary || step.action}
             </p>
-            {/* handoff: de quién recibió */}
-            {step.handoff_from && (
-              <p className="mt-1 text-[11px] text-neutral-500 inline-flex items-center gap-1">
-                <ArrowDown size={10} className="rotate-[-90deg]" />
-                {handoffLabel(step.handoff_from)} <span className="font-medium text-neutral-400">{step.agent.replace(/ Agent$/i, "")}</span>
+            {/* handoff: ← viene de QUÉ agente (comunicación entre agentes) */}
+            {step.handoff_from && cleanName(step.handoff_from) !== cleanName(step.agent) && (
+              <p className="mt-1 text-[11px] text-neutral-500 inline-flex items-center gap-1 flex-wrap">
+                <CornerDownRight size={11} className="text-brand" />
+                viene de
+                <span className={`font-medium ${themeOf(step.handoff_from).text}`}>{cleanName(step.handoff_from)}</span>
+                <span className="text-neutral-600">· {handoffLabel(step.handoff_from)}</span>
               </p>
             )}
           </div>
@@ -322,6 +477,22 @@ function StepCard({
 
         {open && (
           <div className="px-3.5 pb-3.5 border-t border-neutral-800 pt-3 space-y-2.5">
+            {/* dónde falló este agente (detalle del error) */}
+            {failed && (
+              <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-2 flex items-start gap-2">
+                <ShieldAlert size={14} className="text-rose-400 mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-[10px] uppercase tracking-wide text-rose-300/80">falló aquí</div>
+                  <div className="text-[11.5px] text-rose-200 break-words">{step.output_summary || step.action || "El agente reportó un error."}</div>
+                </div>
+              </div>
+            )}
+            {skipped && (
+              <div className="rounded-lg border border-neutral-800 bg-neutral-900/60 px-2.5 py-2 text-[11.5px] text-neutral-400 flex items-start gap-2">
+                <MinusCircle size={13} className="text-neutral-500 mt-0.5 shrink-0" />
+                <span>{step.output_summary || "Paso omitido por el orquestador."}</span>
+              </div>
+            )}
             {/* cómo lo hizo: in -> out */}
             {(step.input_summary || step.output_summary) && (
               <div className="flex items-stretch gap-2 text-[11px]">
@@ -344,7 +515,9 @@ function StepCard({
                     <Layers size={10} className="text-neutral-500" />
                     {a.type === "backlog" ? `${a.count ?? 0} historias`
                       : a.type === "adr" ? `${a.count ?? 0} ADRs`
-                      : a.type === "build" ? "código del sprint"
+                      : a.type === "build" ? (a.sprint ? `código (sprint ${a.sprint})` : "código del sprint")
+                      : a.type === "sprints" ? "sprints planificados"
+                      : a.type === "file" ? (typeof a.path === "string" ? a.path.split("/").pop() : "archivo")
                       : a.type === "deploy" ? `deploy → ${a.target || "staging"}`
                       : a.type || "artefacto"}
                   </span>
@@ -355,6 +528,7 @@ function StepCard({
             {isDev && <ArtifactFiles projectKey={projectKey} />}
             {isPO && <ArtifactStories projectKey={projectKey} />}
             {isQA && <ArtifactTests projectKey={projectKey} />}
+            {isArch && <ArtifactAdrs projectKey={projectKey} />}
           </div>
         )}
       </div>
@@ -505,6 +679,55 @@ function ArtifactStories({ projectKey }: { projectKey: string }) {
             );
           })}
         </ul>
+      )}
+    </div>
+  );
+}
+
+// ── Ver ADRs de arquitectura (Architect) ─────────────────────────────────────
+function ArtifactAdrs({ projectKey }: { projectKey: string }) {
+  const [adrs, setAdrs] = useState<AdrItem[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [sel, setSel] = useState<number | null>(null);
+  const toggle = async () => {
+    setOpen((v) => !v);
+    if (adrs === null && !loading) {
+      setLoading(true);
+      try { setAdrs(await apiGetAdrs(projectKey)); } catch { setAdrs([]); } finally { setLoading(false); }
+    }
+  };
+  const current = adrs && sel != null ? adrs[sel] : null;
+  return (
+    <div>
+      <button onClick={toggle} className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-sky-400 hover:underline">
+        <ScrollText size={13} /> {open ? "Ocultar" : "Ver"} decisiones de arquitectura (ADRs)
+        {adrs && <span className="text-neutral-500">({adrs.length})</span>}
+        {loading && <Loader2 size={11} className="animate-spin" />}
+      </button>
+      {open && adrs && (
+        <div className="mt-2 grid grid-cols-1 lg:grid-cols-[minmax(0,16rem)_1fr] gap-2.5">
+          <ul className="max-h-[26rem] overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 divide-y divide-neutral-800">
+            {adrs.length === 0 && <li className="text-[11px] text-neutral-500 p-2">Aún no hay ADRs.</li>}
+            {adrs.map((a, i) => (
+              <li key={a.adr_number ?? i}>
+                <button onClick={() => setSel(i)}
+                  className={`w-full text-left px-2.5 py-1.5 text-[11.5px] hover:bg-neutral-900 ${sel === i ? "bg-sky-500/15 text-sky-300" : "text-neutral-300"}`}>
+                  <span className="font-mono text-[10px] text-sky-400/80">ADR-{String(a.adr_number ?? i + 1).padStart(3, "0")}</span>
+                  <div className="truncate">{a.title || "Decisión de arquitectura"}</div>
+                  {a.status && <span className="text-[9.5px] uppercase tracking-wide text-neutral-500">{a.status}</span>}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <pre className="max-h-[26rem] overflow-auto rounded-xl bg-slate-900 text-slate-100 text-[11.5px] leading-relaxed p-3.5 ring-1 ring-black/20 whitespace-pre-wrap break-words">
+            {current
+              ? (current.markdown
+                  || [current.context && `## Contexto\n${current.context}`, current.decision && `## Decisión\n${current.decision}`, current.consequences && `## Consecuencias\n${current.consequences}`].filter(Boolean).join("\n\n")
+                  || "Sin contenido.").slice(0, 12000)
+              : <span className="text-neutral-400">Elige un ADR para leer la decisión →</span>}
+          </pre>
+        </div>
       )}
     </div>
   );

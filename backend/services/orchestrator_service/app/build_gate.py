@@ -1914,6 +1914,118 @@ def _dedup_imports(files_rel: list[dict], report: list[str]) -> list[dict]:
     return files_rel
 
 
+def _harden_find_access(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """Blinda el acceso a propiedades DESPUÉS de `.find()/.pop()/.shift()` (que pueden
+    devolver undefined): `arr.find(x).campo` -> `arr.find(x)?.campo`. Era la causa #1 del
+    crash de runtime "Application error: client-side exception" (find no encuentra -> .campo
+    sobre undefined). Escanea paréntesis balanceados (la regex no puede con el callback)."""
+    KW = (".find(", ".findLast(", ".pop(", ".shift(")
+    fixed = 0
+    for f in files_rel:
+        path = (f.get("path") or "").lstrip("/")
+        if not path.endswith((".tsx", ".jsx", ".ts")):
+            continue
+        c = f.get("content") or ""
+        n = len(c)
+        out: list[str] = []
+        i = 0
+        changed = False
+        while i < n:
+            kw = next((k for k in KW if c.startswith(k, i)), None)
+            if kw:
+                j = i + len(kw) - 1  # índice del '('
+                depth = 0
+                k = j
+                while k < n:
+                    ch = c[k]
+                    if ch == "(":
+                        depth += 1
+                    elif ch == ")":
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    k += 1
+                out.append(c[i:k + 1])
+                i = k + 1
+                if i < n and c[i] == "." and not c.startswith("?.", i):
+                    out.append("?")
+                    changed = True
+                continue
+            out.append(c[i])
+            i += 1
+        if changed:
+            f["content"] = "".join(out)
+            fixed += 1
+    if fixed:
+        report.append(f"acceso tras .find()/.pop() blindado en {fixed} archivo(s)")
+    return files_rel
+
+
+_ERROR_BOUNDARY_SRC = '''"use client";
+import { useEffect } from "react";
+
+export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  useEffect(() => { console.error(error); }, [error]);
+  return (
+    <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem" }}>
+      <div style={{ textAlign: "center", maxWidth: 420 }}>
+        <div style={{ fontSize: 40, marginBottom: 8 }}>⚠️</div>
+        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Algo no cargó bien</h2>
+        <p style={{ opacity: 0.7, marginBottom: 16, fontSize: 14 }}>
+          Esta sección tuvo un problema al renderizar. Puedes reintentar.
+        </p>
+        <button onClick={() => reset()} style={{ padding: "8px 20px", borderRadius: 8, border: "none",
+          background: "#4f46e5", color: "#fff", fontWeight: 600, cursor: "pointer" }}>
+          Reintentar
+        </button>
+      </div>
+    </div>
+  );
+}
+'''
+
+_GLOBAL_ERROR_SRC = '''"use client";
+
+export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  return (
+    <html lang="es">
+      <body style={{ fontFamily: "system-ui, sans-serif", display: "flex", minHeight: "100vh",
+        alignItems: "center", justifyContent: "center", margin: 0 }}>
+        <div style={{ textAlign: "center", padding: "2rem" }}>
+          <h2 style={{ fontSize: 22, fontWeight: 700 }}>Algo salió mal</h2>
+          <p style={{ opacity: 0.7, margin: "8px 0 16px" }}>Reintenta la operación.</p>
+          <button onClick={() => reset()} style={{ padding: "8px 20px", borderRadius: 8, border: "none",
+            background: "#4f46e5", color: "#fff", fontWeight: 600, cursor: "pointer" }}>Reintentar</button>
+        </div>
+      </body>
+    </html>
+  );
+}
+'''
+
+
+def _ensure_error_boundary(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """Inyecta error.tsx + global-error.tsx (convención App Router): cualquier crash de
+    runtime de una página muestra un fallback amable con 'Reintentar' en vez de la
+    pantalla blanca 'Application error: a client-side exception has occurred'. Red de
+    seguridad GENÉRICA contra CUALQUIER error de runtime del código generado."""
+    paths = {(f.get("path") or "").lstrip("/") for f in files_rel}
+    prefix = "app/"
+    for p in paths:
+        if p.startswith("src/app/"):
+            prefix = "src/app/"
+            break
+    added: list[str] = []
+    for fname, src in (("error.tsx", _ERROR_BOUNDARY_SRC), ("global-error.tsx", _GLOBAL_ERROR_SRC)):
+        tgt = prefix + fname
+        if tgt not in paths:
+            files_rel.append({"path": tgt, "content": src})
+            added.append(fname)
+    if added:
+        report.append("error boundary inyectado: " + ", ".join(added))
+    return files_rel
+
+
 def _quarantine_failing_files(files_rel: list[dict], log: str, report: list[str]) -> tuple[list[dict], list[str]]:
     """FALLBACK que GARANTIZA el deploy: si `next build` marca archivos como rotos
     (errores de compilación que el autofix no resolvió), los reemplaza por una versión
@@ -1970,9 +2082,13 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     # El app-shell (sidebar) es para APPS con datos, NO para landings (que llevan
     # hero+secciones). En stack estático se omite -> no se importa AppShell.
     if not is_landing:
-        # auth ON por defecto en apps-dashboard (login + roles + superadmin
-        # sembrado). El caller puede desactivarlo (with_auth=False).
-        _auth = True if with_auth is None else with_auth
+        # auth OFF por defecto: las apps generadas son MOCKUPS que se MUESTRAN; un
+        # login wall estorba (hay que loguearse para ver el demo) y el AuthGate
+        # client-side era una fuente de crashes de runtime. Sin auth, la app
+        # renderiza su contenido directo = mockup viewable al instante. Re-activable
+        # con GEN_APP_AUTH=1 (o with_auth=True explícito del caller).
+        _auth_default = os.environ.get("GEN_APP_AUTH", "0") == "1"
+        _auth = _auth_default if with_auth is None else with_auth
         _title = _title_from_vision(vision)  # nombre único por proyecto (de la visión)
         files_rel = _apply_app_shell(files_rel, _pre, title=_title, with_auth=_auth)  # shell determinista (sidebar+header+marca[+auth])
     files_rel = _apply_theme_css(files_rel, _pre, vision=vision)  # fuentes del SECTOR + modo claro (mata "todo en negro")
@@ -1998,6 +2114,8 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     # client-side crash (peor que vacío). Claude ya genera datos inline (prompt
     # reforzado) y el UI-kit maneja vacío con gracia ("Sin registros"). Estabilidad > seed.
     files_rel = _harden_data_access(files_rel, _pre)
+    files_rel = _harden_find_access(files_rel, _pre)   # arr.find(x).campo -> .find(x)?.campo (crash runtime #1)
+    files_rel = _ensure_error_boundary(files_rel, _pre)  # error.tsx -> nunca pantalla blanca
     files_rel = _force_dynamic_pages(files_rel, _pre)
     files_rel = _dedup_imports(files_rel, _pre)  # imports duplicados (los inyectores
     #   del UI-kit/premium podían añadir 2x el mismo import -> "defined multiple times")

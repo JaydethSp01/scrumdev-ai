@@ -635,6 +635,16 @@ export type DeployPreview = {
   vercel_url?: string;
   state?: string;
   github_url?: string;
+  github_owner?: string;
+  deployed?: boolean;
+  deploy_state?: string;
+  deploy_error?: string | null;
+  gate_ok?: boolean;
+  live?: boolean;
+  e2e_ok?: boolean;
+  e2e_checks?: string[];
+  e2e_fails?: string[];
+  backend_warming?: boolean;
   [k: string]: unknown;
 };
 
@@ -1362,7 +1372,7 @@ export type OrchestrationStep = {
   input_summary?: string | null;
   output_summary?: string | null;
   artifacts?: AgentRunArtifact[];
-  status: "running" | "done" | "failed";
+  status: "running" | "done" | "failed" | "error" | "skipped";
   handoff_from?: string | null;
   started_at?: string | null;
   ended_at?: string | null;
@@ -1373,8 +1383,10 @@ export type OrchestrationDeploy = {
   phase_label?: string | null;
   phase_pct?: number | null;
   url?: string | null;
+  vercel_url?: string | null;
   api_url?: string | null;
   git_url?: string | null;
+  gate_detail?: string | null;
   error?: string | null;
   e2e_fails?: string[];
 };
@@ -1396,5 +1408,29 @@ export async function apiGetOrchestration(projectKey: string): Promise<Orchestra
     return (await res.json()) as Orchestration;
   } catch {
     return null;
+  }
+}
+
+// ── ADRs de arquitectura (drill-in del Architect Agent) ──────────────────────
+export type AdrItem = {
+  adr_number?: number;
+  title?: string;
+  status?: string;
+  context?: string;
+  decision?: string;
+  consequences?: string;
+  markdown?: string;
+  [k: string]: unknown;
+};
+export async function apiGetAdrs(projectKey: string): Promise<AdrItem[]> {
+  try {
+    const res = await authFetch(
+      `${API}/projects/${encodeURIComponent(projectKey)}/adrs`
+    );
+    if (!res.ok) return [];
+    const d = (await res.json()) as { adrs?: AdrItem[] } | AdrItem[];
+    return Array.isArray(d) ? d : d.adrs || [];
+  } catch {
+    return [];
   }
 }
