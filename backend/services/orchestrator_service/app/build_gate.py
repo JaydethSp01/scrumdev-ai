@@ -1089,6 +1089,75 @@ def _ensure_npm_deps(files_rel: list[dict], report: list[str]) -> list[dict]:
     return files_rel
 
 
+def _fix_mock_imports(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """Remapea imports de `@/lib/mock` a los nombres REALMENTE exportados.
+
+    La generación por-archivo es inconsistente: el dashboard importa `reservas` pero
+    otra página importa `mockReservas` -> "is not exported" -> el símbolo queda
+    undefined -> 500 en runtime (`Cannot read properties of undefined`). Aquí parseamos
+    los exports reales de lib/mock y, por cada import que no existe, lo remapeamos al
+    export cuyo nombre normalizado coincide (mockReservas->reservas), conservando el
+    alias local: `import { reservas as mockReservas }`. Solo tocamos la línea de import
+    -> cero riesgo en el cuerpo. Mata los 500 por datos undefined en apps generadas."""
+    import re as _re
+    # localizar el archivo mock y sus exports const/let/var/function
+    mock = None
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        if p.endswith("lib/mock.ts") or p.endswith("lib/mock.tsx") or p.endswith("lib/mock.js"):
+            mock = f
+            break
+    if not mock:
+        return files_rel
+    exports = set(_re.findall(r"export\s+(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)", mock.get("content") or ""))
+    if not exports:
+        return files_rel
+
+    def _norm(name: str) -> str:
+        s = name.lower()
+        for pre in ("mock", "initial", "datos", "data", "default", "seed", "fake", "sample"):
+            if s.startswith(pre):
+                s = s[len(pre):]
+        for suf in ("data", "list", "iniciales", "inicial", "mock", "items"):
+            if s.endswith(suf):
+                s = s[: -len(suf)]
+        return s.strip("_")
+
+    norm_to_export = {_norm(e): e for e in exports}
+    fixed = 0
+    imp_re = _re.compile(r'import\s*\{([^}]*)\}\s*from\s*["\']@/lib/mock["\']')
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        if not p.endswith((".tsx", ".jsx", ".ts")) or "lib/mock" in p:
+            continue
+        c = f.get("content") or ""
+        m = imp_re.search(c)
+        if not m:
+            continue
+        names = [n.strip() for n in m.group(1).split(",") if n.strip()]
+        new_names = []
+        changed = False
+        for n in names:
+            # respeta alias existentes 'X as Y'
+            base = n.split(" as ")[0].strip()
+            local = n.split(" as ")[-1].strip() if " as " in n else base
+            if base in exports:
+                new_names.append(n)
+                continue
+            target = norm_to_export.get(_norm(base))
+            if target and target != base:
+                new_names.append(f"{target} as {local}")
+                changed = True
+            else:
+                new_names.append(n)  # sin match: dejar (lo cubre otro fix/stub)
+        if changed:
+            f["content"] = c[: m.start()] + 'import { ' + ", ".join(new_names) + ' } from "@/lib/mock"' + c[m.end():]
+            fixed += 1
+    if fixed:
+        report.append(f"imports de @/lib/mock remapeados a exports reales: {fixed}")
+    return files_rel
+
+
 def _stub_missing_local_imports(files_rel: list[dict], report: list[str]) -> list[dict]:
     """La IA importa componentes locales `@/...` que no generó -> 'Module not
     found'. Creamos un stub por cada archivo faltante para que el build resuelva."""
@@ -2165,6 +2234,7 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     files_rel = _fix_next_router(files_rel, _pre)   # App Router: next/router -> next/navigation
     files_rel = _ensure_use_client(files_rel, _pre)  # hooks de cliente -> "use client"
     files_rel = _ensure_npm_deps(files_rel, _pre)    # libs importadas -> package.json
+    files_rel = _fix_mock_imports(files_rel, _pre)   # @/lib/mock: nombres reales (mata 500 por undefined)
     files_rel = _stub_missing_local_imports(files_rel, _pre)  # @/ faltantes -> stub
     files_rel = _relax_next_config(files_rel, _pre)  # ignorar errores TS/lint
     files_rel = _fix_postcss_config(files_rel, _pre)  # postcss plugins canónicos
