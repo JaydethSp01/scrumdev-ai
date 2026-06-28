@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   X, Cpu, ShoppingBag, Building2, Code2, FlaskConical, ShieldCheck,
-  CalendarRange, Rocket, Bot, ArrowDown, CheckCircle2, Loader2, AlertTriangle,
+  CalendarRange, Rocket, Bot, CheckCircle2, Loader2, AlertTriangle,
   FileCode2, FileText, Layers, ChevronRight, Activity, ExternalLink,
   Image as ImageIcon, CornerDownRight, MinusCircle, XCircle, ScrollText,
   Monitor, RefreshCw, GitBranch, Server, ShieldAlert,
