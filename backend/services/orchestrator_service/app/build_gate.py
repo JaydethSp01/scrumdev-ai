@@ -778,6 +778,47 @@ def _autoimport_ui_components(files_rel: list[dict], report: list[str]) -> list[
     return files_rel
 
 
+def _deaccent(s: str) -> str:
+    import unicodedata as _ud
+    return "".join(c for c in _ud.normalize("NFKD", s) if not _ud.combining(c))
+
+
+def _deaccent_routes(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """Des-acentúa las CARPETAS de ruta y los `href`/push internos a ASCII limpio.
+    Una entidad con tilde ('Membresía') genera carpeta `app/membresía/` y el nav enlaza
+    a `/membresía`; Next falla esa ruta (encoding) -> 404 en consola y al hacer clic.
+    Normalizar a `/membresia` (folder + enlaces) lo elimina y deduplica con la versión
+    sin tilde si ya existía (conserva la de más contenido = la real, no el stub)."""
+    import re as _re
+    # 1) des-acentuar hrefs/push internos en el contenido (incluye `href: "/x"` de
+    #    arrays de nav, no solo `href="/x"`/`push("/x")`).
+    href_re = _re.compile(r'((?:href|push|replace)\s*[=(:]\s*["\'`])(/[^"\'`]*)')
+    hn = 0
+    for f in files_rel:
+        if not (f.get("path") or "").endswith((".tsx", ".jsx", ".ts")):
+            continue
+        c = f.get("content") or ""
+        nc = href_re.sub(lambda m: m.group(1) + _deaccent(m.group(2)), c)
+        if nc != c:
+            f["content"] = nc
+            hn += 1
+    # 2) des-acentuar paths de archivos + dedup por path (conserva el de más contenido)
+    by_path: dict[str, dict] = {}
+    renamed = 0
+    for f in files_rel:
+        p = (f.get("path") or "").lstrip("/")
+        np = _deaccent(p)
+        if np != p:
+            renamed += 1
+            f["path"] = np
+        prev = by_path.get(np)
+        if prev is None or len(f.get("content") or "") >= len(prev.get("content") or ""):
+            by_path[np] = f
+    if renamed or hn:
+        report.append(f"rutas/enlaces des-acentuados (anti-404): {renamed} archivo(s), {hn} con enlaces")
+    return list(by_path.values())
+
+
 def _stub_missing_routes(files_rel: list[dict], report: list[str]) -> list[dict]:
     """Detecta enlaces internos (href/Link/router.push) a rutas SIN página y crea
     una página-formulario estilizada en vez de dejar un 404. Mata los 404 de los
@@ -2263,6 +2304,7 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     # el build entero si dos pages resuelven a la misma URL).
     from services.orchestrator_service.app.deploy_validator import _dedup_parallel_routes
     _pre: list[str] = []
+    files_rel = _deaccent_routes(files_rel, _pre)  # /membresía -> /membresia (mata 404 de nav en consola)
     files_rel = _dedup_parallel_routes(files_rel, _pre)
     files_rel = _ensure_tsconfig_alias(files_rel, _pre)  # @/* -> ./* (sin esto rompen todos los @/ imports)
     files_rel = _normalize_css_imports(files_rel, _pre)  # @/app/globals.css -> ./globals.css
