@@ -10,8 +10,9 @@ import {
 } from "lucide-react";
 import {
   apiGetOrchestration, apiGetCode, apiGetRefinement, apiGetAdrs, apiGetDeployPreview,
+  apiGetBacklog,
   type Orchestration, type OrchestrationStep, type CodeFile, type RefinementStory,
-  type AdrItem, type DeployPreview,
+  type AdrItem, type DeployPreview, type BacklogItem,
 } from "@/lib/api";
 
 // ── Identidad por agente ─────────────────────────────────────────────────────
@@ -47,6 +48,26 @@ function handoffLabel(from: string): string {
   if (f.includes("review")) return "entregó la revisión →";
   if (f.includes("qa")) return "entregó la evidencia →";
   return "pasó la posta →";
+}
+// POR QUÉ el orquestador activa a ESTE agente ahora (la lógica del flujo Scrum,
+// que es FIJO y gateado por el Taller 3 — esto solo lo hace explícito en la traza).
+function whyScrum(agent: string, role = ""): string {
+  const s = `${agent} ${role}`.toLowerCase();
+  if (/owner|^po\b|\bpo\b/.test(s))
+    return "el ciclo Scrum arranca por el backlog: traducir la visión en historias priorizadas (DoR).";
+  if (/scrum/.test(s))
+    return "con el backlog refinado, toca planificar: armar el sprint con las historias listas.";
+  if (/arch/.test(s))
+    return "antes de codificar se define la arquitectura sobre las historias + requisitos no funcionales.";
+  if (/develop|dev\b/.test(s))
+    return "con el sprint y la arquitectura definidos, se implementan las historias del sprint.";
+  if (/review/.test(s))
+    return "código terminado → revisión de patrones, políticas y seguridad antes de integrar.";
+  if (/qa|quality|test/.test(s))
+    return "revisado → QA valida contra los criterios de aceptación (Definition of Done).";
+  if (/devops|deploy|release/.test(s))
+    return "validado → se publica a staging para que el PO apruebe el release.";
+  return "siguiente paso del flujo Scrum gateado.";
 }
 function fmtDur(ms?: number | null): string {
   if (ms == null) return "";
@@ -216,6 +237,9 @@ export default function OrchestrationStudio({
             {deploy && deploy.state && (
               <DeployDebug deploy={deploy} />
             )}
+
+            {/* Tablero del sprint: dónde va cada historia (Backlog → En progreso → Hecho) */}
+            <SprintBoard projectKey={projectKey} state={data?.current_state} />
 
             <p className="text-[10.5px] uppercase tracking-[0.14em] text-neutral-500 mb-4 flex items-center gap-1.5 font-medium">
               <Activity size={12} className="text-brand" /> Registro de orquestación · cómo se pasan la información
@@ -417,6 +441,89 @@ function DeployDebug({ deploy }: { deploy: NonNullable<Orchestration["deploy"]> 
 }
 
 // ── Tarjeta de paso (un agente en el flujo) ──────────────────────────────────
+// ── Sprint board (tablero Scrum) ──────────────────────────────────────────────
+// Vista Backlog → En progreso → Hecho con las historias del PO. El orden del flujo
+// es el de Taller 3 (fijo); esto SOLO visualiza dónde va cada historia en el sprint.
+const DEV_STATES = ["DEVELOPMENT", "CODE_REVIEW", "QA", "PO_REVIEW", "RELEASE_APPROVAL",
+  "STAGING_DEPLOYMENT", "PRODUCTION_DEPLOYMENT"];
+function SprintBoard({ projectKey, state }: { projectKey: string; state?: string | null }) {
+  const [items, setItems] = useState<BacklogItem[]>([]);
+  const [open, setOpen] = useState(true);
+  const load = useCallback(async () => {
+    try { setItems(await apiGetBacklog(projectKey)); } catch { /* noop */ }
+  }, [projectKey]);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { const t = setInterval(() => void load(), 6000); return () => clearInterval(t); }, [load]);
+  if (items.length === 0) return null;
+
+  const inDev = DEV_STATES.includes(state || "");
+  const released = state === "RELEASED";
+  const colOf = (s: BacklogItem): 0 | 1 | 2 => {
+    const st = (s.status || "").toLowerCase();
+    if (st === "done" || released) return 2;
+    if (inDev) return 1;
+    return 0;
+  };
+  const cols: { key: string; label: string; tint: string }[] = [
+    { key: "todo", label: "Backlog", tint: "text-neutral-400" },
+    { key: "doing", label: "En progreso", tint: "text-amber-400" },
+    { key: "done", label: "Hecho", tint: "text-emerald-400" },
+  ];
+  const buckets: BacklogItem[][] = [[], [], []];
+  for (const s of items) buckets[colOf(s)].push(s);
+
+  return (
+    <div className="mb-5 rounded-2xl border border-neutral-800 bg-neutral-900/60 overflow-hidden">
+      <button onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-neutral-900">
+        <span className="grid place-items-center w-7 h-7 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 text-white">
+          <Layers size={14} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[12.5px] font-semibold text-neutral-100">Tablero del sprint</div>
+          <div className="text-[10.5px] text-neutral-500">
+            {items.length} historias · {buckets[2].length} hechas · {buckets[1].length} en curso
+          </div>
+        </div>
+        <ChevronRight size={15} className={`text-neutral-600 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 pt-0">
+          {cols.map((c, ci) => (
+            <div key={c.key} className="rounded-xl bg-neutral-950/60 border border-neutral-800/70 p-2.5">
+              <div className={`flex items-center justify-between text-[10.5px] uppercase tracking-wide font-medium mb-2 ${c.tint}`}>
+                <span>{c.label}</span>
+                <span className="text-neutral-600">{buckets[ci].length}</span>
+              </div>
+              <div className="space-y-1.5">
+                {buckets[ci].length === 0 && (
+                  <p className="text-[10.5px] text-neutral-600 px-1 py-2">—</p>
+                )}
+                {buckets[ci].map((s) => (
+                  <div key={s.id} className="rounded-lg bg-neutral-900 border border-neutral-800 px-2.5 py-2">
+                    <div className="flex items-center gap-1.5">
+                      {s.story_key && (
+                        <span className="text-[9px] font-mono px-1 py-px rounded bg-neutral-800 text-neutral-400 shrink-0">{s.story_key}</span>
+                      )}
+                      {ci === 2 ? <CheckCircle2 size={11} className="text-emerald-500 shrink-0" />
+                        : ci === 1 ? <Loader2 size={11} className="text-amber-500 shrink-0" /> : null}
+                    </div>
+                    <div className="mt-1 text-[11.5px] text-neutral-200 leading-snug line-clamp-2">{s.title}</div>
+                    <div className="mt-1 flex items-center gap-2 text-[9.5px] text-neutral-500">
+                      {typeof s.story_points === "number" && <span>{s.story_points} pts</span>}
+                      {s.priority && <span className="capitalize">· {s.priority}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Relay del orquestador ─────────────────────────────────────────────────────
 // Hace VISIBLE el rol del orquestador (el hub del diagrama): entre cada agente,
 // muestra que ÉL recibe la salida del anterior, arma el contexto y ACTIVA al
@@ -456,6 +563,9 @@ function OrchestratorRelay({
             <CornerDownRight size={11} className="text-brand" /> Activa a
             <span className={`font-medium ${toTh.text}`}>{cleanName(cur.agent)}</span>
             con <span className="text-neutral-300">{cur.input_summary || "el contexto del paso anterior"}</span>
+          </p>
+          <p className="text-[10.5px] text-neutral-500 italic pl-[15px]">
+            ¿por qué? {whyScrum(cur.agent, cur.role)}
           </p>
         </div>
       </div>
