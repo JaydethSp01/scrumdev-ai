@@ -128,6 +128,15 @@ export default function OrchestrationStudio({
   const deploy = data?.deploy;
   const active = data?.active_agent || null;
 
+  // Actividad EN VIVO: qué se está haciendo AHORA (para que el cliente sepa dónde va
+  // en generaciones largas y no se estrese). Todo deriva de pasos persistidos en DB,
+  // así que un reload re-hidrata el mismo estado: no se pierde nada.
+  const runningStep = useMemo(
+    () => [...steps].reverse().find((s) => s.status === "running") || null, [steps]);
+  const filesDone = useMemo(
+    () => steps.filter((s) => s.status === "done" &&
+      /\.(tsx|ts|jsx|js|py)\b/.test(s.output_summary || "")).length, [steps]);
+
   // equipo único en orden de aparición (para el rail)
   const team = useMemo(() => {
     const rank = { running: 3, error: 2, done: 1, skipped: 0 } as const;
@@ -230,6 +239,10 @@ export default function OrchestrationStudio({
 
           {/* ── Registro de orquestación (flujo) ── */}
           <main className="min-h-0 overflow-y-auto p-5 sm:p-7 bg-gradient-to-b from-neutral-900/40 to-neutral-950 os-grid">
+            {/* Actividad EN VIVO: qué hace AHORA + progreso (reload-safe) */}
+            <LiveActivity data={data} runningStep={runningStep} filesDone={filesDone}
+              deploy={deploy} />
+
             {/* Mockup REAL: la app desplegada, en vivo */}
             <LivePreview projectKey={projectKey} deploy={deploy} />
 
@@ -277,6 +290,94 @@ export default function OrchestrationStudio({
           </main>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Actividad EN VIVO ─────────────────────────────────────────────────────────
+// Banner prominente y tranquilizador: dice QUÉ se está haciendo AHORA, con progreso,
+// para que en generaciones largas el cliente sepa dónde va y no se estrese. Como todo
+// sale de pasos persistidos en DB, recargar la página NO pierde nada (se re-hidrata).
+function LiveActivity({
+  data, runningStep, filesDone, deploy,
+}: {
+  data: Orchestration | null;
+  runningStep: OrchestrationStep | null;
+  filesDone: number;
+  deploy?: Orchestration["deploy"];
+}) {
+  if (!data) return null;
+  const state = data.current_state || "";
+  const isReleased = state === "RELEASED";
+  const isGate = !!data.is_gate;
+  const deployActive = !!deploy && !!deploy.state &&
+    !/done|released|degraded/i.test(deploy.state);
+
+  // Determinar el mensaje + progreso según en qué punto va el flujo.
+  let icon = <Loader2 size={16} className="animate-spin text-brand" />;
+  let title = data.current_label || state || "En progreso";
+  let detail = "";
+  let pct: number | null = null;
+  let tone = "from-brand/15 via-neutral-900/60 to-neutral-950 border-brand/25";
+
+  if (deployActive) {
+    title = "Publicando tu app";
+    detail = deploy?.phase_label || "Compilando y desplegando…";
+    pct = typeof deploy?.phase_pct === "number" ? deploy!.phase_pct! : null;
+    tone = "from-indigo-500/15 via-neutral-900/60 to-neutral-950 border-indigo-400/25";
+  } else if (runningStep) {
+    title = `Orquestador → ${cleanName(runningStep.agent)}`;
+    const handed = runningStep.input_summary
+      ? `le pasó: ${runningStep.input_summary}. ` : "";
+    let doing = runningStep.output_summary || runningStep.action || "procesando…";
+    if (/develop/i.test(runningStep.agent + runningStep.role) && filesDone > 0)
+      doing = `generando código · ${filesDone} archivo${filesDone === 1 ? "" : "s"} listos · ${doing}`;
+    detail = `${handed}Ahora ${cleanName(runningStep.agent)} está: ${doing}`;
+    tone = "from-emerald-500/12 via-neutral-900/60 to-neutral-950 border-emerald-400/25";
+  } else if (isGate) {
+    icon = <ShieldAlert size={16} className="text-amber-400" />;
+    title = "Esperando tu aprobación";
+    detail = data.current_label || "Revisa y aprueba para continuar el flujo Scrum.";
+    tone = "from-amber-500/12 via-neutral-900/60 to-neutral-950 border-amber-400/25";
+  } else if (isReleased) {
+    icon = <CheckCircle2 size={16} className="text-emerald-400" />;
+    title = "Ciclo completado";
+    detail = "La app está publicada. Revisa el mockup en vivo abajo.";
+    tone = "from-emerald-500/12 via-neutral-900/60 to-neutral-950 border-emerald-400/25";
+  }
+
+  return (
+    <div className={`mb-5 rounded-2xl border bg-gradient-to-br ${tone} px-4 py-3.5`}>
+      <div className="flex items-center gap-3">
+        <span className="grid place-items-center w-9 h-9 rounded-xl bg-white/5 ring-1 ring-white/10 shrink-0">
+          {icon}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[13px] font-semibold text-neutral-100">{title}</span>
+            {runningStep?.started_at && !deployActive && (
+              <span className="text-[10.5px] tabular-nums text-neutral-500 inline-flex items-center gap-1">
+                <Loader2 size={9} className="animate-spin" /><Elapsed since={runningStep.started_at} />
+              </span>
+            )}
+            <span className="ml-auto text-[10px] px-1.5 py-px rounded-full bg-white/5 text-neutral-400 ring-1 ring-white/10">
+              {state.replace(/_/g, " ").toLowerCase()}
+            </span>
+          </div>
+          <p className="mt-0.5 text-[11.5px] text-neutral-400 leading-snug line-clamp-2">{detail}</p>
+          {pct != null && (
+            <div className="mt-2 h-1.5 rounded-full bg-neutral-800 overflow-hidden">
+              <div className="h-full rounded-full bg-gradient-to-r from-brand to-indigo-400 transition-all duration-700"
+                style={{ width: `${Math.max(4, Math.min(100, pct))}%` }} />
+            </div>
+          )}
+        </div>
+      </div>
+      {!isReleased && (
+        <p className="mt-2 text-[10px] text-neutral-500 flex items-center gap-1.5">
+          <RefreshCw size={10} /> Puedes recargar o cerrar esta página sin perder el progreso — todo se guarda en el servidor.
+        </p>
+      )}
     </div>
   );
 }
