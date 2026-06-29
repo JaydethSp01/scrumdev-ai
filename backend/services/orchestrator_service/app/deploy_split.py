@@ -169,7 +169,11 @@ async def _deploy_frontend(
         except Exception as exc:
             ddata = {"error": str(exc)}
     out["vercel_deploy"] = ddata
-    out["url"] = ddata.get("url")
+    # Vercel devuelve `url` como host PELADO (sin esquema). Normalizamos a absoluto:
+    # si se renderiza como href tal cual, el navegador lo trata como enlace RELATIVO
+    # y termina en "/projects/<host>" -> pantalla "Proyecto no encontrado".
+    _u = ddata.get("url")
+    out["url"] = (f"https://{_u}" if _u and not str(_u).startswith("http") else _u)
     out["deployed"] = "error" not in ddata
 
     # FALLBACK A RENDER: si Vercel falla (p.ej. cuota free 402 "100 deploys/día"),

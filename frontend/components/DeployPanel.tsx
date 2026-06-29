@@ -22,6 +22,7 @@ import {
   type DeployResponse,
   type DeployStatus,
 } from "@/lib/api";
+import { absUrl } from "@/lib/url";
 import DeployFlowDiagram, { type DeployStage } from "@/components/DeployFlowDiagram";
 import DeployProgress from "@/components/DeployProgress";
 import type { AuthUser } from "@/app/auth/_lib";
@@ -447,7 +448,7 @@ export function DeployPanel({ projectKey, user }: Props) {
                       Abrelo en una pestana nueva para verlo en vivo.
                     </p>
                     <a
-                      href={vercelUrl}
+                      href={absUrl(vercelUrl)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="mt-5 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-brand text-white text-sm font-medium hover:opacity-90"

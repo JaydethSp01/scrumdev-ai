@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   X, Cpu, ShoppingBag, Building2, Code2, FlaskConical, ShieldCheck,
   CalendarRange, Rocket, Bot, CheckCircle2, Loader2, AlertTriangle,
@@ -236,15 +236,18 @@ export default function OrchestrationStudio({
 
             <ol className="relative">
               {steps.map((s, i) => (
-                <StepCard
-                  key={s.id}
-                  step={s}
-                  index={i}
-                  isLast={i === steps.length - 1}
-                  open={openStep === s.id}
-                  onToggle={() => setOpenStep(openStep === s.id ? null : s.id)}
-                  projectKey={projectKey}
-                />
+                <Fragment key={s.id}>
+                  {/* relay del orquestador: hace VISIBLE que él coordina el handoff */}
+                  <OrchestratorRelay prev={steps[i - 1]} cur={s} first={i === 0} />
+                  <StepCard
+                    step={s}
+                    index={i}
+                    isLast={i === steps.length - 1}
+                    open={openStep === s.id}
+                    onToggle={() => setOpenStep(openStep === s.id ? null : s.id)}
+                    projectKey={projectKey}
+                  />
+                </Fragment>
               ))}
             </ol>
           </main>
@@ -414,6 +417,52 @@ function DeployDebug({ deploy }: { deploy: NonNullable<Orchestration["deploy"]> 
 }
 
 // ── Tarjeta de paso (un agente en el flujo) ──────────────────────────────────
+// ── Relay del orquestador ─────────────────────────────────────────────────────
+// Hace VISIBLE el rol del orquestador (el hub del diagrama): entre cada agente,
+// muestra que ÉL recibe la salida del anterior, arma el contexto y ACTIVA al
+// siguiente. Así la traza no es una lista de agentes sueltos sino el flujo real
+// Chat → Orquestador → agente → Orquestador → agente…
+function OrchestratorRelay({
+  prev, cur, first,
+}: { prev?: OrchestrationStep; cur: OrchestrationStep; first?: boolean }) {
+  const toTh = themeOf(cur.agent, cur.role);
+  const fromTh = prev ? themeOf(prev.agent, prev.role) : null;
+  return (
+    <li className="relative pl-10 list-none" style={{ animation: "fade .3s ease both" }}>
+      {/* conector hacia el agente que activa */}
+      <span className="absolute left-[18px] top-9 bottom-0 w-px bg-neutral-800" />
+      <span className="absolute left-0 top-1 grid place-items-center w-9 h-9 rounded-xl bg-slate-900 text-white ring-1 ring-white/10">
+        <Cpu size={15} className="text-brand" />
+      </span>
+      <div className="mb-3 rounded-xl border border-slate-700/40 bg-slate-900/50 px-3 py-2">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-200">
+          <span>Orquestador</span>
+          <span className="text-[10px] font-normal text-neutral-500">· coordina el handoff</span>
+        </div>
+        <div className="mt-1 space-y-0.5 text-[11px] text-neutral-400">
+          {first ? (
+            <p className="inline-flex flex-wrap items-center gap-1">
+              Recibió la <span className="text-neutral-200">visión del producto</span> desde el
+              <span className="font-medium text-sky-300">Chat</span>.
+            </p>
+          ) : prev ? (
+            <p className="inline-flex flex-wrap items-center gap-1">
+              Recibió de
+              <span className={`font-medium ${fromTh!.text}`}>{cleanName(prev.agent)}</span>:
+              <span className="text-neutral-300">{prev.output_summary || prev.action}</span>
+            </p>
+          ) : null}
+          <p className="inline-flex flex-wrap items-center gap-1">
+            <CornerDownRight size={11} className="text-brand" /> Activa a
+            <span className={`font-medium ${toTh.text}`}>{cleanName(cur.agent)}</span>
+            con <span className="text-neutral-300">{cur.input_summary || "el contexto del paso anterior"}</span>
+          </p>
+        </div>
+      </div>
+    </li>
+  );
+}
+
 function StepCard({
   step, index, isLast, open, onToggle, projectKey,
 }: {

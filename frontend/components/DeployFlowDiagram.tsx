@@ -26,6 +26,7 @@ import {
   Code2,
   type LucideIcon,
 } from "lucide-react";
+import { absUrl } from "@/lib/url";
 
 export type NodeStatus = "pending" | "active" | "done" | "failed";
 
@@ -288,7 +289,7 @@ export function DeployFlowDiagram(props: DiagramProps) {
         <div className="mt-4 p-3 rounded-lg border border-green-500/30 bg-green-500/5 flex items-center gap-2 text-sm">
           <Globe size={14} className="text-green-600 dark:text-green-300" />
           <a
-            href={props.renderUrl || props.vercelUrl}
+            href={absUrl(props.renderUrl || props.vercelUrl)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-green-700 dark:text-green-300 font-medium underline truncate"

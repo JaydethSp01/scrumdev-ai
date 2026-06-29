@@ -6,6 +6,7 @@ import {
   CheckCircle2, Lock, HelpCircle, ImagePlus, X,
 } from "lucide-react";
 import http from "@/lib/http";
+import { absUrl } from "@/lib/url";
 import { API, apiVisionFromDocument, apiStartLifecycle, apiGetPipeline, apiApproveGate, apiAssistant, apiUploadChatImage, type ChatImageUpload } from "@/lib/api";
 
 import BacklogReview, { type ReviewStory } from "@/components/conversation/BacklogReview";
@@ -705,12 +706,12 @@ function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExp
           <p className="text-[11px] uppercase tracking-wider text-neutral-400 mb-1.5">Ambiente de pruebas (staging)</p>
           {r.staging.url ? (
             <div className="flex items-center gap-2 flex-wrap">
-              <a href={r.staging.url} target="_blank" rel="noopener noreferrer"
+              <a href={absUrl(r.staging.url)} target="_blank" rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand text-white text-xs font-medium hover:bg-brand-dark">
                 🔗 Abrir tu app en staging
               </a>
               {r.staging.api_url && (
-                <a href={r.staging.api_url} target="_blank" rel="noopener noreferrer"
+                <a href={absUrl(r.staging.api_url)} target="_blank" rel="noopener noreferrer"
                   className="text-[11px] text-neutral-500 underline">API</a>
               )}
               <span className="text-[11px] text-emerald-600">Valídala y luego aprueba producción.</span>

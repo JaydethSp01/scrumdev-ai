@@ -474,6 +474,105 @@ def is_balanced_code(content: str) -> bool:
     return not (more_opens and not clean_close)
 
 
+def _fallback_entity_page(entity: str) -> str:
+    """Página CRUD REAL determinista (tabla + búsqueda + eliminar) para cuando la
+    generación con Claude de una página de entidad falla/timeoutea en el free-tier.
+    En vez de un ERROR rojo o un stub "Sección en preparación", la app SIEMPRE tiene
+    una página funcional con los datos mock. Usa `import * as mock` -> inmune al
+    desajuste de nombres de export (mockX vs x). Genérica: descubre el array por
+    el nombre de la entidad y arma columnas desde la 1ª fila."""
+    title = (entity or "Registros").strip().capitalize()
+    want = (entity or "").lower()
+    return f'''"use client";
+export const dynamic = "force-dynamic";
+import {{ useState }} from "react";
+import * as mock from "@/lib/mock";
+
+const RAW: any[] = (() => {{
+  const m: any = mock;
+  const keys = Object.keys(m).filter((k) => Array.isArray(m[k]));
+  const want = "{want}";
+  const k =
+    keys.find((x) => x.toLowerCase() === want) ||
+    keys.find((x) => x.toLowerCase() === want + "s") ||
+    keys.find((x) => x.toLowerCase().includes(want)) ||
+    keys[0];
+  const v = k ? m[k] : [];
+  return Array.isArray(v) ? v : [];
+}})();
+
+export default function {title.replace(" ", "")}Page() {{
+  const [rows, setRows] = useState<any[]>(RAW);
+  const [q, setQ] = useState("");
+  const cols = rows[0]
+    ? Object.keys(rows[0]).filter((c) => typeof (rows[0] as any)[c] !== "object").slice(0, 6)
+    : [];
+  const filtered = rows.filter((r) =>
+    JSON.stringify(r).toLowerCase().includes(q.toLowerCase())
+  );
+  return (
+    <div className="p-6 space-y-5">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold text-gray-900">{title}</h1>
+        <input
+          value={{q}}
+          onChange={{(e) => setQ(e.target.value)}}
+          placeholder="Buscar…"
+          className="px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+        />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+          <div className="text-2xl font-bold text-gray-900">{{rows.length}}</div>
+          <div className="text-xs text-gray-500">Total {title}</div>
+        </div>
+      </div>
+      <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-100 bg-gray-50">
+              {{cols.map((c) => (
+                <th key={{c}} className="text-left px-4 py-3 font-medium text-gray-600 capitalize">
+                  {{c}}
+                </th>
+              ))}}
+              <th className="px-4 py-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {{filtered.map((r, i) => (
+              <tr key={{i}} className="border-b border-gray-50 hover:bg-gray-50/60">
+                {{cols.map((c) => (
+                  <td key={{c}} className="px-4 py-3 text-gray-700">
+                    {{String((r as any)[c] ?? "—")}}
+                  </td>
+                ))}}
+                <td className="px-4 py-3 text-right">
+                  <button
+                    onClick={{() => setRows((p) => p.filter((x) => x !== r))}}
+                    className="text-xs text-red-600 hover:underline"
+                  >
+                    Eliminar
+                  </button>
+                </td>
+              </tr>
+            ))}}
+            {{filtered.length === 0 && (
+              <tr>
+                <td colSpan={{cols.length + 1}} className="px-4 py-10 text-center text-gray-400">
+                  Sin registros
+                </td>
+              </tr>
+            )}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}}
+'''
+
+
 def _inject_ui_kit(files: list[dict], report: list[str]) -> list[dict]:
     """Inyecta el UI-kit 1A curado (AppShell/Sidebar/Card/DataTable/Badge/Button/
     PageHeader/EmptyState + cn) en CADA proyecto, bajo frontend/. Es la palanca de
@@ -849,35 +948,56 @@ async def generate_full_app(
             "explicaciones, comentarios introductorios, tablas ni texto markdown "
             "(ni '---', ni '## ', ni 'Decisiones de diseño') ni antes ni después del código."
         )
+        # ¿es una página de entidad? (frontend/app/{e}/page.tsx, no el dashboard raíz)
+        import re as _re
+        _m_ent = _re.match(r"frontend/app/([^/]+)/page\.(tsx|jsx)$", path)
+        _entity = _m_ent.group(1) if _m_ent else None
         async with progress.step("Developer Agent", f"Generando {label}", "generate_app") as st:
             # max_turns ALTO: el CLI de Claude Code es AGÉNTICO (razona + genera). Con
             # max_turns=1 los archivos sustantivos (mock con datos reales, páginas CRUD)
             # chocaban con "Reached maximum number of turns (1)" y FALLABAN. Esa era la
             # causa raíz del "se cuelga y no crea código", NO el tamaño ni el free-tier.
-            raw = await run_claude_code(
-                prompt, system_prompt=APP_GENERATOR_SYSTEM,
-                max_turns=int(os.environ.get("GEN_MAX_TURNS", "10")), kind="ui")
-            content = _strip_fences(raw)
-            # ANTI-TRUNCACIÓN: si el archivo de código quedó con llaves/paréntesis sin
-            # cerrar (output cortado a la mitad -> "Unexpected eof" en el build), lo
-            # REGENERAMOS una vez con instrucción de archivo COMPLETO. Esta era la causa
-            # raíz de los builds de Vercel que fallaban con un dashboard real válido.
-            _is_code = path.endswith((".ts", ".tsx", ".js", ".jsx"))
-            if _is_code and content and not is_balanced_code(content):
-                logger.warning("gen_file_truncated_retry", path=path, chars=len(content))
-                raw2 = await run_claude_code(
-                    prompt + "\nEl archivo DEBE estar COMPLETO: cierra TODAS las llaves, "
-                    "paréntesis y el export por defecto. No lo cortes a la mitad.",
-                    system_prompt=APP_GENERATOR_SYSTEM,
+            content = ""
+            try:
+                raw = await run_claude_code(
+                    prompt, system_prompt=APP_GENERATOR_SYSTEM,
                     max_turns=int(os.environ.get("GEN_MAX_TURNS", "10")), kind="ui")
-                c2 = _strip_fences(raw2)
-                if c2 and len(c2) > 20 and is_balanced_code(c2):
-                    content = c2
-                elif c2 and len(c2) > len(content) and is_balanced_code(c2):
-                    content = c2
+                content = _strip_fences(raw)
+                # ANTI-TRUNCACIÓN: si el archivo quedó con llaves/paréntesis sin cerrar
+                # (output cortado -> "Unexpected eof" en el build), lo REGENERAMOS una vez
+                # con instrucción de archivo COMPLETO.
+                _is_code = path.endswith((".ts", ".tsx", ".js", ".jsx"))
+                if _is_code and content and not is_balanced_code(content):
+                    logger.warning("gen_file_truncated_retry", path=path, chars=len(content))
+                    raw2 = await run_claude_code(
+                        prompt + "\nEl archivo DEBE estar COMPLETO: cierra TODAS las llaves, "
+                        "paréntesis y el export por defecto. No lo cortes a la mitad.",
+                        system_prompt=APP_GENERATOR_SYSTEM,
+                        max_turns=int(os.environ.get("GEN_MAX_TURNS", "10")), kind="ui")
+                    c2 = _strip_fences(raw2)
+                    if c2 and len(c2) > 20 and is_balanced_code(c2):
+                        content = c2
+                    elif c2 and len(c2) > len(content) and is_balanced_code(c2):
+                        content = c2
+            except Exception as exc:  # noqa: BLE001 — Claude falló/timeout en el free-tier
+                logger.warning("gen_file_claude_failed", path=path, error=str(exc)[:140])
+                content = ""
+
+            valid = bool(content) and len(content) > 20 and (
+                not path.endswith((".ts", ".tsx", ".js", ".jsx")) or is_balanced_code(content))
+
+            # DEGRADACIÓN ELEGANTE: si una página de entidad no salió válida, NO fallamos
+            # el paso (nada de ERROR rojo ni stub "en preparación"): entregamos una página
+            # CRUD REAL determinista con los datos mock. La app SIEMPRE queda funcional.
+            if not valid and _entity:
+                content = _fallback_entity_page(_entity)
+                st.set(output=f"{path} · plantilla de respaldo ({len(content)} chars)",
+                       artifacts=[{"type": "file", "path": path}])
+                return {"path": path, "content": content}
+
             st.set(output=f"{path} ({len(content)} chars)",
                    artifacts=[{"type": "file", "path": path}])
-            if content and len(content) > 20:
+            if valid:
                 return {"path": path, "content": content}
             return None
 
