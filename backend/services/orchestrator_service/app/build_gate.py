@@ -1125,6 +1125,7 @@ def _fix_mock_imports(files_rel: list[dict], report: list[str]) -> list[dict]:
 
     norm_to_export = {_norm(e): e for e in exports}
     fixed = 0
+    missing_exports: set[str] = set()
     imp_re = _re.compile(r'import\s*\{([^}]*)\}\s*from\s*["\']@/lib/mock["\']')
     for f in files_rel:
         p = (f.get("path") or "").lstrip("/")
@@ -1138,6 +1139,11 @@ def _fix_mock_imports(files_rel: list[dict], report: list[str]) -> list[dict]:
         new_names = []
         changed = False
         for n in names:
+            # imports de TIPO (`type Plan`) -> dejarlos intactos (no son valores; crear
+            # `export const type Plan` sería sintaxis inválida).
+            if n.startswith("type "):
+                new_names.append(n)
+                continue
             # respeta alias existentes 'X as Y'
             base = n.split(" as ")[0].strip()
             local = n.split(" as ")[-1].strip() if " as " in n else base
@@ -1149,10 +1155,20 @@ def _fix_mock_imports(files_rel: list[dict], report: list[str]) -> list[dict]:
                 new_names.append(f"{target} as {local}")
                 changed = True
             else:
-                new_names.append(n)  # sin match: dejar (lo cubre otro fix/stub)
+                # sin export ni remapeo: el símbolo quedaría undefined -> 500 en runtime
+                # (`undefined.filter`). Lo registramos para crear un export vacío seguro.
+                missing_exports.add(base)
+                new_names.append(n)
         if changed:
             f["content"] = c[: m.start()] + 'import { ' + ", ".join(new_names) + ' } from "@/lib/mock"' + c[m.end():]
             fixed += 1
+    # Crea exports vacíos para los símbolos importados que el mock NO define (entidad
+    # con página pero sin datos en el mock) -> resuelven a [] en vez de undefined.
+    if missing_exports:
+        extra = "\n\n// exports de respaldo (entidad con página pero sin datos en el mock)\n" + \
+            "\n".join(f"export const {nm}: any[] = [];" for nm in sorted(missing_exports))
+        mock["content"] = (mock.get("content") or "") + extra
+        report.append(f"exports vacíos añadidos al mock para símbolos faltantes: {', '.join(sorted(missing_exports))}")
     if fixed:
         report.append(f"imports de @/lib/mock remapeados a exports reales: {fixed}")
     return files_rel
@@ -2037,6 +2053,46 @@ def _harden_find_access(files_rel: list[dict], report: list[str]) -> list[dict]:
     return files_rel
 
 
+# Métodos por TIPO: si el receptor (campo) es undefined, el default correcto evita el
+# crash sin cambiar la semántica. Solo métodos NO-ambiguos (no .slice/.includes que
+# existen en string Y array). Receptor = cadena de acceso `a.b…` (≥1 punto).
+_STR_METHODS = ("toLowerCase", "toUpperCase", "toLocaleLowerCase", "toLocaleUpperCase",
+                "charAt", "charCodeAt", "trim", "trimStart", "trimEnd", "padStart",
+                "padEnd", "normalize", "split")
+_NUM_METHODS = ("toFixed", "toLocaleString", "toPrecision", "toExponential")
+_ARR_METHODS = ("filter", "map", "reduce", "reduceRight", "forEach", "some", "every",
+                "sort", "flatMap", "flat", "join", "reverse", "findIndex", "findLastIndex")
+_RECV = r'(?<![\w)\]"\'])((?:[A-Za-z_$][\w$]*)(?:\.[A-Za-z_$][\w$]*)+)\.'
+_STR_METHOD_RE = re.compile(_RECV + r'(' + "|".join(_STR_METHODS) + r')\(')
+_NUM_METHOD_RE = re.compile(_RECV + r'(' + "|".join(_NUM_METHODS) + r')\(')
+_ARR_METHOD_RE = re.compile(_RECV + r'(' + "|".join(_ARR_METHODS) + r')\(')
+
+
+def _harden_string_methods(files_rel: list[dict], report: list[str]) -> list[dict]:
+    """Blinda `obj.campo.METODO()` cuando `campo` puede ser undefined, con el default
+    correcto por tipo: string->"" , número->0 , array->[]. Causa real de 500s en
+    runtime: la generación per-archivo a veces usa un nombre de campo que el mock no
+    tiene (page usa `c.instructor`, mock trae `instructorNombre`; `precio` array vs
+    objeto) -> undefined.metodo() revienta (`toLowerCase`/`toLocaleString`/`filter`).
+    Solo métodos NO-ambiguos y cadenas `a.b…` (≥1 punto, no identificadores simples ya
+    definidos). Red de seguridad del contrato de datos para apps generadas."""
+    fixed = 0
+    for f in files_rel:
+        path = (f.get("path") or "").lstrip("/")
+        if not path.endswith((".tsx", ".jsx", ".ts")):
+            continue
+        c = f.get("content") or ""
+        nc = _STR_METHOD_RE.sub(lambda m: f'({m.group(1)} ?? "").{m.group(2)}(', c)
+        nc = _NUM_METHOD_RE.sub(lambda m: f'({m.group(1)} ?? 0).{m.group(2)}(', nc)
+        nc = _ARR_METHOD_RE.sub(lambda m: f'({m.group(1)} ?? []).{m.group(2)}(', nc)
+        if nc != c:
+            f["content"] = nc
+            fixed += 1
+    if fixed:
+        report.append(f"métodos (string/número/array) blindados contra undefined en {fixed} archivo(s)")
+    return files_rel
+
+
 _ERROR_BOUNDARY_SRC = '''"use client";
 import { useEffect } from "react";
 
@@ -2247,6 +2303,7 @@ async def build_gate_frontend(files_rel: list[dict], max_attempts: int = 4,
     # reforzado) y el UI-kit maneja vacío con gracia ("Sin registros"). Estabilidad > seed.
     files_rel = _harden_data_access(files_rel, _pre)
     files_rel = _harden_find_access(files_rel, _pre)   # arr.find(x).campo -> .find(x)?.campo (crash runtime #1)
+    files_rel = _harden_string_methods(files_rel, _pre)  # campo.toLowerCase() sobre undefined -> (campo ?? "")
     files_rel = _ensure_error_boundary(files_rel, _pre)  # error.tsx -> nunca pantalla blanca
     files_rel = _force_dynamic_pages(files_rel, _pre)
     files_rel = _dedup_imports(files_rel, _pre)  # imports duplicados (los inyectores

@@ -474,6 +474,50 @@ def is_balanced_code(content: str) -> bool:
     return not (more_opens and not clean_close)
 
 
+def _mock_field_shapes(src: str) -> dict[str, list[str]]:
+    """Parsea `frontend/lib/mock.ts` y devuelve {nombreArray: [campos del 1er objeto]}.
+
+    Fija el CONTRATO de datos: la generación per-archivo produce el mock y las páginas
+    en llamadas separadas y derivaban en nombres de campo distintos (la página usa
+    `c.instructor` pero el mock trae `instructorNombre`) -> undefined -> 500 en runtime.
+    Con esto inyectamos los campos EXACTOS en el prompt de cada página. Best-effort."""
+    import re as _re
+    shapes: dict[str, list[str]] = {}
+    for m in _re.finditer(r"export\s+const\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*\[", src):
+        name = m.group(1)
+        i = src.find("{", m.end())
+        if i < 0:
+            continue
+        # extraer el primer objeto balanceando llaves
+        depth = 0
+        j = i
+        while j < len(src):
+            if src[j] == "{":
+                depth += 1
+            elif src[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        obj = src[i : j + 1]
+        # quitar el CONTENIDO de strings para no captar `T09:` de fechas como si fuera
+        # una clave (`"2024-01-15T09:00:00Z"` -> `T09` falso). Conserva las comillas.
+        obj = _re.sub(r'"(?:[^"\\]|\\.)*"', '""', obj)
+        obj = _re.sub(r"'(?:[^'\\]|\\.)*'", "''", obj)
+        obj = _re.sub(r"`(?:[^`\\]|\\.)*`", "``", obj)
+        # claves de primer nivel: "key:" que no estén dentro de subobjetos/arrays
+        keys: list[str] = []
+        d = 0
+        for km in _re.finditer(r"([{}\[\]])|([A-Za-z_$][\w$]*)\s*:", obj):
+            if km.group(1):
+                d += 1 if km.group(1) in "{[" else -1
+            elif km.group(2) and d == 1:  # nivel raíz del objeto
+                keys.append(km.group(2))
+        if keys:
+            shapes[name] = keys
+    return shapes
+
+
 def _fallback_entity_page(entity: str) -> str:
     """Página CRUD REAL determinista (tabla + búsqueda + eliminar) para cuando la
     generación con Claude de una página de entidad falla/timeoutea en el free-tier.
@@ -1057,7 +1101,42 @@ async def generate_full_app(
     _plan = _plan_files()
     logger.info("perfile_plan", project=project_key, files=len(_plan),
                 paths=[p[0] for p in _plan])
-    _results = await asyncio.gather(*[_run_one(p, w, l) for p, w, l in _plan])
+
+    # CONTRATO DE DATOS: generar `lib/mock.ts` PRIMERO, parsear los campos reales por
+    # entidad e inyectarlos en el prompt de cada página. Sin esto, mock y páginas se
+    # generan en llamadas separadas y derivan en nombres de campo distintos
+    # (página usa `c.instructor`, mock trae `instructorNombre`) -> undefined -> 500.
+    import re as _re2
+    _mock_entry = next((x for x in _plan if x[0].endswith("lib/mock.ts")), None)
+    _mock_file = await _run_one(*_mock_entry) if _mock_entry else None
+    _shapes = _mock_field_shapes(_mock_file["content"]) if _mock_file else {}
+    logger.info("mock_shapes", project=project_key, entities=list(_shapes.keys()))
+
+    def _shape_hint(path: str) -> str:
+        if not _shapes:
+            return ""
+        m = _re2.match(r"frontend/app/([^/]+)/page\.tsx$", path)
+        if m:
+            e = m.group(1).lower()
+            name = next((n for n in _shapes if n.lower() == e or n.lower() == e + "s"
+                         or e in n.lower() or n.lower() in e), None)
+            if name:
+                return ("\nCONTRATO DE DATOS (OBLIGATORIO): cada objeto de `" + name +
+                        "` en @/lib/mock tiene EXACTAMENTE estos campos: " +
+                        ", ".join(_shapes[name]) + ". Usa SOLO esos nombres tal cual; NO "
+                        "inventes ni renombres campos (no asumas `instructor`/`estado`/`dia` "
+                        "si no están en la lista). Antes de usar un string method (.toLowerCase, "
+                        ".charAt) verifica que el campo exista.")
+        if path.endswith("app/page.tsx"):  # dashboard usa todas las entidades
+            allf = "; ".join(f"{n}: {', '.join(fs)}" for n, fs in _shapes.items())
+            return ("\nCONTRATO DE DATOS (OBLIGATORIO): usa EXACTAMENTE estos campos por "
+                    "entidad de @/lib/mock: " + allf + ". No inventes nombres de campo.")
+        return ""
+
+    _rest = [(p, w + _shape_hint(p), l) for (p, w, l) in _plan
+             if not p.endswith("lib/mock.ts")]
+    _results = ([_mock_file] if _mock_file else []) + await asyncio.gather(
+        *[_run_one(p, w, l) for p, w, l in _rest])
 
     # MERGER: dedup por path. Un archivo que falló lo cubre el backfill determinista.
     _merged: dict[str, dict] = {}
