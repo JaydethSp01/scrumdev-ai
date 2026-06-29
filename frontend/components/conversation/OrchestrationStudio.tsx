@@ -6,11 +6,11 @@ import {
   CalendarRange, Rocket, Bot, CheckCircle2, Loader2, AlertTriangle,
   FileCode2, FileText, Layers, ChevronRight, Activity, ExternalLink,
   Image as ImageIcon, CornerDownRight, MinusCircle, XCircle, ScrollText,
-  Monitor, RefreshCw, GitBranch, Server, ShieldAlert,
+  Monitor, RefreshCw, GitBranch, Server, ShieldAlert, Wrench,
 } from "lucide-react";
 import {
   apiGetOrchestration, apiGetCode, apiGetRefinement, apiGetAdrs, apiGetDeployPreview,
-  apiGetBacklog,
+  apiGetBacklog, apiRepairDeploy,
   type Orchestration, type OrchestrationStep, type CodeFile, type RefinementStory,
   type AdrItem, type DeployPreview, type BacklogItem,
 } from "@/lib/api";
@@ -248,7 +248,7 @@ export default function OrchestrationStudio({
 
             {/* Debug del despliegue (cuando aplica) */}
             {deploy && deploy.state && (
-              <DeployDebug deploy={deploy} />
+              <DeployDebug deploy={deploy} projectKey={projectKey} />
             )}
 
             {/* Tablero del sprint: dónde va cada historia (Backlog → En progreso → Hecho) */}
@@ -492,10 +492,21 @@ function LivePreview({
 }
 
 // ── Barra de debug del despliegue ────────────────────────────────────────────
-function DeployDebug({ deploy }: { deploy: NonNullable<Orchestration["deploy"]> }) {
+function DeployDebug({
+  deploy, projectKey,
+}: { deploy: NonNullable<Orchestration["deploy"]>; projectKey: string }) {
+  const [repairing, setRepairing] = useState(false);
   const failed = deploy.state === "gate_failed" || deploy.state === "error" || deploy.state === "done_degraded";
   const done = deploy.state === "done";
+  const isRepairing = deploy.state === "repairing" || repairing;
+  const hasE2eFails = Array.isArray(deploy.e2e_fails) && deploy.e2e_fails.length > 0;
+  const canRepair = (failed || hasE2eFails) && !isRepairing;
   const pct = Math.max(5, Math.min(100, deploy.phase_pct ?? (done ? 100 : 20)));
+  const onRepair = async () => {
+    setRepairing(true);
+    await apiRepairDeploy(projectKey);
+    // el polling de /orchestration mostrará el progreso (repairing -> building -> done)
+  };
   return (
     <div className={`mb-5 rounded-2xl border p-4 ${failed ? "border-rose-500/30 bg-rose-500/10" : done ? "border-emerald-500/30 bg-emerald-500/10" : "border-indigo-500/30 bg-indigo-500/10"}`}>
       <div className="flex items-center gap-2 mb-2">
@@ -530,6 +541,33 @@ function DeployDebug({ deploy }: { deploy: NonNullable<Orchestration["deploy"]> 
             <li key={i} className="text-[11px] text-amber-300 flex items-start gap-1"><span>•</span>{f}</li>
           ))}
         </ul>
+      )}
+      {/* Botón CORREGIR: la IA arregla el código de la app y redespliega sola */}
+      {(canRepair || isRepairing) && (
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          {isRepairing ? (
+            <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-amber-300">
+              <Loader2 size={13} className="animate-spin" />
+              {deploy.phase_label || "Reparando con IA y redesplegando…"}
+            </span>
+          ) : (
+            <>
+              <button onClick={onRepair}
+                className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg bg-rose-500 text-white hover:bg-rose-600 transition">
+                <Wrench size={13} /> Corregir con IA
+              </button>
+              <span className="text-[10.5px] text-neutral-500">
+                La IA analiza el fallo, corrige el código de tu app y la vuelve a publicar.
+              </span>
+            </>
+          )}
+        </div>
+      )}
+      {/* feedback cuando la reparación terminó OK */}
+      {done && deploy.repair_summary && (
+        <p className="mt-2 text-[11px] text-emerald-300 flex items-start gap-1.5">
+          <CheckCircle2 size={12} className="mt-0.5 shrink-0" /> Reparado: {deploy.repair_summary}
+        </p>
       )}
       {done && deploy.url && (
         <a href={deploy.url.startsWith("http") ? deploy.url : `https://${deploy.url}`} target="_blank" rel="noopener noreferrer"

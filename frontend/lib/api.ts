@@ -321,6 +321,22 @@ export type TechTask = {
   id?: string; module: string; type: string; title: string;
   detail?: string; depends_on?: string[];
 };
+// Auto-reparación de deploy: la IA corrige el código de la app y redespliega.
+export async function apiRepairDeploy(
+  projectKey: string
+): Promise<{ repairing?: boolean; message?: string }> {
+  try {
+    const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/deploy/repair`, {
+      method: "POST",
+      body: JSON.stringify({ triggered_by: "po" }),
+    });
+    if (!res.ok) return { repairing: false, message: `HTTP ${res.status}` };
+    return await res.json();
+  } catch {
+    return { repairing: false, message: "sin conexión" };
+  }
+}
+
 // Asistente de visión (IA menor, OpenAI): pule la idea + sugiere usuarios/entidades.
 export async function apiVisionAssist(
   text: string
@@ -1407,6 +1423,7 @@ export type OrchestrationDeploy = {
   gate_detail?: string | null;
   error?: string | null;
   e2e_fails?: string[];
+  repair_summary?: string | null;
 };
 export type Orchestration = {
   current_state: string;

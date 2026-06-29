@@ -1880,6 +1880,8 @@ async def get_orchestration(project_key: str) -> dict:
         "phase_pct": ds.get("phase_pct"), "url": ds.get("vercel_url"),
         "api_url": ds.get("render_url"), "git_url": ds.get("git_url"),
         "error": ds.get("error"),
+        "gate_detail": ds.get("gate_detail"),
+        "repair_summary": ds.get("repair_summary"),
         "e2e_fails": ds.get("e2e_fails") or [],
     } if ds else None
     meta = _PHASE_BY_STATE.get(state, {})
@@ -3440,6 +3442,71 @@ async def fix_bug_endpoint(project_key: str, req: FixBugRequest) -> dict:
         "files_changed": changed, "summary": result.get("summary", ""),
         "message": f"Fix aplicado a v{version_num} ({len(changed)} archivo(s)). Re-despliega para publicarlo.",
     }
+
+
+class RepairDeployRequest(BaseModel):
+    triggered_by: str = "po"
+
+
+async def _repair_and_redeploy_bg(project_key: str, bug_desc: str, triggered_by: str) -> None:
+    """AUTO-REPARACIÓN: la IA corrige el código de la app a partir del fallo del deploy
+    y luego REDESPLIEGA solo. Reporta progreso por _DEPLOY_STATUS para el feedback en
+    vivo. Best-effort: si la reparación falla, lo deja claro sin tumbar nada."""
+    try:
+        res = await fix_bug_endpoint(
+            project_key,
+            FixBugRequest(bug_description=bug_desc, image_paths=[], triggered_by=triggered_by),
+        )
+        changed = res.get("files_changed") or []
+        _DEPLOY_STATUS.setdefault(project_key, {}).update({
+            "state": "building",
+            "phase_label": f"Fix aplicado a {len(changed)} archivo(s) — redesplegando…",
+            "phase_pct": 45, "repair_summary": res.get("summary", ""),
+        })
+        logger.info("repair_fix_applied", project=project_key, files=len(changed))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("repair_failed", project=project_key, error=str(exc)[:200])
+        _DEPLOY_STATUS.setdefault(project_key, {}).update({
+            "state": "error", "error": f"La auto-reparación no pudo completarse: {str(exc)[:160]}",
+            "phase_label": "La reparación automática falló — revisa el detalle",
+        })
+        return
+    # redesplegar con el código ya corregido
+    await _run_deploy_bg(project_key, triggered_by)
+
+
+@app.post("/projects/{project_key}/deploy/repair")
+async def repair_deploy(project_key: str, req: RepairDeployRequest) -> dict:
+    """Botón 'Corregir': cuando el deploy falló o quedó degradado, arma el contexto del
+    fallo (error de build + fallos e2e en vivo), la IA corrige el código de la app y
+    REDESPLIEGA automáticamente. El usuario solo espera y recibe feedback al terminar."""
+    ds = _DEPLOY_STATUS.get(project_key) or {}
+    parts: list[str] = []
+    if ds.get("error"):
+        parts.append(f"Error del despliegue: {ds['error']}")
+    if ds.get("gate_detail"):
+        parts.append(f"Detalle del build:\n{str(ds['gate_detail'])[:1200]}")
+    e2e = ds.get("e2e_fails") or []
+    if e2e:
+        parts.append("Fallos detectados en vivo (navegador): " +
+                     "; ".join(str(x) for x in e2e[:10]))
+    if not parts:
+        parts.append("El despliegue quedó con errores. Revisa errores de runtime (HTTP 500), "
+                     "accesos a propiedades de undefined, imports rotos y rutas que no cargan.")
+    bug_desc = (
+        "El DESPLIEGUE de esta app falló o quedó con errores. Corrige el código de la app "
+        "(NO la plataforma) para que compile y TODAS las rutas carguen sin error 500 ni crash. "
+        "Aplica el fix mínimo y completo.\n\n" + "\n".join(parts)
+    )
+    _DEPLOY_STATUS.setdefault(project_key, {}).update({
+        "state": "repairing",
+        "phase_label": "Analizando el fallo y corrigiendo con IA…",
+        "phase_pct": 15, "error": None,
+    })
+    _spawn_bg(_repair_and_redeploy_bg(project_key, bug_desc, req.triggered_by))
+    logger.info("repair_deploy_started", project=project_key)
+    return {"repairing": True,
+            "message": "Reparando el despliegue automáticamente. Te aviso cuando quede listo."}
 
 
 # ===== Multi-chat: un proyecto tiene varios chats con su historial =====
