@@ -75,7 +75,7 @@ class TextIn(BaseModel):
 # Marcador de BUILD: permite verificar AL INSTANTE qué versión de código está viva
 # en el contenedor (en vez de inferirlo de un ciclo de 10 min). Subir este valor en
 # cada deploy que se quiera confirmar en prod.
-BUILD_MARKER = "data-contract-v19"
+BUILD_MARKER = "vision-assist-v20"
 
 
 @app.get("/health")
@@ -752,6 +752,17 @@ class IntakeVisionPayload(BaseModel):
 async def gw_intake_vision(req: IntakeVisionPayload) -> dict:
     return await _proxy_post(
         f"{settings.agent_runtime_service_url}/intake/vision", req.model_dump(), timeout=90.0
+    )
+
+
+class VisionAssistPayload(BaseModel):
+    text: str
+
+
+@app.post("/intake/vision/assist")
+async def gw_vision_assist(req: VisionAssistPayload) -> dict:
+    return await _proxy_post(
+        f"{settings.agent_runtime_service_url}/intake/vision/assist", req.model_dump(), timeout=60.0
     )
 
 

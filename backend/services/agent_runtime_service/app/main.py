@@ -287,6 +287,48 @@ async def vision_from_intake_endpoint(req: IntakeVisionRequest) -> dict:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+class VisionAssistRequest(BaseModel):
+    text: str
+
+
+@app.post("/intake/vision/assist")
+async def vision_assist(req: VisionAssistRequest) -> dict:
+    """AYUDA MENOR al usuario final (IA barata, OpenAI): pule su idea en bruto y
+    sugiere usuarios objetivo + entidades del dominio. NO arranca el ciclo ni toca el
+    flujo gateado — solo ayuda a escribir una mejor visión antes de empezar. Best-effort."""
+    from shared.clients.llm import openai_chat
+    import json as _json
+
+    raw = (req.text or "").strip()
+    if len(raw) < 3:
+        return {"ok": False, "reason": "Escribe un poco más sobre tu idea."}
+    system = (
+        "Eres un product manager senior. Te dan una idea de producto en bruto (a veces "
+        "vaga) y devuelves SOLO un JSON válido, sin texto extra, con esta forma EXACTA:\n"
+        '{"vision": "<visión clara y concreta en 2-3 frases, en español>", '
+        '"target_users": "<quiénes son los usuarios objetivo>", '
+        '"entities": ["<entidad1>", "<entidad2>", "..."]}\n'
+        "Las 'entities' son los sustantivos de dominio que el sistema gestionará (3-6, "
+        "en minúscula y singular). NO inventes funciones que el usuario no insinuó; "
+        "mantente fiel a su idea, solo más clara."
+    )
+    out = await openai_chat(system, raw, max_tokens=500)
+    if not out:
+        return {"ok": False, "reason": "El asistente de IA no está disponible ahora."}
+    try:
+        s = out[out.find("{"): out.rfind("}") + 1]
+        data = _json.loads(s)
+        return {
+            "ok": True,
+            "vision": str(data.get("vision") or "").strip(),
+            "target_users": str(data.get("target_users") or "").strip(),
+            "entities": [str(e).strip() for e in (data.get("entities") or []) if str(e).strip()][:6],
+        }
+    except Exception:
+        logger.warning("vision_assist_unparseable", raw=out[:200])
+        return {"ok": False, "reason": "No pude estructurar la respuesta, intenta de nuevo."}
+
+
 from fastapi import File, Form, UploadFile  # noqa: E402
 
 
