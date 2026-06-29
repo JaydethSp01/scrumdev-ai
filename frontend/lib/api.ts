@@ -321,6 +321,22 @@ export type TechTask = {
   id?: string; module: string; type: string; title: string;
   detail?: string; depends_on?: string[];
 };
+// Asistente de visión (IA menor, OpenAI): pule la idea + sugiere usuarios/entidades.
+export async function apiVisionAssist(
+  text: string
+): Promise<{ ok: boolean; vision?: string; target_users?: string; entities?: string[]; reason?: string }> {
+  try {
+    const res = await authFetch(`${API}/intake/vision/assist`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` };
+    return await res.json();
+  } catch {
+    return { ok: false, reason: "sin conexión" };
+  }
+}
+
 export type RefinementStory = {
   story_key: string; title: string; priority?: string; story_points?: number;
   dor: { ready: boolean; checks: { name: string; ok: boolean }[] };

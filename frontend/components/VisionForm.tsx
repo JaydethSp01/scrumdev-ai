@@ -22,6 +22,7 @@ import {
   apiSaveVision,
   apiListNFR,
   apiSubmitNFR,
+  apiVisionAssist,
   type ProductVision,
 } from "@/lib/api";
 import type { AuthUser } from "@/app/auth/_lib";
@@ -75,6 +76,32 @@ export function VisionForm({ projectKey, user }: Props) {
   const [nfr, setNfr] = useState<NFRState>(defaultNFR);
   const [nfrSaving, setNfrSaving] = useState(false);
   const [hasNfr, setHasNfr] = useState(false);
+  // Asistente de visión (IA menor): pule la idea y sugiere entidades. No toca el ciclo.
+  const [assisting, setAssisting] = useState(false);
+  const [suggestedEntities, setSuggestedEntities] = useState<string[]>([]);
+
+  const handleAssist = async () => {
+    if (assisting) return;
+    const idea = vision.trim();
+    if (idea.length < 3) {
+      toasts.error("Escribe tu idea primero (aunque sea informal).");
+      return;
+    }
+    setAssisting(true);
+    try {
+      const r = await apiVisionAssist(idea);
+      if (r.ok && r.vision) {
+        setVision(r.vision);
+        if (r.target_users && !targetUsers.trim()) setTargetUsers(r.target_users);
+        setSuggestedEntities(r.entities || []);
+        toasts.success("Visión mejorada con IA ✨");
+      } else {
+        toasts.error(r.reason || "No se pudo mejorar ahora, intenta de nuevo.");
+      }
+    } finally {
+      setAssisting(false);
+    }
+  };
   const toasts = useToasts();
 
   useEffect(() => {
@@ -216,19 +243,41 @@ export function VisionForm({ projectKey, user }: Props) {
 
       <div className="space-y-4">
         <div>
-          <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400 block mb-1.5">
-            Vision del producto
-          </label>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">
+              Vision del producto
+            </label>
+            <button
+              type="button"
+              onClick={handleAssist}
+              disabled={assisting}
+              title="La IA pule tu idea y sugiere usuarios y entidades"
+              className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-lg bg-brand/10 text-brand hover:bg-brand/20 disabled:opacity-60 transition"
+            >
+              {assisting ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+              {assisting ? "Mejorando…" : "Mejorar con IA"}
+            </button>
+          </div>
           <textarea
             value={vision}
             onChange={(e) => setVision(e.target.value)}
             rows={8}
-            placeholder="Describe que vas a construir, para quien y por que."
+            placeholder="Describe tu idea, aunque sea informal (ej: 'una app para mi peluquería, citas y clientes'). Luego pulsa 'Mejorar con IA'."
             className="w-full px-3 py-2.5 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-transparent text-sm focus:outline-none focus:ring-2 focus:ring-brand/40 resize-none leading-relaxed"
           />
           <p className="text-[11px] text-neutral-500 mt-1">
             {vision.trim().length} caracteres
           </p>
+          {suggestedEntities.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-neutral-500">La IA detectó que gestionarás:</span>
+              {suggestedEntities.map((e) => (
+                <span key={e} className="text-[10.5px] px-1.5 py-0.5 rounded-md bg-brand/10 text-brand capitalize">
+                  {e}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
