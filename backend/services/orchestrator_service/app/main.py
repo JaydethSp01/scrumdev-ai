@@ -3449,30 +3449,52 @@ class RepairDeployRequest(BaseModel):
 
 
 async def _repair_and_redeploy_bg(project_key: str, bug_desc: str, triggered_by: str) -> None:
-    """AUTO-REPARACIÓN: la IA corrige el código de la app a partir del fallo del deploy
-    y luego REDESPLIEGA solo. Reporta progreso por _DEPLOY_STATUS para el feedback en
-    vivo. Best-effort: si la reparación falla, lo deja claro sin tumbar nada."""
+    """AUTO-REPARACIÓN en 2 pasos (económica y robusta):
+    1) REDESPLIEGA con el build gate determinista ACTUAL — auto-corrige la mayoría de
+       fallos sin IA (truncación, colisiones, mock imports, accesos a undefined, exports
+       faltantes). Para apps generadas con un gate viejo, esto solo ya las arregla.
+    2) Solo si SIGUE fallando, la IA corrige los archivos del fallo específico (acotada
+       en tiempo, best-effort) y se redespliega otra vez.
+    Reporta progreso por _DEPLOY_STATUS. Nunca tumba nada."""
+    # PASO 1: redeploy determinista
+    _DEPLOY_STATUS.setdefault(project_key, {}).update({
+        "state": "building", "phase_label": "Aplicando las correcciones automáticas del build y redesplegando…",
+        "phase_pct": 35, "error": None,
+    })
+    await _run_deploy_bg(project_key, triggered_by)
+    ds = _DEPLOY_STATUS.get(project_key) or {}
+    if ds.get("state") == "done" and not (ds.get("e2e_fails") or []):
+        ds.update({"repair_summary": "Corregido por las validaciones automáticas del build (sin IA)."})
+        logger.info("repair_done_deterministic", project=project_key)
+        return
+
+    # PASO 2 (fallback acotado): la IA corrige el fallo específico
+    _DEPLOY_STATUS.setdefault(project_key, {}).update({
+        "phase_label": "Afinando con IA los fallos que quedaron…", "phase_pct": 55})
     try:
-        res = await fix_bug_endpoint(
-            project_key,
-            FixBugRequest(bug_description=bug_desc, image_paths=[], triggered_by=triggered_by),
+        res = await asyncio.wait_for(
+            fix_bug_endpoint(
+                project_key,
+                FixBugRequest(bug_description=bug_desc, image_paths=[], triggered_by=triggered_by),
+            ),
+            timeout=180,
         )
         changed = res.get("files_changed") or []
+        if changed:
+            _DEPLOY_STATUS.setdefault(project_key, {}).update({
+                "state": "building",
+                "phase_label": f"IA corrigió {len(changed)} archivo(s) — redesplegando…",
+                "phase_pct": 70, "repair_summary": res.get("summary", ""),
+            })
+            await _run_deploy_bg(project_key, triggered_by)
+        else:
+            logger.info("repair_ai_no_changes", project=project_key)
+    except Exception as exc:  # noqa: BLE001 - el redeploy determinista ya quedó publicado
+        logger.warning("repair_ai_fallback_failed", project=project_key, error=str(exc)[:160])
         _DEPLOY_STATUS.setdefault(project_key, {}).update({
-            "state": "building",
-            "phase_label": f"Fix aplicado a {len(changed)} archivo(s) — redesplegando…",
-            "phase_pct": 45, "repair_summary": res.get("summary", ""),
+            "phase_label": "Redesplegado con las correcciones automáticas (la IA no pudo afinar más).",
+            "repair_summary": "Correcciones automáticas del build aplicadas.",
         })
-        logger.info("repair_fix_applied", project=project_key, files=len(changed))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("repair_failed", project=project_key, error=str(exc)[:200])
-        _DEPLOY_STATUS.setdefault(project_key, {}).update({
-            "state": "error", "error": f"La auto-reparación no pudo completarse: {str(exc)[:160]}",
-            "phase_label": "La reparación automática falló — revisa el detalle",
-        })
-        return
-    # redesplegar con el código ya corregido
-    await _run_deploy_bg(project_key, triggered_by)
 
 
 @app.post("/projects/{project_key}/deploy/repair")
