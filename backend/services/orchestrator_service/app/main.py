@@ -3531,6 +3531,47 @@ async def repair_deploy(project_key: str, req: RepairDeployRequest) -> dict:
             "message": "Reparando el despliegue automáticamente. Te aviso cuando quede listo."}
 
 
+@app.post("/projects/{project_key}/gate/explain")
+async def explain_gate_simple(project_key: str) -> dict:
+    """AYUDA MENOR (IA barata, OpenAI): explica EN CRISTIANO qué está por aprobar el
+    usuario en el gate actual — 2-3 frases sin jerga, para que decida sin estrés. NO
+    cambia el flujo gateado; es solo una explicación amable. Best-effort."""
+    from services.orchestrator_service.app.project_pipeline import _PHASE_BY_STATE
+    from shared.clients.llm import openai_chat
+
+    state = "BACKLOG"
+    last_out = ""
+    async for session in get_session():
+        proj = (await session.execute(
+            select(_Project).where(_Project.key == project_key)
+        )).scalar_one_or_none()
+        state = (proj.workflow_state if proj else None) or "BACKLOG"
+        last = (await session.execute(
+            select(AgentRun).where(
+                AgentRun.project_key == project_key, AgentRun.status == "done",
+            ).order_by(AgentRun.started_at.desc()).limit(1)
+        )).scalar_one_or_none()
+        last_out = (last.output_summary if last else "") or ""
+        break
+
+    meta = _PHASE_BY_STATE.get(state, {})
+    label = meta.get("label") or state
+    desc = meta.get("desc") or ""
+    ctx = (f"Punto del proceso (gate) a aprobar: {label}. {desc}\n"
+           f"Lo último que hizo el equipo de agentes: {last_out}")
+    system = (
+        "Le hablas a un dueño de negocio SIN conocimientos técnicos. Explica en MÁXIMO "
+        "3 frases cortas, en español claro y cercano, sin jerga ni markdown: (1) qué "
+        "hizo el equipo en este punto, (2) qué significa que TÚ lo apruebes, (3) qué "
+        "pasa si en vez de aprobar pides cambios. Solo el texto, nada de listas."
+    )
+    out = await openai_chat(system, ctx, max_tokens=220, temperature=0.5)
+    if not out:
+        return {"ok": False,
+                "explanation": "Por ahora no puedo simplificarlo; usa 'Explícame' para el detalle completo."}
+    return {"ok": True, "explanation": out}
+
+
 # ===== Multi-chat: un proyecto tiene varios chats con su historial =====
 
 

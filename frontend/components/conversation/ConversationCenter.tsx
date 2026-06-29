@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bot, Send, Loader2, Paperclip, ShieldCheck,
-  CheckCircle2, Lock, HelpCircle, ImagePlus, X,
+  CheckCircle2, Lock, HelpCircle, ImagePlus, X, Sparkles,
 } from "lucide-react";
 import http from "@/lib/http";
 import { absUrl } from "@/lib/url";
-import { API, apiVisionFromDocument, apiStartLifecycle, apiGetPipeline, apiApproveGate, apiAssistant, apiUploadChatImage, type ChatImageUpload } from "@/lib/api";
+import { API, apiVisionFromDocument, apiStartLifecycle, apiGetPipeline, apiApproveGate, apiAssistant, apiUploadChatImage, apiExplainGateSimple, type ChatImageUpload } from "@/lib/api";
 
 import BacklogReview, { type ReviewStory } from "@/components/conversation/BacklogReview";
 import NfrInline from "@/components/conversation/NfrInline";
@@ -391,6 +391,20 @@ export default function ConversationCenter({
     }
   }, [projectKey, userId, push]);
 
+  // "En cristiano": explicación SIMPLE y barata (OpenAI) de qué se aprueba.
+  const explainGateSimple = useCallback(async () => {
+    push({ role: "human", content: "Explícamelo simple, en cristiano." });
+    setBusy(true);
+    try {
+      const r = await apiExplainGateSimple(projectKey);
+      push({ role: "agent", content: r.explanation || "No pude simplificarlo ahora, prueba 'Explícame' para el detalle." });
+    } catch {
+      push({ role: "agent", content: "No pude generar la explicación simple ahora." });
+    } finally {
+      setBusy(false);
+    }
+  }, [projectKey, push]);
+
   // Reintentar el despliegue cuando staging falló (acción honesta del gate).
   const retryDeploy = useCallback(async () => {
     setBusy(true);
@@ -462,6 +476,7 @@ export default function ConversationCenter({
                   onApprove={approve}
                   onRequestChanges={() => push({ role: "agent", content: "Claro — dime qué te gustaría cambiar y lo ajusto antes de continuar." })}
                   onExplain={() => m.gate && explainGate(m.gate)}
+                  onExplainSimple={explainGateSimple}
                   onRetryDeploy={retryDeploy}
                   onReviewStories={
                     (m.gate.gate_review?.stories?.length || 0) > 0
@@ -603,7 +618,7 @@ export default function ConversationCenter({
   );
 }
 
-function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExplain, onReviewStories, onRetryDeploy, busy }: { gate: Gate; projectKey: string; userId: string; onApprove: () => void; onRequestChanges: () => void; onExplain: () => void; onReviewStories?: () => void; onRetryDeploy?: () => void; busy: boolean }) {
+function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExplain, onExplainSimple, onReviewStories, onRetryDeploy, busy }: { gate: Gate; projectKey: string; userId: string; onApprove: () => void; onRequestChanges: () => void; onExplain: () => void; onExplainSimple?: () => void; onReviewStories?: () => void; onRetryDeploy?: () => void; busy: boolean }) {
   const r = gate.gate_review || {};
   const nMock = (r.stories || []).filter((s) => s.mockup).length;
   const chips: string[] = [];
@@ -759,6 +774,12 @@ function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExp
           <button onClick={onReviewStories} disabled={busy} title="Ver cada historia completa, descargarlas y aprobar"
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border border-brand/40 text-brand hover:bg-brand/10 disabled:opacity-60 font-medium">
             Ver historias completas
+          </button>
+        )}
+        {onExplainSimple && (
+          <button onClick={onExplainSimple} disabled={busy} title="Explicación corta y sin tecnicismos de qué vas a aprobar"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-60 font-medium">
+            <Sparkles size={14} /> En cristiano
           </button>
         )}
         <button onClick={onExplain} disabled={busy} title="Que el equipo te explique a fondo qué vas a aprobar"

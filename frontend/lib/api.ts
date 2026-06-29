@@ -321,6 +321,22 @@ export type TechTask = {
   id?: string; module: string; type: string; title: string;
   detail?: string; depends_on?: string[];
 };
+// Explicación SIMPLE del gate (IA barata, OpenAI): qué apruebas, en cristiano.
+export async function apiExplainGateSimple(
+  projectKey: string
+): Promise<{ ok?: boolean; explanation?: string }> {
+  try {
+    const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/gate/explain`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) return { ok: false };
+    return await res.json();
+  } catch {
+    return { ok: false };
+  }
+}
+
 // Auto-reparación de deploy: la IA corrige el código de la app y redespliega.
 export async function apiRepairDeploy(
   projectKey: string

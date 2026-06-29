@@ -75,7 +75,7 @@ class TextIn(BaseModel):
 # Marcador de BUILD: permite verificar AL INSTANTE qué versión de código está viva
 # en el contenedor (en vez de inferirlo de un ciclo de 10 min). Subir este valor en
 # cada deploy que se quiera confirmar en prod.
-BUILD_MARKER = "self-heal-v22"
+BUILD_MARKER = "gate-explain-v23"
 
 
 @app.get("/health")
@@ -661,6 +661,14 @@ async def gw_repair_deploy(project_key: str, req: GwRepairDeploy) -> dict:
     return await _proxy_post(
         f"{settings.orchestrator_service_url}/projects/{project_key}/deploy/repair",
         req.model_dump(), timeout=60.0,
+    )
+
+
+@app.post("/projects/{project_key}/gate/explain")
+async def gw_gate_explain(project_key: str) -> dict:
+    return await _proxy_post(
+        f"{settings.orchestrator_service_url}/projects/{project_key}/gate/explain",
+        {}, timeout=60.0,
     )
 
 
