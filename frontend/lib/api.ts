@@ -321,6 +321,22 @@ export type TechTask = {
   id?: string; module: string; type: string; title: string;
   detail?: string; depends_on?: string[];
 };
+// Resumen ejecutivo para el cliente (IA barata, OpenAI): qué se construyó.
+export async function apiExecutiveSummary(
+  projectKey: string
+): Promise<{ ok?: boolean; summary?: string; url?: string }> {
+  try {
+    const res = await authFetch(`${API}/projects/${encodeURIComponent(projectKey)}/summary`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) return { ok: false };
+    return await res.json();
+  } catch {
+    return { ok: false };
+  }
+}
+
 // Explicación SIMPLE del gate (IA barata, OpenAI): qué apruebas, en cristiano.
 export async function apiExplainGateSimple(
   projectKey: string

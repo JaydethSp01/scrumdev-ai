@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import {
   apiGetOrchestration, apiGetCode, apiGetRefinement, apiGetAdrs, apiGetDeployPreview,
-  apiGetBacklog, apiRepairDeploy,
+  apiGetBacklog, apiRepairDeploy, apiExecutiveSummary,
   type Orchestration, type OrchestrationStep, type CodeFile, type RefinementStory,
   type AdrItem, type DeployPreview, type BacklogItem,
 } from "@/lib/api";
@@ -241,7 +241,7 @@ export default function OrchestrationStudio({
           <main className="min-h-0 overflow-y-auto p-5 sm:p-7 bg-gradient-to-b from-neutral-900/40 to-neutral-950 os-grid">
             {/* Actividad EN VIVO: qué hace AHORA + progreso (reload-safe) */}
             <LiveActivity data={data} runningStep={runningStep} filesDone={filesDone}
-              deploy={deploy} />
+              deploy={deploy} projectKey={projectKey} />
 
             {/* Mockup REAL: la app desplegada, en vivo */}
             <LivePreview projectKey={projectKey} deploy={deploy} />
@@ -299,13 +299,26 @@ export default function OrchestrationStudio({
 // para que en generaciones largas el cliente sepa dónde va y no se estrese. Como todo
 // sale de pasos persistidos en DB, recargar la página NO pierde nada (se re-hidrata).
 function LiveActivity({
-  data, runningStep, filesDone, deploy,
+  data, runningStep, filesDone, deploy, projectKey,
 }: {
   data: Orchestration | null;
   runningStep: OrchestrationStep | null;
   filesDone: number;
   deploy?: Orchestration["deploy"];
+  projectKey: string;
 }) {
+  const [summary, setSummary] = useState<string | null>(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
+  const loadSummary = async () => {
+    if (loadingSummary) return;
+    setLoadingSummary(true);
+    try {
+      const r = await apiExecutiveSummary(projectKey);
+      setSummary(r.summary || "No pude generar el resumen ahora.");
+    } finally {
+      setLoadingSummary(false);
+    }
+  };
   if (!data) return null;
   const state = data.current_state || "";
   const isReleased = state === "RELEASED";
@@ -377,6 +390,25 @@ function LiveActivity({
         <p className="mt-2 text-[10px] text-neutral-500 flex items-center gap-1.5">
           <RefreshCw size={10} /> Puedes recargar o cerrar esta página sin perder el progreso — todo se guarda en el servidor.
         </p>
+      )}
+      {/* Resumen ejecutivo para el cliente (solo al terminar) */}
+      {isReleased && (
+        <div className="mt-3">
+          {!summary ? (
+            <button onClick={loadSummary} disabled={loadingSummary}
+              className="inline-flex items-center gap-1.5 text-[11.5px] font-medium px-3 py-1.5 rounded-lg bg-white/5 text-neutral-200 ring-1 ring-white/10 hover:bg-white/10 disabled:opacity-60 transition">
+              {loadingSummary ? <Loader2 size={12} className="animate-spin" /> : <ScrollText size={12} />}
+              {loadingSummary ? "Generando…" : "Resumen para el cliente"}
+            </button>
+          ) : (
+            <div className="rounded-lg bg-neutral-900/70 border border-neutral-800 p-3">
+              <div className="text-[9px] uppercase tracking-wide text-neutral-500 mb-1 flex items-center gap-1">
+                <ScrollText size={10} className="text-brand" /> Resumen para el cliente
+              </div>
+              <p className="text-[12px] text-neutral-200 leading-relaxed">{summary}</p>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

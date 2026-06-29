@@ -3572,6 +3572,43 @@ async def explain_gate_simple(project_key: str) -> dict:
     return {"ok": True, "explanation": out}
 
 
+@app.post("/projects/{project_key}/summary")
+async def executive_summary(project_key: str) -> dict:
+    """AYUDA MENOR (IA barata, OpenAI): resumen EJECUTIVO para el cliente cuando la app
+    está lista — 1 párrafo no técnico de qué se construyó y qué hace, listo para
+    presentar. Best-effort, no toca el flujo."""
+    from shared.clients.llm import openai_chat
+
+    vision = ""
+    n_stories = 0
+    url = (_DEPLOY_STATUS.get(project_key) or {}).get("vercel_url") or ""
+    async for session in get_session():
+        v = (await session.execute(
+            select(ProjectVision).where(ProjectVision.project_key == project_key)
+        )).scalar_one_or_none()
+        vision = (v.vision if v else "") or ""
+        n_stories = len((await session.execute(
+            select(BacklogItem).where(BacklogItem.project_key == project_key)
+        )).scalars().all())
+        break
+
+    if not vision:
+        return {"ok": False, "summary": "Aún no hay suficiente información del proyecto."}
+    ctx = (f"Visión del producto: {vision[:1200]}\n"
+           f"Historias de usuario implementadas: {n_stories}\n"
+           f"Publicado y funcionando: {'sí, en ' + url if url else 'sí'}")
+    system = (
+        "Eres un consultor presentándole el resultado a un CLIENTE no técnico. En UN "
+        "párrafo de 4-5 frases, en español profesional y cercano, sin jerga ni markdown, "
+        "resume QUÉ SE CONSTRUYÓ: el producto, qué puede hacer (sus funciones principales) "
+        "y que ya está publicado y funcionando. Habla en presente, con orgullo y claridad."
+    )
+    out = await openai_chat(system, ctx, max_tokens=320, temperature=0.5)
+    if not out:
+        return {"ok": False, "summary": "No pude generar el resumen ahora."}
+    return {"ok": True, "summary": out, "url": url}
+
+
 # ===== Multi-chat: un proyecto tiene varios chats con su historial =====
 
 
