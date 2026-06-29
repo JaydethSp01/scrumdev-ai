@@ -1709,9 +1709,15 @@ async def _record_agent_run(
     output_summary: str = "",
     artifacts: list | None = None,
     status: str = "done",
+    input_full: str = "",
+    output_full: str = "",
 ) -> None:
     """Auditoria/trazabilidad: persiste UNA ejecucion de agente y publica los
-    eventos AGENT_EXECUTION_STARTED/COMPLETED. Best-effort: nunca rompe la fase."""
+    eventos AGENT_EXECUTION_STARTED/COMPLETED. Best-effort: nunca rompe la fase.
+
+    input_full/output_full guardan la COMUNICACIÓN COMPLETA (mensaje que el
+    orquestador pasa al agente + producción completa del agente) para la traza
+    profunda; si no se pasan, caen al resumen."""
     now = datetime.now(timezone.utc)
     try:
       async with _record_lock:
@@ -1739,6 +1745,8 @@ async def _record_agent_run(
                 action=action,
                 input_summary=input_summary or None,
                 output_summary=output_summary or None,
+                input_full=(input_full or input_summary or None),
+                output_full=(output_full or output_summary or None),
                 artifacts=artifacts or [],
                 status=status,
                 started_at=now,
@@ -1854,6 +1862,9 @@ async def get_orchestration(project_key: str) -> dict:
                 "id": r.id, "agent": r.agent_name, "role": r.role,
                 "phase": r.phase, "action": r.action,
                 "input_summary": r.input_summary, "output_summary": r.output_summary,
+                # comunicación COMPLETA (traza profunda); cae al resumen si no hay full
+                "input_full": getattr(r, "input_full", None) or r.input_summary,
+                "output_full": getattr(r, "output_full", None) or r.output_summary,
                 "artifacts": r.artifacts or [], "status": r.status,
                 "handoff_from": prev_agent,  # quién le pasó la posta
                 "started_at": r.started_at.isoformat() if r.started_at else None,
@@ -2021,10 +2032,30 @@ async def _run_phase_action(project_key: str, phase: str, action: str, triggered
             _titles = [str(s.title).strip() for s in stories if getattr(s, "title", None)][:4]
             _feat = ", ".join(_titles) if _titles else "las historias del sprint"
             _more = "…" if len(stories) > 4 else ""
+            # COMUNICACIÓN COMPLETA: el mensaje real que el orquestador le pasa al
+            # Developer = las historias del sprint con sus criterios de aceptación.
+            _lines = []
+            for s in stories:
+                _ac = getattr(s, "acceptance_criteria", None) or []
+                _act = ("\n   - " + "\n   - ".join(str(a) for a in _ac)) if _ac else ""
+                _lines.append(
+                    f"• [{getattr(s, 'story_key', '') or '—'}] {getattr(s, 'title', '')}"
+                    f" ({getattr(s, 'story_points', '?')} pts)"
+                    + (f"\n   {getattr(s, 'description', '')}" if getattr(s, 'description', None) else "")
+                    + (f"\n   Criterios de aceptación:{_act}" if _ac else "")
+                )
+            _in_full = (
+                f"ORQUESTADOR → DEVELOPER (Sprint {sp_num or 1} de {sp_total or 1})\n"
+                f"Implementa estas {len(stories)} historias del sprint activo:\n\n"
+                + "\n\n".join(_lines)
+            )
             await _record_agent_run(
                 project_key, "Developer Agent", "Developer", phase, action,
                 input_summary=f"Sprint {sp_num or 1} — historias a implementar: {_feat}{_more}",
                 output_summary=f"Implementando código de: {_feat}{_more}",
+                input_full=_in_full,
+                output_full=f"Generando la app (sprint {sp_num or 1}). El código producido "
+                            f"aparece en 'archivos generados' de este paso.",
                 artifacts=[{"type": "build", "build_id": bid, "sprint": sp_num,
                             "features": _titles}],
                 status="running",
@@ -2205,12 +2236,35 @@ async def _auto_run_until_gate(project_key: str, triggered_by: str, max_steps: i
             if n == 0:
                 logger.error("backlog_generation_stuck", project=project_key)
                 return  # no avanzar a un gate vacío; el PO puede reintentar
+        # COMUNICACIÓN COMPLETA del PO: la lista real de historias que produjo.
+        _po_full = f"Generó {n} historias priorizadas:"
+        try:
+            async for session in get_session():
+                _items = (await session.execute(
+                    select(BacklogItem).where(BacklogItem.project_key == project_key)
+                    .order_by(BacklogItem.order_index)
+                )).scalars().all()
+                break
+            _po_full = (
+                f"PO → BACKLOG · {n} historias priorizadas (con criterios de aceptación):\n\n"
+                + "\n\n".join(
+                    f"• [{getattr(it, 'story_key', '') or '—'}] {it.title}"
+                    f" ({getattr(it, 'story_points', '?')} pts · {getattr(it, 'priority', '—')})"
+                    + (f"\n   {it.description}" if getattr(it, 'description', None) else "")
+                    + ((f"\n   Criterios: " + "; ".join(str(a) for a in (it.acceptance_criteria or [])))
+                       if getattr(it, 'acceptance_criteria', None) else "")
+                    for it in _items
+                )
+            )
+        except Exception:
+            pass
         # El PO ya terminó: pasamos su registro 'running' a 'done' con el conteo
         # REAL. Si por algún motivo no existía el running, lo creamos.
         updated = await _update_agent_run(
             project_key, "PO Agent", "generate_backlog",
             status="done",
             output_summary=f"Generó {n} historias de backlog priorizadas",
+            output_full=_po_full,
             artifacts=[{"type": "backlog", "count": n}],
         )
         if not updated:
@@ -2218,6 +2272,9 @@ async def _auto_run_until_gate(project_key: str, triggered_by: str, max_steps: i
                 project_key, "PO Agent", "Product Owner", "BACKLOG", "generate_backlog",
                 input_summary="Visión del producto",
                 output_summary=f"Generó {n} historias de backlog priorizadas",
+                input_full="ORQUESTADOR → PO: traduce la visión del producto en un backlog "
+                           "priorizado con criterios de aceptación (Definition of Ready).",
+                output_full=_po_full,
                 artifacts=[{"type": "backlog", "count": n}],
             )
 

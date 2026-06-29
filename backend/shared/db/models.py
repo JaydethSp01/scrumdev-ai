@@ -439,6 +439,11 @@ class AgentRun(Base):
     action: Mapped[str] = mapped_column(String(64))
     input_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # TRAZABILIDAD TOTAL: comunicación COMPLETA (no solo resumen) para "ver a profundidad
+    # cómo se comunican": input_full = mensaje/contexto que el orquestador pasa al agente;
+    # output_full = respuesta/producción completa del agente.
+    input_full: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_full: Mapped[str | None] = mapped_column(Text, nullable=True)
     artifacts: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(32), default="running")
     correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

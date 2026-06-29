@@ -1371,6 +1371,8 @@ export type OrchestrationStep = {
   action: string;
   input_summary?: string | null;
   output_summary?: string | null;
+  input_full?: string | null;
+  output_full?: string | null;
   artifacts?: AgentRunArtifact[];
   status: "running" | "done" | "failed" | "error" | "skipped";
   handoff_from?: string | null;

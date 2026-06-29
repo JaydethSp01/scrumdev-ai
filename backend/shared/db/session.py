@@ -92,6 +92,14 @@ async def _ensure_constraints() -> None:
                 "ALTER TABLE human_decisions ADD CONSTRAINT chk_human_decisions_status "
                 "CHECK (status IN ('pending','approved','rejected','superseded'))"
             ))
+            # TRAZABILIDAD TOTAL: columnas de comunicación completa en agent_runs.
+            # create_all NO añade columnas a tablas existentes -> ALTER idempotente.
+            await conn.execute(text(
+                "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS input_full TEXT"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS output_full TEXT"
+            ))
     except Exception as exc:  # noqa: BLE001 - nunca bloquear el arranque
         import logging
         logging.getLogger("db.init").warning("ensure_constraints failed: %s", exc)

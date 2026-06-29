@@ -524,6 +524,56 @@ function SprintBoard({ projectKey, state }: { projectKey: string; state?: string
   );
 }
 
+// ── Comunicación completa de un agente ────────────────────────────────────────
+// Trazabilidad TOTAL: muestra el mensaje COMPLETO que el orquestador le pasó al
+// agente y la respuesta/producción completa (no solo el resumen) -> "ver a
+// profundidad cómo se comunican". Solo aparece si hay contenido más rico que el
+// resumen (input_full/output_full distintos del summary).
+function AgentComms({ step }: { step: OrchestrationStep }) {
+  const [open, setOpen] = useState(false);
+  const inFull = (step.input_full || "").trim();
+  const outFull = (step.output_full || "").trim();
+  const richer =
+    (inFull && inFull !== (step.input_summary || "").trim()) ||
+    (outFull && outFull !== (step.output_summary || "").trim());
+  if (!richer) return null;
+  return (
+    <div className="rounded-lg border border-neutral-800 bg-neutral-950/60 overflow-hidden">
+      <button onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-neutral-900/60">
+        <ScrollText size={12} className="text-brand" />
+        <span className="text-[10.5px] font-medium text-neutral-300">Comunicación completa</span>
+        <span className="text-[9.5px] text-neutral-600">· cómo se comunican</span>
+        <ChevronRight size={13} className={`ml-auto text-neutral-600 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="px-2.5 pb-2.5 space-y-2">
+          {inFull && (
+            <div>
+              <div className="text-[9px] uppercase tracking-wide text-neutral-500 mb-1 flex items-center gap-1">
+                <CornerDownRight size={10} className="text-sky-400" /> mensaje recibido (del orquestador)
+              </div>
+              <pre className="text-[10.5px] leading-relaxed text-neutral-300 whitespace-pre-wrap break-words max-h-64 overflow-y-auto rounded-md bg-neutral-900 border border-neutral-800 p-2 font-mono">
+                {inFull}
+              </pre>
+            </div>
+          )}
+          {outFull && (
+            <div>
+              <div className="text-[9px] uppercase tracking-wide text-neutral-500 mb-1 flex items-center gap-1">
+                <CornerDownRight size={10} className="text-emerald-400" /> respuesta / producción del agente
+              </div>
+              <pre className="text-[10.5px] leading-relaxed text-neutral-300 whitespace-pre-wrap break-words max-h-64 overflow-y-auto rounded-md bg-neutral-900 border border-neutral-800 p-2 font-mono">
+                {outFull}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Relay del orquestador ─────────────────────────────────────────────────────
 // Hace VISIBLE el rol del orquestador (el hub del diagrama): entre cada agente,
 // muestra que ÉL recibe la salida del anterior, arma el contexto y ACTIVA al
@@ -666,6 +716,9 @@ function StepCard({
                 </div>
               </div>
             )}
+            {/* COMUNICACIÓN COMPLETA: ver a profundidad qué mensaje recibió el agente y
+                qué produjo (no solo el resumen). Trazabilidad total. */}
+            <AgentComms step={step} />
             {/* artefactos */}
             {step.artifacts && step.artifacts.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
