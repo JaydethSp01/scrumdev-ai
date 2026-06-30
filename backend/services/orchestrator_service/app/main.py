@@ -3449,13 +3449,78 @@ class RepairDeployRequest(BaseModel):
 
 
 async def _repair_and_redeploy_bg(project_key: str, bug_desc: str, triggered_by: str) -> None:
-    """AUTO-REPARACIÓN en 2 pasos (económica y robusta):
+    """AUTO-REPARACIÓN robusta:
+    0) Si NO hay código (la generación se cortó/colgó, p.ej. por un reinicio del Space),
+       REGENERA la app con Claude Code y espera a que termine antes de desplegar.
     1) REDESPLIEGA con el build gate determinista ACTUAL — auto-corrige la mayoría de
-       fallos sin IA (truncación, colisiones, mock imports, accesos a undefined, exports
-       faltantes). Para apps generadas con un gate viejo, esto solo ya las arregla.
-    2) Solo si SIGUE fallando, la IA corrige los archivos del fallo específico (acotada
-       en tiempo, best-effort) y se redespliega otra vez.
+       fallos sin IA (truncación, colisiones, mock imports, undefined, exports faltantes).
+    2) Solo si SIGUE fallando, la IA corrige los archivos del fallo específico (acotada,
+       best-effort) y se redespliega otra vez.
     Reporta progreso por _DEPLOY_STATUS. Nunca tumba nada."""
+    # PASO 0: ¿hay código? si la generación se cortó, NO hay artefactos -> regenerar
+    # con Claude Code (mismo pipeline per-archivo del Developer) antes de desplegar.
+    has_code = False
+    async for session in get_session():
+        has_code = (await session.execute(
+            select(CodeArtifact.id).where(CodeArtifact.project_key == project_key).limit(1)
+        )).first() is not None
+        break
+    if not has_code:
+        logger.info("repair_no_code_regenerate", project=project_key)
+        # marcar como fallido cualquier paso del Developer que quedó "running" colgado
+        # (p.ej. por un reinicio del Space) para que la traza no muestre "running" eterno.
+        try:
+            async for session in get_session():
+                stuck = (await session.execute(
+                    select(AgentRun).where(
+                        AgentRun.project_key == project_key,
+                        AgentRun.status == "running",
+                    )
+                )).scalars().all()
+                for r in stuck:
+                    r.status = "failed"
+                    r.output_summary = (r.output_summary or "") + " (interrumpido — regenerando)"
+                if stuck:
+                    await session.commit()
+                break
+        except Exception:
+            pass
+        _DEPLOY_STATUS.setdefault(project_key, {}).update({
+            "state": "building",
+            "phase_label": "No había código (la generación se cortó) — regenerando la app con Claude Code…",
+            "phase_pct": 20, "error": None,
+        })
+        try:
+            bid = None
+            async for session in get_session():
+                run = BuildRun(
+                    project_key=project_key, triggered_by=triggered_by,
+                    stage="queued (repair regenerate)", progress_percent=5,
+                    summary={"action": "generate_full_app", "via": "repair"},
+                )
+                session.add(run)
+                await session.commit()
+                await session.refresh(run)
+                bid = run.id
+                break
+            await _run_generate_full_app(project_key, triggered_by, True, bid)
+            await _wait_build_done(project_key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("repair_regenerate_failed", project=project_key, error=str(exc)[:160])
+        # re-chequear: si aún no hay código, no tiene sentido desplegar
+        async for session in get_session():
+            has_code = (await session.execute(
+                select(CodeArtifact.id).where(CodeArtifact.project_key == project_key).limit(1)
+            )).first() is not None
+            break
+        if not has_code:
+            _DEPLOY_STATUS.setdefault(project_key, {}).update({
+                "state": "error",
+                "error": "La regeneración con Claude Code no produjo código. Reintenta en un momento.",
+                "phase_label": "No se pudo regenerar el código",
+            })
+            return
+
     # PASO 1: redeploy determinista
     _DEPLOY_STATUS.setdefault(project_key, {}).update({
         "state": "building", "phase_label": "Aplicando las correcciones automáticas del build y redesplegando…",
