@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import http from "@/lib/http";
 import { absUrl } from "@/lib/url";
-import { API, apiVisionFromDocument, apiStartLifecycle, apiGetPipeline, apiApproveGate, apiAssistant, apiUploadChatImage, apiExplainGateSimple, type ChatImageUpload } from "@/lib/api";
+import { API, apiVisionFromDocument, apiStartLifecycle, apiGetPipeline, apiApproveGate, apiAssistant, apiUploadChatImage, apiExplainGateSimple, apiRepairDeploy, type ChatImageUpload } from "@/lib/api";
 
 import BacklogReview, { type ReviewStory } from "@/components/conversation/BacklogReview";
 import NfrInline from "@/components/conversation/NfrInline";
@@ -405,6 +405,21 @@ export default function ConversationCenter({
     }
   }, [projectKey, push]);
 
+  // "Corregir con IA": auto-repara el deploy (redeploy determinista + IA) y avisa.
+  const repairDeploy = useCallback(async () => {
+    setBusy(true);
+    push({ role: "human", content: "🔧 Corregir el despliegue con IA." });
+    try {
+      const r = await apiRepairDeploy(projectKey);
+      push({ role: "agent", content: r.message || "Estoy reparando el despliegue: aplico las correcciones automáticas, y si hace falta la IA afina el código y lo vuelvo a publicar. Te muestro la URL aquí cuando esté lista (~5-10 min)." });
+      setTimeout(() => void syncPipeline(), 6000);
+    } catch {
+      push({ role: "agent", content: "No pude iniciar la reparación ahora. Intenta de nuevo en un momento." });
+    } finally {
+      setBusy(false);
+    }
+  }, [projectKey, push, syncPipeline]);
+
   // Reintentar el despliegue cuando staging falló (acción honesta del gate).
   const retryDeploy = useCallback(async () => {
     setBusy(true);
@@ -478,6 +493,7 @@ export default function ConversationCenter({
                   onExplain={() => m.gate && explainGate(m.gate)}
                   onExplainSimple={explainGateSimple}
                   onRetryDeploy={retryDeploy}
+                  onRepairDeploy={repairDeploy}
                   onReviewStories={
                     (m.gate.gate_review?.stories?.length || 0) > 0
                       ? () => setReviewStories(m.gate!.gate_review!.stories!)
@@ -618,7 +634,7 @@ export default function ConversationCenter({
   );
 }
 
-function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExplain, onExplainSimple, onReviewStories, onRetryDeploy, busy }: { gate: Gate; projectKey: string; userId: string; onApprove: () => void; onRequestChanges: () => void; onExplain: () => void; onExplainSimple?: () => void; onReviewStories?: () => void; onRetryDeploy?: () => void; busy: boolean }) {
+function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExplain, onExplainSimple, onReviewStories, onRetryDeploy, onRepairDeploy, busy }: { gate: Gate; projectKey: string; userId: string; onApprove: () => void; onRequestChanges: () => void; onExplain: () => void; onExplainSimple?: () => void; onReviewStories?: () => void; onRetryDeploy?: () => void; onRepairDeploy?: () => void; busy: boolean }) {
   const r = gate.gate_review || {};
   const nMock = (r.stories || []).filter((s) => s.mockup).length;
   const chips: string[] = [];
@@ -744,13 +760,24 @@ function GateCard({ gate, projectKey, userId, onApprove, onRequestChanges, onExp
               <p className="text-[11px] text-neutral-500 mt-1">
                 No hay nada publicado que validar. Reintenta el despliegue o pide cambios al equipo.
               </p>
-              <button
-                onClick={onRetryDeploy}
-                disabled={busy}
-                className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-60"
-              >
-                🔄 Reintentar despliegue
-              </button>
+              <div className="mt-2 flex items-center gap-2 flex-wrap">
+                {onRepairDeploy && (
+                  <button
+                    onClick={onRepairDeploy}
+                    disabled={busy}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60"
+                  >
+                    🔧 Corregir con IA
+                  </button>
+                )}
+                <button
+                  onClick={onRetryDeploy}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-60"
+                >
+                  🔄 Reintentar
+                </button>
+              </div>
             </div>
           )}
         </div>

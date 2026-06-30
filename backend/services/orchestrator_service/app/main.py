@@ -3557,13 +3557,28 @@ async def explain_gate_simple(project_key: str) -> dict:
     meta = _PHASE_BY_STATE.get(state, {})
     label = meta.get("label") or state
     desc = meta.get("desc") or ""
+    # HONESTIDAD: si el despliegue falló/degradó, la explicación NO debe decir que
+    # "todo está listo". Incluimos el estado real del deploy en el contexto.
+    ds = _DEPLOY_STATUS.get(project_key) or {}
+    dstate = (ds.get("state") or "").lower()
+    deploy_note = ""
+    if dstate in ("error", "gate_failed") or (not ds.get("vercel_url") and dstate not in ("done", "")):
+        deploy_note = ("\nIMPORTANTE: el despliegue a pruebas (staging) FALLÓ y NO hay nada "
+                       "publicado todavía. Sé honesto: NO está listo para producción; conviene "
+                       "pulsar 'Corregir con IA' (lo arregla y republica) o pedir cambios. "
+                       "NO digas que está todo listo.")
+    elif dstate == "done_degraded" or (ds.get("e2e_fails") or []):
+        deploy_note = ("\nIMPORTANTE: el despliegue se publicó pero la prueba en vivo encontró "
+                       "fallos. Sé honesto: conviene revisarlo o pulsar 'Corregir con IA' antes "
+                       "de aprobar producción.")
     ctx = (f"Punto del proceso (gate) a aprobar: {label}. {desc}\n"
-           f"Lo último que hizo el equipo de agentes: {last_out}")
+           f"Lo último que hizo el equipo de agentes: {last_out}{deploy_note}")
     system = (
         "Le hablas a un dueño de negocio SIN conocimientos técnicos. Explica en MÁXIMO "
-        "3 frases cortas, en español claro y cercano, sin jerga ni markdown: (1) qué "
-        "hizo el equipo en este punto, (2) qué significa que TÚ lo apruebes, (3) qué "
-        "pasa si en vez de aprobar pides cambios. Solo el texto, nada de listas."
+        "3 frases cortas, en español claro y cercano, sin jerga ni markdown: (1) en qué "
+        "punto va el proceso AHORA (sé honesto si algo falló), (2) qué significa que TÚ "
+        "apruebes, (3) qué conviene hacer si no está listo (corregir o pedir cambios). "
+        "Solo el texto, nada de listas."
     )
     out = await openai_chat(system, ctx, max_tokens=220, temperature=0.5)
     if not out:
