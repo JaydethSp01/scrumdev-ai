@@ -262,3 +262,7 @@ Este proyecto implementa la propuesta tecnica descrita en los talleres del
 repositorio [adanbeltran/ProyectoEstanciaDelfin](https://github.com/adanbeltran/ProyectoEstanciaDelfin),
 adaptada a una primera fase corrible y verificable en local, con Claude como
 LLM por defecto.
+
+## Creadores del proyecto
+**Jaydeth Simarra Polo**
+**Jhoan Getial**
