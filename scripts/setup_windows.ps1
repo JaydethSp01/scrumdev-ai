@@ -40,12 +40,7 @@ if (-not (Have poetry)) {
 if (-not (Have poetry)) { Fail "Poetry no quedo en el PATH. Cierra y reabre PowerShell, o ejecuta:  python -m pip install --user poetry" }
 Ok "Poetry $(poetry --version)"
 
-# 3) CLI de Claude Code (necesaria para que la IA genere codigo) ------------
-if (-not (Have claude)) {
-  Info "Instalando la CLI de Claude Code (npm global)..."
-  npm install -g @anthropic-ai/claude-code | Out-Null
-}
-if (Have claude) { Ok "Claude Code CLI instalada" } else { Warn "No pude instalar la CLI de Claude Code. Instalala manual:  npm i -g @anthropic-ai/claude-code" }
+# 3) (La IA usa OpenAI por API — no hace falta instalar ninguna CLI extra) --
 
 # 4) ARCHIVOS .env ----------------------------------------------------------
 if (-not (Test-Path ".env")) { Copy-Item ".env.example" ".env"; Ok "Creado .env desde .env.example" } else { Ok ".env ya existe" }
@@ -76,21 +71,22 @@ if ($envtxt -match "JWT_SECRET_KEY=change-me" -or $envtxt -notmatch "JWT_SECRET_
   Ok "JWT_SECRET_KEY generado"
 }
 
-# 5) TOKEN de la IA (para que genere codigo con tu plan de Claude) ----------
+# 5) API KEY de OpenAI (la IA genera el codigo con OpenAI) ------------------
 Write-Host ""
-Info "La generacion de codigo usa tu plan de Claude Code (no gasta API)."
-Write-Host "     1) En otra ventana ejecuta:  claude setup-token" -ForegroundColor Gray
-Write-Host "     2) Copia el token que te da (empieza por sk-ant-oat...)." -ForegroundColor Gray
-$tok = Read-Host "     Pega aqui tu CLAUDE_CODE_OAUTH_TOKEN (Enter para saltar)"
-if ($tok.Trim().Length -gt 10) {
-  Set-Env ".env" "CLAUDE_CODE_OAUTH_TOKEN" $tok.Trim()
-  Set-Env ".env" "SCRUMDEV_AI_PROVIDER" "claude_code"
-  Ok "Token guardado en .env"
+Info "La generacion de codigo usa OpenAI (gpt-4o). Solo necesitas tu API key."
+Write-Host "     Consiguela en: https://platform.openai.com/api-keys  (empieza por sk-...)" -ForegroundColor Gray
+$okey = Read-Host "     Pega aqui tu OPENAI_API_KEY (Enter para saltar)"
+if ($okey.Trim().Length -gt 10) {
+  Set-Env ".env" "OPENAI_API_KEY" $okey.Trim()
+  Set-Env ".env" "OPENAI_ENABLED" "true"
+  Set-Env ".env" "SCRUMDEV_AI_PROVIDER" "openai"
+  Set-Env ".env" "OPENAI_MODEL_VISION" "gpt-4o"
+  Set-Env ".env" "OPENAI_MODEL_FAST" "gpt-4o-mini"
+  Ok "OpenAI configurado (provider=openai, modelo gpt-4o)"
 } else {
-  Warn "Sin token: la plataforma abre, pero la IA no generara codigo hasta que pongas CLAUDE_CODE_OAUTH_TOKEN en .env"
+  Set-Env ".env" "SCRUMDEV_AI_PROVIDER" "openai"
+  Warn "Sin key: la plataforma abre, pero la IA no generara hasta que pongas OPENAI_API_KEY (y OPENAI_ENABLED=true) en .env"
 }
-$okey = Read-Host "     (Opcional) OPENAI_API_KEY para las ayudas menores (Enter para saltar)"
-if ($okey.Trim().Length -gt 10) { Set-Env ".env" "OPENAI_API_KEY" $okey.Trim(); Set-Env ".env" "OPENAI_ENABLED" "true"; Ok "OpenAI configurado" }
 
 # 6) INFRA (Postgres + Redis en Docker) -------------------------------------
 Write-Host ""

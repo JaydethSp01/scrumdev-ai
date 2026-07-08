@@ -9,7 +9,7 @@ Guía para dejar **toda la plataforma funcional en tu Windows**: backend + front
 | Herramienta | Para qué | Descarga |
 |-------------|----------|----------|
 | **Python 3.11–3.13** | backend | https://www.python.org/downloads/ — **marca “Add Python to PATH”** al instalar |
-| **Node.js 18+ (LTS)** | frontend + CLI de IA | https://nodejs.org/ |
+| **Node.js 18+ (LTS)** | frontend | https://nodejs.org/ |
 | **Docker Desktop** | base de datos (Postgres) | https://www.docker.com/products/docker-desktop/ — **ábrelo** antes de instalar |
 | **Git** | clonar el repo | https://git-scm.com/download/win |
 
@@ -40,7 +40,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup_windows.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\run_windows.ps1
 ```
 
-El `setup_windows.ps1` te pedirá un **token de Claude Code** (ver §5). Cuando termine, `run_windows.ps1` abre **http://localhost:3000**.
+El `setup_windows.ps1` te pedirá tu **API key de OpenAI** (ver §5). Cuando termine, `run_windows.ps1` abre **http://localhost:3000**.
 
 > Para **apagar** todo: cierra las dos ventanas de PowerShell y ejecuta `docker compose -f infra/docker-compose.yml down`.
 
@@ -55,19 +55,20 @@ docker compose -f infra/docker-compose.yml up -d
 # 2) Variables de entorno
 Copy-Item .env.example .env
 Copy-Item frontend\.env.example frontend\.env.local
-#   -> edita .env: pon tu CLAUDE_CODE_OAUTH_TOKEN (ver §5) y deja:
+#   -> edita .env y pon (ver §5):
+#      SCRUMDEV_AI_PROVIDER=openai
+#      OPENAI_ENABLED=true
+#      OPENAI_API_KEY=sk-...
+#      OPENAI_MODEL_VISION=gpt-4o
 #      ML_ENABLED=false  KAFKA_ENABLED=false  RABBITMQ_ENABLED=false
 #      DATABASE_URL=postgresql+asyncpg://scrumdev:scrumdev@localhost:5434/scrumdev_ai
 
-# 3) CLI de Claude Code (la IA la usa para generar)
-npm install -g @anthropic-ai/claude-code
-
-# 4) Dependencias
+# 3) Dependencias
 pip install --user poetry
 cd backend;  poetry install --no-root;  cd ..
 cd frontend; npm install;               cd ..
 
-# 5) Arrancar (dos terminales)
+# 4) Arrancar (dos terminales)
 #    Terminal 1 (backend, todo en un proceso):
 cd backend
 $env:PYTHONPATH = "$PWD"
@@ -82,29 +83,24 @@ Abre **http://localhost:3000**.
 
 ---
 
-## 5. Conseguir el token de la IA (para que genere código)
+## 5. Configurar la API key de OpenAI (para que genere código)
 
-La generación usa **tu plan de Claude Code** (no gasta API). Consigue el token así:
+La generación de código usa **OpenAI** (`gpt-4o`). Solo necesitas tu API key:
 
-```powershell
-claude setup-token
-```
-
-Copia el valor que te da (empieza por `sk-ant-oat...`) y ponlo en `.env`:
+1. Consíguela en **https://platform.openai.com/api-keys** (empieza por `sk-...`).
+2. Ponla en `.env`:
 
 ```
-CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat...
-SCRUMDEV_AI_PROVIDER=claude_code
-```
-
-> Sin token, la plataforma **abre igual** (puedes ver la UI, registrarte, crear proyectos), pero la IA **no generará código** hasta que lo pongas.
-
-**Opcional** — `OPENAI_API_KEY` habilita las ayudas menores (asistente de visión, “En cristiano”, resumen ejecutivo):
-
-```
-OPENAI_API_KEY=sk-...
+SCRUMDEV_AI_PROVIDER=openai
 OPENAI_ENABLED=true
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL_VISION=gpt-4o        # modelo para generar código
+OPENAI_MODEL_FAST=gpt-4o-mini     # modelo barato para las ayudas menores
 ```
+
+> La **misma** key habilita también las ayudas menores (asistente de visión, “En cristiano”, resumen ejecutivo), que usan `gpt-4o-mini`.
+
+> Sin key, la plataforma **abre igual** (ves la UI, te registras, creas proyectos), pero la IA **no generará** hasta que la pongas.
 
 ---
 
@@ -136,6 +132,7 @@ OPENAI_ENABLED=true
 | `docker: command not found` / “Docker no está corriendo” | Abre **Docker Desktop** y espera a que diga *Running*. |
 | `poetry` no se reconoce | Cierra y reabre PowerShell, o `python -m pip install --user poetry`. |
 | Backend no conecta a la BD | Verifica que el contenedor `scrumdev-postgres` esté *Up*: `docker ps`. |
-| La IA no genera nada | Falta `CLAUDE_CODE_OAUTH_TOKEN` en `.env` (§5). |
+| La IA no genera nada | Falta `OPENAI_API_KEY` / `OPENAI_ENABLED=true` / `SCRUMDEV_AI_PROVIDER=openai` en `.env` (§5). |
+| Error 401 de OpenAI | La `OPENAI_API_KEY` es inválida o sin saldo. Revisa https://platform.openai.com/account/billing |
 | `ExecutionPolicy` bloquea el script | Ejecuta con `powershell -ExecutionPolicy Bypass -File ...` (ya está en los comandos). |
 | Puerto ocupado | Cambia el puerto en `.env` (backend/frontend) o en `infra/docker-compose.yml` (Postgres/Redis). |
